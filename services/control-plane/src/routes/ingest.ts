@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
+import { resolveCorrelationId } from "../http/correlation.js";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
@@ -25,7 +26,10 @@ export async function registerIngestRoute(
         });
       }
 
-      const result = persistence.createIngestAsset({ title, sourceUri });
+      const result = persistence.createIngestAsset(
+        { title, sourceUri },
+        { correlationId: resolveCorrelationId(request) }
+      );
       return reply.status(201).send(result);
     });
   }

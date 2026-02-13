@@ -24,7 +24,7 @@ AssetHarbor accepts canonical workflow events on `POST /api/v1/events`.
 
 - `asset.processing.started` -> job status `processing`
 - `asset.processing.completed` -> job status `completed`
-- `asset.processing.failed` -> job status `failed`
+- `asset.processing.failed` -> retry scheduling while attempts remain, then `failed` + DLQ
 - `asset.processing.replay_requested` -> job status `needs_replay`
 
 ## Reliability Rules
@@ -33,6 +33,12 @@ AssetHarbor accepts canonical workflow events on `POST /api/v1/events`.
 - Duplicate `eventId` values are accepted and treated as no-op.
 - Unknown jobs return `404` with `code: NOT_FOUND`.
 - Invalid envelopes return `400` with `code: CONTRACT_VALIDATION_ERROR`.
+
+## Retry and DLQ behavior
+
+- Jobs retry with exponential backoff while `attemptCount < maxAttempts`.
+- When retries are exhausted, job moves to DLQ and status becomes `failed`.
+- Replay uses `POST /api/v1/jobs/:id/replay` to requeue the job.
 
 ## Compatibility
 

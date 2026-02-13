@@ -1,5 +1,5 @@
 import { LocalPersistenceAdapter } from "./local-persistence.js";
-import type { PersistenceAdapter } from "../types.js";
+import type { FailureResult, PersistenceAdapter, WriteContext } from "../types.js";
 
 interface VastConfig {
   databaseUrl: string | undefined;
@@ -12,22 +12,28 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   private readonly localFallback = new LocalPersistenceAdapter();
 
-  constructor(private readonly config: VastConfig) {}
+  constructor(private readonly config: VastConfig) {
+    void this.config;
+  }
 
   reset(): void {
     this.localFallback.reset();
   }
 
-  createIngestAsset(input: Parameters<PersistenceAdapter["createIngestAsset"]>[0]) {
-    return this.localFallback.createIngestAsset(input);
+  createIngestAsset(
+    input: Parameters<PersistenceAdapter["createIngestAsset"]>[0],
+    context: Parameters<PersistenceAdapter["createIngestAsset"]>[1]
+  ) {
+    return this.localFallback.createIngestAsset(input, context);
   }
 
   setJobStatus(
     jobId: Parameters<PersistenceAdapter["setJobStatus"]>[0],
     status: Parameters<PersistenceAdapter["setJobStatus"]>[1],
-    lastError: Parameters<PersistenceAdapter["setJobStatus"]>[2]
+    lastError: Parameters<PersistenceAdapter["setJobStatus"]>[2],
+    context: Parameters<PersistenceAdapter["setJobStatus"]>[3]
   ) {
-    return this.localFallback.setJobStatus(jobId, status, lastError);
+    return this.localFallback.setJobStatus(jobId, status, lastError, context);
   }
 
   getJobById(jobId: Parameters<PersistenceAdapter["getJobById"]>[0]) {
@@ -36,6 +42,38 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   getPendingJobs() {
     return this.localFallback.getPendingJobs();
+  }
+
+  claimNextJob(workerId: string, leaseSeconds: number, context: WriteContext) {
+    return this.localFallback.claimNextJob(workerId, leaseSeconds, context);
+  }
+
+  heartbeatJob(jobId: string, workerId: string, leaseSeconds: number, context: WriteContext) {
+    return this.localFallback.heartbeatJob(jobId, workerId, leaseSeconds, context);
+  }
+
+  reapStaleLeases(nowIso: string): number {
+    return this.localFallback.reapStaleLeases(nowIso);
+  }
+
+  handleJobFailure(jobId: string, error: string, context: WriteContext): FailureResult {
+    return this.localFallback.handleJobFailure(jobId, error, context);
+  }
+
+  replayJob(jobId: string, context: WriteContext) {
+    return this.localFallback.replayJob(jobId, context);
+  }
+
+  getDlqItems() {
+    return this.localFallback.getDlqItems();
+  }
+
+  getOutboxItems() {
+    return this.localFallback.getOutboxItems();
+  }
+
+  publishOutbox(context: WriteContext) {
+    return this.localFallback.publishOutbox(context);
   }
 
   listAssetQueueRows() {

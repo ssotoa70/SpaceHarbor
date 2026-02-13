@@ -11,4 +11,6 @@
 ## Recovery baseline
 
 - Inspect job status via `/api/v1/jobs/:id`.
-- Replay via event submission path when retries are implemented.
+- Inspect dead-letter jobs via `/api/v1/dlq`.
+- Replay failed jobs via `/api/v1/jobs/:id/replay`.
+- Requeue stale processing leases via `/api/v1/queue/reap-stale`.
