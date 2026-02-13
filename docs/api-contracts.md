@@ -1,5 +1,11 @@
 # API Contracts
 
+## OpenAPI
+
+- `GET /openapi.json` exposes the generated OpenAPI 3 document.
+- `GET /docs` serves Swagger UI in non-production environments.
+- Contract rule: any new or changed HTTP endpoint must include Fastify `schema` metadata so the OpenAPI document stays current.
+
 ## Health
 
 - `GET /health`
