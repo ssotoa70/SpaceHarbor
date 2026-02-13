@@ -91,3 +91,75 @@ test("OpenAPI critical workflow operations expose stable operation metadata", as
 
   await app.close();
 });
+
+test("OpenAPI workflow operations keep tags, parameter docs, and error envelope consistency", async () => {
+  const app = buildApp();
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/openapi.json"
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+
+  const workflowOperations = [
+    {
+      path: "/api/v1/assets/ingest",
+      method: "post",
+      expectedTag: "assets",
+      errorStatuses: ["400", "401", "403"]
+    },
+    {
+      path: "/api/v1/events",
+      method: "post",
+      expectedTag: "events",
+      errorStatuses: ["400", "401", "403", "404"]
+    },
+    {
+      path: "/api/v1/queue/claim",
+      method: "post",
+      expectedTag: "workflow",
+      errorStatuses: ["400", "401", "403"]
+    },
+    {
+      path: "/api/v1/jobs/{id}/heartbeat",
+      method: "post",
+      expectedTag: "workflow",
+      errorStatuses: ["400", "401", "403", "404"]
+    },
+    {
+      path: "/api/v1/jobs/{id}/replay",
+      method: "post",
+      expectedTag: "workflow",
+      errorStatuses: ["401", "403", "404"]
+    }
+  ] as const;
+
+  for (const operationConfig of workflowOperations) {
+    const operation = body.paths?.[operationConfig.path]?.[operationConfig.method];
+    assert.ok(operation, `missing operation ${operationConfig.method.toUpperCase()} ${operationConfig.path}`);
+
+    assert.ok(Array.isArray(operation.tags), `missing tags for ${operationConfig.path}`);
+    assert.ok(operation.tags.includes(operationConfig.expectedTag), `missing expected tag for ${operationConfig.path}`);
+
+    if (operationConfig.path.includes("{id}")) {
+      const idParameter = operation.parameters?.find((parameter: { name?: string }) => parameter.name === "id");
+      assert.ok(idParameter, `missing id parameter for ${operationConfig.path}`);
+      assert.equal(idParameter.required, true, `id parameter should be required for ${operationConfig.path}`);
+      assert.equal(typeof idParameter.description, "string", `missing id parameter description for ${operationConfig.path}`);
+      assert.equal(idParameter.description.length > 0, true, `empty id parameter description for ${operationConfig.path}`);
+    }
+
+    for (const status of operationConfig.errorStatuses) {
+      const errorResponse = operation.responses?.[status];
+      assert.ok(errorResponse, `missing ${status} response for ${operationConfig.path}`);
+
+      const requiredFields = errorResponse.content?.["application/json"]?.schema?.required;
+      assert.ok(Array.isArray(requiredFields), `missing required fields in ${status} response for ${operationConfig.path}`);
+      assert.deepEqual([...requiredFields].sort(), ["code", "details", "message", "requestId"], `unexpected error envelope in ${status} response for ${operationConfig.path}`);
+    }
+  }
+
+  await app.close();
+});

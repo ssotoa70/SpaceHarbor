@@ -10,7 +10,7 @@ const jobParamsSchema = {
   type: "object",
   required: ["id"],
   properties: {
-    id: { type: "string", minLength: 1 }
+    id: { type: "string", minLength: 1, description: "Workflow job identifier" }
   }
 } as const;
 
