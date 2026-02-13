@@ -3,6 +3,38 @@ import assert from "node:assert/strict";
 
 import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence";
 
+test("VAST adapter delegates ingest writes through workflow client boundary", () => {
+  const calls: string[] = [];
+
+  const adapter = new VastPersistenceAdapter(
+    {
+      databaseUrl: "https://db.example",
+      eventBrokerUrl: "https://events.example",
+      dataEngineUrl: "https://engine.example",
+      strict: true
+    },
+    async () => new Response(null, { status: 200 }),
+    {
+      createIngestAsset: () => {
+        calls.push("createIngestAsset");
+        return null;
+      }
+    }
+  );
+
+  adapter.createIngestAsset(
+    {
+      title: "vast-boundary-asset",
+      sourceUri: "s3://bucket/vast-boundary-asset.mov"
+    },
+    {
+      correlationId: "corr-vast-boundary-1"
+    }
+  );
+
+  assert.equal(calls.includes("createIngestAsset"), true);
+});
+
 test("VAST adapter publishes outbox items to event broker endpoint", async () => {
   const calls: Array<{ url: string; body: unknown }> = [];
 
