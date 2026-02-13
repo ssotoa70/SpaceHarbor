@@ -7,6 +7,7 @@ import {
   normalizeCanonicalEvent,
   normalizeLegacyEvent
 } from "../events/types.js";
+import { resolveCorrelationId } from "../http/correlation.js";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
@@ -24,7 +25,11 @@ export async function registerEventsRoute(
       });
     }
 
-    const result = processAssetEvent(persistence, normalizeLegacyEvent(request.body));
+    const result = processAssetEvent(persistence, normalizeLegacyEvent(request.body), {
+      correlationId: resolveCorrelationId(request)
+    }, {
+      enableRetryOnFailure: false
+    });
     if (!result.accepted) {
       return sendError(request, reply, 404, "NOT_FOUND", result.message ?? "job not found", {
         route: "/events"
@@ -46,7 +51,11 @@ export async function registerEventsRoute(
       });
     }
 
-    const result = processAssetEvent(persistence, normalizeCanonicalEvent(request.body));
+    const result = processAssetEvent(persistence, normalizeCanonicalEvent(request.body), {
+      correlationId: resolveCorrelationId(request)
+    }, {
+      enableRetryOnFailure: true
+    });
     if (!result.accepted) {
       return sendError(request, reply, 404, "NOT_FOUND", result.message ?? "job not found", {
         route: "/api/v1/events"

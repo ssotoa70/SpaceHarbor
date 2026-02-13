@@ -5,13 +5,32 @@ class ControlPlaneClient:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
 
-    def fetch_pending_jobs(self) -> list[dict]:
-        response = requests.get(f"{self.base_url}/jobs/pending", timeout=10)
+    def claim_next_job(self, worker_id: str, lease_seconds: int) -> dict | None:
+        response = requests.post(
+            f"{self.base_url}/api/v1/queue/claim",
+            json={
+                "workerId": worker_id,
+                "leaseSeconds": lease_seconds,
+            },
+            timeout=10,
+        )
         response.raise_for_status()
         body = response.json()
-        return body.get("jobs", [])
+        return body.get("job")
+
+    def heartbeat_job(self, job_id: str, worker_id: str, lease_seconds: int) -> dict:
+        response = requests.post(
+            f"{self.base_url}/api/v1/jobs/{job_id}/heartbeat",
+            json={
+                "workerId": worker_id,
+                "leaseSeconds": lease_seconds,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
 
     def post_event(self, payload: dict) -> dict:
-        response = requests.post(f"{self.base_url}/events", json=payload, timeout=10)
+        response = requests.post(f"{self.base_url}/api/v1/events", json=payload, timeout=10)
         response.raise_for_status()
         return response.json()

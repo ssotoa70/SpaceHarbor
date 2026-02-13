@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { fetchAssets, fetchAudit, ingestAsset, type AssetRow, type AuditRow } from "./api";
+import { fetchAssets, fetchAudit, ingestAsset, replayJob, type AssetRow, type AuditRow } from "./api";
 
 export function App() {
   const [assets, setAssets] = useState<AssetRow[]>([]);
@@ -35,6 +35,11 @@ export function App() {
     await refresh();
   }
 
+  async function onReplay(jobId: string): Promise<void> {
+    await replayJob(jobId);
+    await refresh();
+  }
+
   return (
     <main className="layout">
       <header className="hero">
@@ -65,12 +70,13 @@ export function App() {
               <th scope="col">Title</th>
               <th scope="col">Source</th>
               <th scope="col">Status</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
             {assets.length === 0 ? (
               <tr>
-                <td colSpan={3}>No assets yet.</td>
+                <td colSpan={4}>No assets yet.</td>
               </tr>
             ) : (
               assets.map((asset) => (
@@ -79,6 +85,15 @@ export function App() {
                   <td>{asset.sourceUri}</td>
                   <td>
                     <span className={`status status-${asset.status}`}>{asset.status}</span>
+                  </td>
+                  <td>
+                    {asset.status === "failed" && asset.jobId ? (
+                      <button type="button" onClick={() => void onReplay(asset.jobId)}>
+                        Replay
+                      </button>
+                    ) : (
+                      <span>-</span>
+                    )}
                   </td>
                 </tr>
               ))

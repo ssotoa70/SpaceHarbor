@@ -8,20 +8,22 @@ class WorkflowEvent:
     event_type: str
     asset_id: str
     job_id: str
+    correlation_id: str
     producer: str = "media-worker"
-    schema_version: str = "1.0"
+    event_version: str = "1.0"
     error: str | None = None
 
     def to_payload(self) -> dict:
         payload = {
-            "event_id": str(uuid4()),
-            "event_type": self.event_type,
-            "asset_id": self.asset_id,
-            "occurred_at": datetime.now(UTC).isoformat(),
+            "eventId": str(uuid4()),
+            "eventType": self.event_type,
+            "eventVersion": self.event_version,
+            "occurredAt": datetime.now(UTC).isoformat(),
+            "correlationId": self.correlation_id,
             "producer": self.producer,
-            "schema_version": self.schema_version,
             "data": {
-                "job_id": self.job_id,
+                "assetId": self.asset_id,
+                "jobId": self.job_id,
             },
         }
 
