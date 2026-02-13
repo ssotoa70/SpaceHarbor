@@ -49,12 +49,13 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     input: Parameters<PersistenceAdapter["createIngestAsset"]>[0],
     context: Parameters<PersistenceAdapter["createIngestAsset"]>[1]
   ) {
-    const clientResult = this.callWorkflowClient("createIngestAsset", () => this.workflowClient?.createIngestAsset?.(input, context));
-    if (clientResult) {
-      return clientResult;
-    }
-
-    return this.localFallback.createIngestAsset(input, context);
+    return this.invokeWorkflowClient(
+      "createIngestAsset",
+      this.workflowClient?.createIngestAsset
+        ? () => this.workflowClient!.createIngestAsset(input, context)
+        : undefined,
+      () => this.localFallback.createIngestAsset(input, context)
+    );
   }
 
   setJobStatus(
@@ -63,16 +64,23 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     lastError: Parameters<PersistenceAdapter["setJobStatus"]>[2],
     context: Parameters<PersistenceAdapter["setJobStatus"]>[3]
   ) {
-    return this.localFallback.setJobStatus(jobId, status, lastError, context);
+    return this.invokeWorkflowClient(
+      "setJobStatus",
+      this.workflowClient?.setJobStatus
+        ? () => this.workflowClient!.setJobStatus(jobId, status, lastError, context)
+        : undefined,
+      () => this.localFallback.setJobStatus(jobId, status, lastError, context)
+    );
   }
 
   getJobById(jobId: Parameters<PersistenceAdapter["getJobById"]>[0]) {
-    const clientResult = this.callWorkflowClient("getJobById", () => this.workflowClient?.getJobById?.(jobId));
-    if (clientResult) {
-      return clientResult;
-    }
-
-    return this.localFallback.getJobById(jobId);
+    return this.invokeWorkflowClient(
+      "getJobById",
+      this.workflowClient?.getJobById
+        ? () => this.workflowClient!.getJobById(jobId)
+        : undefined,
+      () => this.localFallback.getJobById(jobId)
+    );
   }
 
   getPendingJobs() {
@@ -80,21 +88,23 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   claimNextJob(workerId: string, leaseSeconds: number, context: WriteContext) {
-    const clientResult = this.callWorkflowClient("claimNextJob", () => this.workflowClient?.claimNextJob?.(workerId, leaseSeconds, context));
-    if (clientResult) {
-      return clientResult;
-    }
-
-    return this.localFallback.claimNextJob(workerId, leaseSeconds, context);
+    return this.invokeWorkflowClient(
+      "claimNextJob",
+      this.workflowClient?.claimNextJob
+        ? () => this.workflowClient!.claimNextJob(workerId, leaseSeconds, context)
+        : undefined,
+      () => this.localFallback.claimNextJob(workerId, leaseSeconds, context)
+    );
   }
 
   heartbeatJob(jobId: string, workerId: string, leaseSeconds: number, context: WriteContext) {
-    const clientResult = this.callWorkflowClient("heartbeatJob", () => this.workflowClient?.heartbeatJob?.(jobId, workerId, leaseSeconds, context));
-    if (clientResult) {
-      return clientResult;
-    }
-
-    return this.localFallback.heartbeatJob(jobId, workerId, leaseSeconds, context);
+    return this.invokeWorkflowClient(
+      "heartbeatJob",
+      this.workflowClient?.heartbeatJob
+        ? () => this.workflowClient!.heartbeatJob(jobId, workerId, leaseSeconds, context)
+        : undefined,
+      () => this.localFallback.heartbeatJob(jobId, workerId, leaseSeconds, context)
+    );
   }
 
   reapStaleLeases(nowIso: string): number {
@@ -102,16 +112,23 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   handleJobFailure(jobId: string, error: string, context: WriteContext): FailureResult {
-    return this.localFallback.handleJobFailure(jobId, error, context);
+    return this.invokeWorkflowClient(
+      "handleJobFailure",
+      this.workflowClient?.handleJobFailure
+        ? () => this.workflowClient!.handleJobFailure(jobId, error, context)
+        : undefined,
+      () => this.localFallback.handleJobFailure(jobId, error, context)
+    );
   }
 
   replayJob(jobId: string, context: WriteContext) {
-    const clientResult = this.callWorkflowClient("replayJob", () => this.workflowClient?.replayJob?.(jobId, context));
-    if (clientResult) {
-      return clientResult;
-    }
-
-    return this.localFallback.replayJob(jobId, context);
+    return this.invokeWorkflowClient(
+      "replayJob",
+      this.workflowClient?.replayJob
+        ? () => this.workflowClient!.replayJob(jobId, context)
+        : undefined,
+      () => this.localFallback.replayJob(jobId, context)
+    );
   }
 
   getDlqItems() {
@@ -174,23 +191,39 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   hasProcessedEvent(eventId: string): boolean {
-    return this.localFallback.hasProcessedEvent(eventId);
+    return this.invokeWorkflowClient(
+      "hasProcessedEvent",
+      this.workflowClient?.hasProcessedEvent
+        ? () => this.workflowClient!.hasProcessedEvent(eventId)
+        : undefined,
+      () => this.localFallback.hasProcessedEvent(eventId)
+    );
   }
 
   markProcessedEvent(eventId: string): void {
-    this.localFallback.markProcessedEvent(eventId);
+    this.invokeWorkflowClient(
+      "markProcessedEvent",
+      this.workflowClient?.markProcessedEvent
+        ? () => this.workflowClient!.markProcessedEvent(eventId)
+        : undefined,
+      () => this.localFallback.markProcessedEvent(eventId)
+    );
   }
 
-  private callWorkflowClient<T>(operation: string, call: () => T | null | undefined): T | null {
+  private invokeWorkflowClient<T>(operation: string, clientCall: (() => T) | undefined, fallbackCall: () => T): T {
+    if (!clientCall) {
+      return fallbackCall();
+    }
+
     try {
-      return call() ?? null;
+      return clientCall();
     } catch (error) {
       if (!this.shouldFallback(error)) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         throw new Error(`vast workflow client failure (${operation}): ${errorMessage}`);
       }
 
-      return null;
+      return fallbackCall();
     }
   }
 
