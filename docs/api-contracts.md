@@ -65,6 +65,15 @@
 - `GET /api/v1/outbox` lists outbox events.
 - `POST /api/v1/outbox/publish` marks unpublished outbox items as published.
 
+## Metrics
+
+- `GET /api/v1/metrics` returns workflow counters:
+  - assets total
+  - jobs by status
+  - queue pending/leased
+  - outbox pending/published
+  - DLQ total
+
 ## Audit
 
 - `GET /api/v1/audit` returns recent audit events in reverse chronological order.
@@ -92,12 +101,20 @@ Current common `code` values:
 - `VALIDATION_ERROR`
 - `NOT_FOUND`
 - `CONTRACT_VALIDATION_ERROR`
+- `UNAUTHORIZED`
+- `FORBIDDEN`
 
 ## Correlation ID
 
 - API responds with `x-correlation-id` header.
 - If request sends `x-correlation-id`, the same value is echoed.
 - If omitted, API uses `request.id` as correlation ID.
+
+## API key protection
+
+- If `ASSETHARBOR_API_KEY` is configured, all POST API requests require header `x-api-key` (versioned and legacy aliases).
+- Missing key returns `401` with `code: UNAUTHORIZED`.
+- Invalid key returns `403` with `code: FORBIDDEN`.
 
 ## Compatibility
 

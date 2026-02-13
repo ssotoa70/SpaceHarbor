@@ -21,10 +21,13 @@ export function createPersistenceAdapter(rawBackend = process.env.ASSETHARBOR_PE
   const backend = resolvePersistenceBackend(rawBackend);
 
   if (backend === "vast") {
+    const strict = process.env.ASSETHARBOR_VAST_STRICT?.toLowerCase() === "true";
+
     return new VastPersistenceAdapter({
       databaseUrl: process.env.VAST_DATABASE_URL,
       eventBrokerUrl: process.env.VAST_EVENT_BROKER_URL,
-      dataEngineUrl: process.env.VAST_DATAENGINE_URL
+      dataEngineUrl: process.env.VAST_DATAENGINE_URL,
+      strict
     });
   }
 

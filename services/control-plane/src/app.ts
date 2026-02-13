@@ -9,6 +9,7 @@ import { registerEventsRoute } from "./routes/events.js";
 import { registerHealthRoute } from "./routes/health.js";
 import { registerIngestRoute } from "./routes/ingest.js";
 import { registerJobsRoute } from "./routes/jobs.js";
+import { registerMetricsRoute } from "./routes/metrics.js";
 import { registerOutboxRoute } from "./routes/outbox.js";
 import { registerQueueRoute } from "./routes/queue.js";
 
@@ -20,7 +21,36 @@ export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: false });
 
   app.addHook("onRequest", async (request, reply) => {
-    reply.header("x-correlation-id", resolveCorrelationId(request));
+    const correlationId = resolveCorrelationId(request);
+    reply.header("x-correlation-id", correlationId);
+
+    const configuredApiKey = process.env.ASSETHARBOR_API_KEY?.trim();
+    const isWriteMethod = request.method === "POST" || request.method === "PUT" || request.method === "PATCH" || request.method === "DELETE";
+
+    if (!configuredApiKey || !isWriteMethod) {
+      return;
+    }
+
+    const providedApiKey = request.headers["x-api-key"];
+    if (!providedApiKey || typeof providedApiKey !== "string") {
+      reply.status(401).send({
+        code: "UNAUTHORIZED",
+        message: "missing API key",
+        requestId: request.id,
+        details: null
+      });
+      return;
+    }
+
+    if (providedApiKey !== configuredApiKey) {
+      reply.status(403).send({
+        code: "FORBIDDEN",
+        message: "invalid API key",
+        requestId: request.id,
+        details: null
+      });
+      return;
+    }
   });
 
   void registerHealthRoute(app);
@@ -32,6 +62,7 @@ export function buildApp(): FastifyInstance {
   void registerQueueRoute(app, persistence);
   void registerOutboxRoute(app, persistence);
   void registerDlqRoute(app, persistence);
+  void registerMetricsRoute(app, persistence);
 
   return app;
 }

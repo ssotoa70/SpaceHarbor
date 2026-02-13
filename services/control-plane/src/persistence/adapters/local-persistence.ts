@@ -10,7 +10,7 @@ import type {
   WorkflowJob,
   WorkflowStatus
 } from "../../domain/models.js";
-import type { FailureResult, IngestInput, PersistenceAdapter, WriteContext } from "../types.js";
+import type { FailureResult, IngestInput, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
 
 interface QueueEntry {
   jobId: string;
@@ -450,7 +450,7 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     return [...this.outbox];
   }
 
-  publishOutbox(context: WriteContext): number {
+  async publishOutbox(context: WriteContext): Promise<number> {
     const now = this.resolveNow(context).toISOString();
     let publishedCount = 0;
 
@@ -467,6 +467,78 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     }
 
     return publishedCount;
+  }
+
+  getWorkflowStats(nowIso = new Date().toISOString()): WorkflowStats {
+    const nowMs = new Date(nowIso).getTime();
+    let pending = 0;
+    let processing = 0;
+    let completed = 0;
+    let failed = 0;
+    let needsReplay = 0;
+
+    for (const job of this.jobs.values()) {
+      switch (job.status) {
+        case "pending":
+          pending += 1;
+          break;
+        case "processing":
+          processing += 1;
+          break;
+        case "completed":
+          completed += 1;
+          break;
+        case "failed":
+          failed += 1;
+          break;
+        case "needs_replay":
+          needsReplay += 1;
+          break;
+      }
+    }
+
+    let queuePending = 0;
+    let queueLeased = 0;
+    for (const entry of this.queue.values()) {
+      const leaseActive = !!entry.leaseExpiresAt && new Date(entry.leaseExpiresAt).getTime() > nowMs;
+      if (leaseActive) {
+        queueLeased += 1;
+        continue;
+      }
+
+      const available = new Date(entry.availableAt).getTime() <= nowMs;
+      if (available) {
+        queuePending += 1;
+      }
+    }
+
+    const outboxPending = this.outbox.filter((item) => !item.publishedAt).length;
+    const outboxPublished = this.outbox.filter((item) => !!item.publishedAt).length;
+
+    return {
+      assets: {
+        total: this.assets.size
+      },
+      jobs: {
+        total: this.jobs.size,
+        pending,
+        processing,
+        completed,
+        failed,
+        needsReplay
+      },
+      queue: {
+        pending: queuePending,
+        leased: queueLeased
+      },
+      outbox: {
+        pending: outboxPending,
+        published: outboxPublished
+      },
+      dlq: {
+        total: this.dlq.size
+      }
+    };
   }
 
   listAssetQueueRows(): AssetQueueRow[] {

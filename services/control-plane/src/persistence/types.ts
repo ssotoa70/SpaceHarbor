@@ -28,6 +28,31 @@ export interface FailureResult {
   message?: string;
 }
 
+export interface WorkflowStats {
+  assets: {
+    total: number;
+  };
+  jobs: {
+    total: number;
+    pending: number;
+    processing: number;
+    completed: number;
+    failed: number;
+    needsReplay: number;
+  };
+  queue: {
+    pending: number;
+    leased: number;
+  };
+  outbox: {
+    pending: number;
+    published: number;
+  };
+  dlq: {
+    total: number;
+  };
+}
+
 export interface PersistenceAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
@@ -47,7 +72,8 @@ export interface PersistenceAdapter {
   replayJob(jobId: string, context: WriteContext): WorkflowJob | null;
   getDlqItems(): DlqItem[];
   getOutboxItems(): OutboxItem[];
-  publishOutbox(context: WriteContext): number;
+  publishOutbox(context: WriteContext): Promise<number>;
+  getWorkflowStats(nowIso?: string): WorkflowStats;
   listAssetQueueRows(): AssetQueueRow[];
   getAuditEvents(): AuditEvent[];
   hasProcessedEvent(eventId: string): boolean;

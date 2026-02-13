@@ -9,7 +9,7 @@ export async function registerOutboxRoute(app: FastifyInstance, persistence: Per
   }));
 
   app.post("/api/v1/outbox/publish", async (request, reply) => {
-    const publishedCount = persistence.publishOutbox({
+    const publishedCount = await persistence.publishOutbox({
       correlationId: resolveCorrelationId(request)
     });
 

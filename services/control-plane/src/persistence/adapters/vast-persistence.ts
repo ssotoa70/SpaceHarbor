@@ -1,19 +1,40 @@
 import { LocalPersistenceAdapter } from "./local-persistence.js";
-import type { FailureResult, PersistenceAdapter, WriteContext } from "../types.js";
+import type { FailureResult, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
 
 interface VastConfig {
   databaseUrl: string | undefined;
   eventBrokerUrl: string | undefined;
   dataEngineUrl: string | undefined;
+  strict: boolean;
 }
+
+type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 export class VastPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "vast" as const;
 
   private readonly localFallback = new LocalPersistenceAdapter();
+  private readonly fetchFn: FetchLike;
 
-  constructor(private readonly config: VastConfig) {
-    void this.config;
+  constructor(private readonly config: VastConfig, fetchFn?: FetchLike) {
+    this.fetchFn = fetchFn ?? globalThis.fetch;
+
+    if (this.config.strict) {
+      const missing: string[] = [];
+      if (!this.config.databaseUrl) {
+        missing.push("VAST_DATABASE_URL");
+      }
+      if (!this.config.eventBrokerUrl) {
+        missing.push("VAST_EVENT_BROKER_URL");
+      }
+      if (!this.config.dataEngineUrl) {
+        missing.push("VAST_DATAENGINE_URL");
+      }
+
+      if (missing.length > 0) {
+        throw new Error(`missing required VAST configuration: ${missing.join(", ")}`);
+      }
+    }
   }
 
   reset(): void {
@@ -72,8 +93,47 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     return this.localFallback.getOutboxItems();
   }
 
-  publishOutbox(context: WriteContext) {
+  async publishOutbox(context: WriteContext): Promise<number> {
+    const outboxItems = this.localFallback.getOutboxItems().filter((item) => !item.publishedAt);
+    if (outboxItems.length === 0) {
+      return 0;
+    }
+
+    if (!this.config.eventBrokerUrl) {
+      return this.localFallback.publishOutbox(context);
+    }
+
+    const brokerUrl = `${this.config.eventBrokerUrl.replace(/\/$/, "")}/events`;
+
+    try {
+      for (const item of outboxItems) {
+        const response = await this.fetchFn(brokerUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-correlation-id": context.correlationId
+          },
+          body: JSON.stringify({
+            eventType: item.eventType,
+            correlationId: item.correlationId,
+            payload: item.payload,
+            occurredAt: item.createdAt
+          })
+        });
+
+        if (!response.ok) {
+          return 0;
+        }
+      }
+    } catch {
+      return 0;
+    }
+
     return this.localFallback.publishOutbox(context);
+  }
+
+  getWorkflowStats(nowIso?: string): WorkflowStats {
+    return this.localFallback.getWorkflowStats(nowIso);
   }
 
   listAssetQueueRows() {

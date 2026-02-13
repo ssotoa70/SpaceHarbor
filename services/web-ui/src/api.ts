@@ -1,4 +1,16 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const API_KEY = import.meta.env.VITE_API_KEY;
+
+function withAuth(headers: Record<string, string> = {}): Record<string, string> {
+  if (!API_KEY) {
+    return headers;
+  }
+
+  return {
+    ...headers,
+    "x-api-key": API_KEY
+  };
+}
 
 export interface AssetRow {
   id: string;
@@ -25,19 +37,28 @@ export async function fetchAssets(): Promise<AssetRow[]> {
 }
 
 export async function ingestAsset(input: { title: string; sourceUri: string }): Promise<void> {
-  await fetch(`${API_BASE_URL}/api/v1/assets/ingest`, {
+  const response = await fetch(`${API_BASE_URL}/api/v1/assets/ingest`, {
     method: "POST",
-    headers: {
+    headers: withAuth({
       "content-type": "application/json"
-    },
+    }),
     body: JSON.stringify(input)
   });
+
+  if (!response.ok) {
+    throw new Error(`ingest failed: ${response.status}`);
+  }
 }
 
 export async function replayJob(jobId: string): Promise<void> {
-  await fetch(`${API_BASE_URL}/api/v1/jobs/${jobId}/replay`, {
-    method: "POST"
+  const response = await fetch(`${API_BASE_URL}/api/v1/jobs/${jobId}/replay`, {
+    method: "POST",
+    headers: withAuth()
   });
+
+  if (!response.ok) {
+    throw new Error(`replay failed: ${response.status}`);
+  }
 }
 
 export async function fetchAudit(): Promise<AuditRow[]> {

@@ -47,9 +47,13 @@ def run_forever() -> None:
     poll_seconds = float(os.environ.get("WORKER_POLL_SECONDS", "2"))
     worker_id = os.environ.get("WORKER_ID", "media-worker-1")
     lease_seconds = int(os.environ.get("WORKER_LEASE_SECONDS", "30"))
+    control_plane_api_key = os.environ.get("CONTROL_PLANE_API_KEY")
+
+    client = ControlPlaneClient(base_url=base_url)
+    client.set_api_key(control_plane_api_key)
 
     worker = MediaWorker(
-        ControlPlaneClient(base_url=base_url),
+        client,
         worker_id=worker_id,
         lease_seconds=lease_seconds,
     )
