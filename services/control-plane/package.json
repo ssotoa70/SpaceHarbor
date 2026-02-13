@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "test": "node --import tsx --test test/**/*.test.ts",
+    "test": "node --import tsx --test test/*.test.ts",
     "test:contracts": "node --import tsx --test test/*contract*.test.ts test/*v1-contract*.test.ts"
   },
   "dependencies": {
