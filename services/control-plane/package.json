@@ -10,6 +10,8 @@
     "test:contracts": "node --import tsx --test test/*contract*.test.ts test/*v1-contract*.test.ts"
   },
   "dependencies": {
+    "@fastify/swagger": "^9.7.0",
+    "@fastify/swagger-ui": "^5.2.5",
     "fastify": "^5.2.0"
   },
   "devDependencies": {

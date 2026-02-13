@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { resolveCorrelationId } from "./http/correlation.js";
+import { registerOpenApi } from "./http/openapi.js";
 import { createPersistenceAdapter } from "./persistence/factory.js";
 import { registerAssetsRoute } from "./routes/assets.js";
 import { registerAuditRoute } from "./routes/audit.js";
@@ -19,6 +20,8 @@ export function buildApp(): FastifyInstance {
   const prefixes = ["", "/api/v1"];
 
   const app = Fastify({ logger: false });
+
+  registerOpenApi(app);
 
   app.addHook("onRequest", async (request, reply) => {
     const correlationId = resolveCorrelationId(request);
@@ -53,16 +56,18 @@ export function buildApp(): FastifyInstance {
     }
   });
 
-  void registerHealthRoute(app);
-  void registerAssetsRoute(app, persistence, prefixes);
-  void registerAuditRoute(app, persistence, prefixes);
-  void registerIngestRoute(app, persistence, prefixes);
-  void registerEventsRoute(app, persistence, prefixes);
-  void registerJobsRoute(app, persistence, prefixes);
-  void registerQueueRoute(app, persistence);
-  void registerOutboxRoute(app, persistence);
-  void registerDlqRoute(app, persistence);
-  void registerMetricsRoute(app, persistence);
+  app.after(() => {
+    void registerHealthRoute(app);
+    void registerAssetsRoute(app, persistence, prefixes);
+    void registerAuditRoute(app, persistence, prefixes);
+    void registerIngestRoute(app, persistence, prefixes);
+    void registerEventsRoute(app, persistence, prefixes);
+    void registerJobsRoute(app, persistence, prefixes);
+    void registerQueueRoute(app, persistence);
+    void registerOutboxRoute(app, persistence);
+    void registerDlqRoute(app, persistence);
+    void registerMetricsRoute(app, persistence);
+  });
 
   return app;
 }

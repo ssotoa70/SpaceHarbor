@@ -10,14 +10,72 @@ import {
 import { resolveCorrelationId } from "../http/correlation.js";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
+import { errorEnvelopeSchema } from "../http/schemas.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
+
+const canonicalEventBodySchema = {
+  type: "object",
+  required: ["eventId", "eventType", "eventVersion", "occurredAt", "correlationId", "producer", "data"],
+  properties: {
+    eventId: { type: "string" },
+    eventType: {
+      type: "string",
+      enum: [
+        "asset.processing.started",
+        "asset.processing.completed",
+        "asset.processing.failed",
+        "asset.processing.replay_requested"
+      ]
+    },
+    eventVersion: { type: "string" },
+    occurredAt: { type: "string", format: "date-time" },
+    correlationId: { type: "string" },
+    producer: { type: "string" },
+    data: {
+      type: "object",
+      required: ["assetId", "jobId"],
+      properties: {
+        assetId: { type: "string" },
+        jobId: { type: "string" },
+        error: { type: "string" }
+      }
+    }
+  }
+} as const;
+
+const eventAcceptedResponseSchema = {
+  type: "object",
+  required: ["accepted", "duplicate"],
+  properties: {
+    accepted: { type: "boolean" },
+    duplicate: { type: "boolean" },
+    status: { type: "string" },
+    movedToDlq: { type: "boolean" },
+    retryScheduled: { type: "boolean" },
+    message: { type: "string" }
+  }
+} as const;
 
 export async function registerEventsRoute(
   app: FastifyInstance,
   persistence: PersistenceAdapter,
   prefixes: string[]
 ): Promise<void> {
-  app.post(withPrefix("", "/events"), async (request, reply) => {
+  app.post(withPrefix("", "/events"), {
+    attachValidation: true,
+    schema: {
+      tags: ["events"],
+      operationId: "legacySubmitWorkflowEvent",
+      summary: "(Legacy) submit workflow event envelope",
+      response: {
+        202: eventAcceptedResponseSchema,
+        400: errorEnvelopeSchema,
+        401: errorEnvelopeSchema,
+        403: errorEnvelopeSchema,
+        404: errorEnvelopeSchema
+      }
+    }
+  }, async (request, reply) => {
     if (!isLegacyAssetEventEnvelope(request.body)) {
       return sendError(request, reply, 400, "CONTRACT_VALIDATION_ERROR", "invalid event envelope", {
         route: "/events",
@@ -43,7 +101,23 @@ export async function registerEventsRoute(
     return;
   }
 
-  app.post(withPrefix("/api/v1", "/events"), async (request, reply) => {
+  app.post(withPrefix("/api/v1", "/events"), {
+    attachValidation: true,
+    schema: {
+      tags: ["events"],
+      operationId: "v1SubmitWorkflowEvent",
+      summary: "Submit canonical workflow event envelope",
+      security: [{ ApiKeyAuth: [] as string[] }],
+      body: canonicalEventBodySchema,
+      response: {
+        202: eventAcceptedResponseSchema,
+        400: errorEnvelopeSchema,
+        401: errorEnvelopeSchema,
+        403: errorEnvelopeSchema,
+        404: errorEnvelopeSchema
+      }
+    }
+  }, async (request, reply) => {
     if (!isCanonicalAssetEventEnvelope(request.body)) {
       return sendError(request, reply, 400, "CONTRACT_VALIDATION_ERROR", "invalid event envelope", {
         route: "/api/v1/events",
