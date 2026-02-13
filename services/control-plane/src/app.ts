@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { resolveCorrelationId } from "./http/correlation.js";
 import { registerOpenApi } from "./http/openapi.js";
 import { createPersistenceAdapter } from "./persistence/factory.js";
+import type { PersistenceAdapter } from "./persistence/types.js";
 import { registerAssetsRoute } from "./routes/assets.js";
 import { registerAuditRoute } from "./routes/audit.js";
 import { registerDlqRoute } from "./routes/dlq.js";
@@ -14,8 +15,12 @@ import { registerMetricsRoute } from "./routes/metrics.js";
 import { registerOutboxRoute } from "./routes/outbox.js";
 import { registerQueueRoute } from "./routes/queue.js";
 
-export function buildApp(): FastifyInstance {
-  const persistence = createPersistenceAdapter();
+interface BuildAppOptions {
+  persistenceAdapter?: PersistenceAdapter;
+}
+
+export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
+  const persistence = options.persistenceAdapter ?? createPersistenceAdapter();
   persistence.reset();
   const prefixes = ["", "/api/v1"];
 
@@ -54,6 +59,15 @@ export function buildApp(): FastifyInstance {
       });
       return;
     }
+  });
+
+  app.setErrorHandler(async (_error, request, reply) => {
+    reply.status(500).send({
+      code: "INTERNAL_ERROR",
+      message: "internal server error",
+      requestId: request.id,
+      details: null
+    });
   });
 
   app.after(() => {
