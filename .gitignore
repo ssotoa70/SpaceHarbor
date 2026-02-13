@@ -1,0 +1,11 @@
+node_modules/
+services/control-plane/node_modules/
+services/web-ui/node_modules/
+/.pytest_cache/
+services/media-worker/.pytest_cache/
+services/media-worker/__pycache__/
+services/media-worker/worker/__pycache__/
+services/media-worker/tests/__pycache__/
+.env
+dist/
+coverage/

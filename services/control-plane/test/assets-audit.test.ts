@@ -1,0 +1,66 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { buildApp } from "../src/app";
+
+test("GET /assets returns queue rows with status", async () => {
+  const app = buildApp();
+
+  await app.inject({
+    method: "POST",
+    url: "/assets/ingest",
+    payload: {
+      title: "Queue Asset",
+      sourceUri: "s3://bucket/queue-asset.mov"
+    }
+  });
+
+  const response = await app.inject({ method: "GET", url: "/assets" });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json() as { assets: Array<{ title: string; status: string }> };
+  assert.equal(body.assets[0].title, "Queue Asset");
+  assert.equal(body.assets[0].status, "pending");
+
+  await app.close();
+});
+
+test("GET /audit returns event history", async () => {
+  const app = buildApp();
+
+  const ingest = await app.inject({
+    method: "POST",
+    url: "/assets/ingest",
+    payload: {
+      title: "Audit Asset",
+      sourceUri: "s3://bucket/audit-asset.mov"
+    }
+  });
+
+  const body = ingest.json() as {
+    asset: { id: string };
+    job: { id: string };
+  };
+
+  await app.inject({
+    method: "POST",
+    url: "/events",
+    payload: {
+      event_id: "evt-audit-1",
+      event_type: "asset.processing.started",
+      asset_id: body.asset.id,
+      occurred_at: new Date().toISOString(),
+      producer: "media-worker",
+      schema_version: "1.0",
+      data: {
+        job_id: body.job.id
+      }
+    }
+  });
+
+  const audit = await app.inject({ method: "GET", url: "/audit" });
+  assert.equal(audit.statusCode, 200);
+  assert.ok(audit.json().events.length >= 1);
+
+  await app.close();
+});

@@ -1,0 +1,123 @@
+:root {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #102033;
+  background: linear-gradient(180deg, #f7fafc 0%, #e9f0f5 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.layout {
+  display: grid;
+  gap: 1rem;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.hero {
+  background: linear-gradient(120deg, #0f3b53, #1f5f7a);
+  color: #f6fbff;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.hero p {
+  margin: 0.5rem 0 0;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d2deea;
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.ingest-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+.ingest-form label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+
+.ingest-form input {
+  padding: 0.55rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid #bfcfdd;
+}
+
+.ingest-form button {
+  width: fit-content;
+  border: none;
+  background: #135f3a;
+  color: #fff;
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e0eaf2;
+  text-align: left;
+  padding: 0.55rem;
+}
+
+.status {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.status-pending {
+  background: #f6e5bc;
+}
+
+.status-processing {
+  background: #c7dcf8;
+}
+
+.status-completed {
+  background: #bde9ca;
+}
+
+.status-failed {
+  background: #f8c6cb;
+}
+
+.status-needs_replay {
+  background: #efd1f8;
+}
+
+@media (max-width: 700px) {
+  .layout {
+    padding: 0.75rem;
+  }
+
+  th,
+  td {
+    font-size: 0.9rem;
+  }
+}

@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install control-plane dependencies
+        run: npm ci --prefix services/control-plane
+
+      - name: Install web-ui dependencies
+        run: npm ci --prefix services/web-ui
+
+      - name: Install media-worker dependencies
+        run: pip install -r services/media-worker/requirements.txt
+
+      - name: Validate Docker Compose
+        run: docker compose config
+
+      - name: Run full verification suite
+        run: npm run test:all
