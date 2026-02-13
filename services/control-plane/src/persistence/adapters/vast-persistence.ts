@@ -7,6 +7,7 @@ interface VastConfig {
   eventBrokerUrl: string | undefined;
   dataEngineUrl: string | undefined;
   strict: boolean;
+  fallbackToLocal: boolean;
 }
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -48,7 +49,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     input: Parameters<PersistenceAdapter["createIngestAsset"]>[0],
     context: Parameters<PersistenceAdapter["createIngestAsset"]>[1]
   ) {
-    const clientResult = this.callWorkflowClient(() => this.workflowClient?.createIngestAsset?.(input, context));
+    const clientResult = this.callWorkflowClient("createIngestAsset", () => this.workflowClient?.createIngestAsset?.(input, context));
     if (clientResult) {
       return clientResult;
     }
@@ -66,7 +67,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   getJobById(jobId: Parameters<PersistenceAdapter["getJobById"]>[0]) {
-    const clientResult = this.callWorkflowClient(() => this.workflowClient?.getJobById?.(jobId));
+    const clientResult = this.callWorkflowClient("getJobById", () => this.workflowClient?.getJobById?.(jobId));
     if (clientResult) {
       return clientResult;
     }
@@ -79,7 +80,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   claimNextJob(workerId: string, leaseSeconds: number, context: WriteContext) {
-    const clientResult = this.callWorkflowClient(() => this.workflowClient?.claimNextJob?.(workerId, leaseSeconds, context));
+    const clientResult = this.callWorkflowClient("claimNextJob", () => this.workflowClient?.claimNextJob?.(workerId, leaseSeconds, context));
     if (clientResult) {
       return clientResult;
     }
@@ -88,7 +89,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   heartbeatJob(jobId: string, workerId: string, leaseSeconds: number, context: WriteContext) {
-    const clientResult = this.callWorkflowClient(() => this.workflowClient?.heartbeatJob?.(jobId, workerId, leaseSeconds, context));
+    const clientResult = this.callWorkflowClient("heartbeatJob", () => this.workflowClient?.heartbeatJob?.(jobId, workerId, leaseSeconds, context));
     if (clientResult) {
       return clientResult;
     }
@@ -105,7 +106,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   replayJob(jobId: string, context: WriteContext) {
-    const clientResult = this.callWorkflowClient(() => this.workflowClient?.replayJob?.(jobId, context));
+    const clientResult = this.callWorkflowClient("replayJob", () => this.workflowClient?.replayJob?.(jobId, context));
     if (clientResult) {
       return clientResult;
     }
@@ -180,11 +181,24 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     this.localFallback.markProcessedEvent(eventId);
   }
 
-  private callWorkflowClient<T>(call: () => T | null | undefined): T | null {
+  private callWorkflowClient<T>(operation: string, call: () => T | null | undefined): T | null {
     try {
       return call() ?? null;
-    } catch {
+    } catch (error) {
+      if (!this.shouldFallback(error)) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`vast workflow client failure (${operation}): ${errorMessage}`);
+      }
+
       return null;
     }
+  }
+
+  private shouldFallback(_error: unknown): boolean {
+    if (this.config.strict) {
+      return false;
+    }
+
+    return this.config.fallbackToLocal;
   }
 }

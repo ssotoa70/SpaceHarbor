@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createPersistenceAdapter, resolvePersistenceBackend } from "../src/persistence/factory";
+import { createPersistenceAdapter, resolvePersistenceBackend, resolveVastFallbackToLocal } from "../src/persistence/factory";
 
 test("persistence backend resolution defaults to local", () => {
   assert.equal(resolvePersistenceBackend(undefined), "local");
@@ -61,4 +61,12 @@ test("strict VAST mode requires full endpoint configuration", () => {
   } else {
     process.env.VAST_DATAENGINE_URL = previous.engine;
   }
+});
+
+test("VAST fallback policy defaults to local fallback unless explicitly false", () => {
+  assert.equal(resolveVastFallbackToLocal(undefined), true);
+  assert.equal(resolveVastFallbackToLocal(""), true);
+  assert.equal(resolveVastFallbackToLocal("true"), true);
+  assert.equal(resolveVastFallbackToLocal("TRUE"), true);
+  assert.equal(resolveVastFallbackToLocal("false"), false);
 });

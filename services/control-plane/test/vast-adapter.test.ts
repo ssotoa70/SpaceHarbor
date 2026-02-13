@@ -35,6 +35,70 @@ test("VAST adapter delegates ingest writes through workflow client boundary", ()
   assert.equal(calls.includes("createIngestAsset"), true);
 });
 
+test("strict VAST mode throws when workflow client write fails", () => {
+  const adapter = new VastPersistenceAdapter(
+    {
+      databaseUrl: "https://db.example",
+      eventBrokerUrl: "https://events.example",
+      dataEngineUrl: "https://engine.example",
+      strict: true,
+      fallbackToLocal: true
+    },
+    async () => new Response(null, { status: 200 }),
+    {
+      createIngestAsset: () => {
+        throw new Error("db write failed");
+      }
+    }
+  );
+
+  assert.throws(
+    () => {
+      adapter.createIngestAsset(
+        {
+          title: "strict-failure-asset",
+          sourceUri: "s3://bucket/strict-failure-asset.mov"
+        },
+        {
+          correlationId: "corr-vast-strict-failure"
+        }
+      );
+    },
+    /vast workflow client failure/i
+  );
+});
+
+test("fallback VAST mode uses local store when workflow client write fails", () => {
+  const adapter = new VastPersistenceAdapter(
+    {
+      databaseUrl: "https://db.example",
+      eventBrokerUrl: "https://events.example",
+      dataEngineUrl: "https://engine.example",
+      strict: false,
+      fallbackToLocal: true
+    },
+    async () => new Response(null, { status: 200 }),
+    {
+      createIngestAsset: () => {
+        throw new Error("temporary db outage");
+      }
+    }
+  );
+
+  const result = adapter.createIngestAsset(
+    {
+      title: "fallback-success-asset",
+      sourceUri: "s3://bucket/fallback-success-asset.mov"
+    },
+    {
+      correlationId: "corr-vast-fallback-success"
+    }
+  );
+
+  assert.ok(result.asset.id);
+  assert.ok(result.job.id);
+});
+
 test("VAST adapter publishes outbox items to event broker endpoint", async () => {
   const calls: Array<{ url: string; body: unknown }> = [];
 
