@@ -14,3 +14,11 @@
 - Inspect dead-letter jobs via `/api/v1/dlq`.
 - Replay failed jobs via `/api/v1/jobs/:id/replay`.
 - Requeue stale processing leases via `/api/v1/queue/reap-stale`.
+- Inspect workflow counters via `/api/v1/metrics`.
+
+## Security checks
+
+- If API key mode is enabled, verify matching values for:
+  - `ASSETHARBOR_API_KEY`
+  - `CONTROL_PLANE_API_KEY`
+  - `VITE_API_KEY`

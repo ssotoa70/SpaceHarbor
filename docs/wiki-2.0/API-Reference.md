@@ -15,3 +15,9 @@ Primary versioned endpoints are under `/api/v1`.
 - `GET /api/v1/outbox`
 - `POST /api/v1/outbox/publish`
 - `GET /api/v1/audit`
+- `GET /api/v1/metrics`
+
+Notes:
+
+- All POST API endpoints require `x-api-key` when `ASSETHARBOR_API_KEY` is configured.
+- API responses include `x-correlation-id` for traceability.

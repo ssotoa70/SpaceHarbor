@@ -22,3 +22,43 @@ test("persistence adapter factory returns requested adapter", () => {
   assert.equal(createPersistenceAdapter().backend, "local");
   assert.equal(createPersistenceAdapter("vast").backend, "vast");
 });
+
+test("strict VAST mode requires full endpoint configuration", () => {
+  const previous = {
+    strict: process.env.ASSETHARBOR_VAST_STRICT,
+    db: process.env.VAST_DATABASE_URL,
+    broker: process.env.VAST_EVENT_BROKER_URL,
+    engine: process.env.VAST_DATAENGINE_URL
+  };
+
+  process.env.ASSETHARBOR_VAST_STRICT = "true";
+  delete process.env.VAST_DATABASE_URL;
+  delete process.env.VAST_EVENT_BROKER_URL;
+  delete process.env.VAST_DATAENGINE_URL;
+
+  assert.throws(() => createPersistenceAdapter("vast"), /missing required VAST configuration/i);
+
+  if (previous.strict === undefined) {
+    delete process.env.ASSETHARBOR_VAST_STRICT;
+  } else {
+    process.env.ASSETHARBOR_VAST_STRICT = previous.strict;
+  }
+
+  if (previous.db === undefined) {
+    delete process.env.VAST_DATABASE_URL;
+  } else {
+    process.env.VAST_DATABASE_URL = previous.db;
+  }
+
+  if (previous.broker === undefined) {
+    delete process.env.VAST_EVENT_BROKER_URL;
+  } else {
+    process.env.VAST_EVENT_BROKER_URL = previous.broker;
+  }
+
+  if (previous.engine === undefined) {
+    delete process.env.VAST_DATAENGINE_URL;
+  } else {
+    process.env.VAST_DATAENGINE_URL = previous.engine;
+  }
+});

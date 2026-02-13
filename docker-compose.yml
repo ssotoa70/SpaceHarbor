@@ -7,10 +7,12 @@ services:
       NODE_ENV: development
       PORT: 8080
       ASSETHARBOR_PERSISTENCE_BACKEND: ${ASSETHARBOR_PERSISTENCE_BACKEND:-local}
-      VAST_DATABASE_URL: ${VAST_DATABASE_URL}
-      VAST_EVENT_BROKER_URL: ${VAST_EVENT_BROKER_URL}
-      VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL}
-      VAST_API_TOKEN: ${VAST_API_TOKEN}
+      ASSETHARBOR_VAST_STRICT: ${ASSETHARBOR_VAST_STRICT:-false}
+      ASSETHARBOR_API_KEY: ${ASSETHARBOR_API_KEY:-}
+      VAST_DATABASE_URL: ${VAST_DATABASE_URL:-}
+      VAST_EVENT_BROKER_URL: ${VAST_EVENT_BROKER_URL:-}
+      VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL:-}
+      VAST_API_TOKEN: ${VAST_API_TOKEN:-}
     ports:
       - "8080:8080"
 
@@ -20,8 +22,9 @@ services:
     container_name: assetharbor-media-worker
     environment:
       CONTROL_PLANE_URL: http://control-plane:8080
-      VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL}
-      VAST_API_TOKEN: ${VAST_API_TOKEN}
+      CONTROL_PLANE_API_KEY: ${CONTROL_PLANE_API_KEY:-}
+      VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL:-}
+      VAST_API_TOKEN: ${VAST_API_TOKEN:-}
     depends_on:
       - control-plane
 
@@ -31,6 +34,7 @@ services:
     container_name: assetharbor-web-ui
     environment:
       VITE_API_BASE_URL: http://localhost:8080
+      VITE_API_KEY: ${VITE_API_KEY:-}
     ports:
       - "4173:4173"
     depends_on:

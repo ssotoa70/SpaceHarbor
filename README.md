@@ -49,6 +49,7 @@ docker compose up --build
 - `GET /api/v1/outbox`
 - `POST /api/v1/outbox/publish`
 - `GET /api/v1/audit`
+- `GET /api/v1/metrics`
 
 Legacy-compatible aliases (for existing internal clients):
 
@@ -62,7 +63,19 @@ Legacy-compatible aliases (for existing internal clients):
 ## Persistence backend
 
 - `ASSETHARBOR_PERSISTENCE_BACKEND=local` uses local in-memory adapter.
-- `ASSETHARBOR_PERSISTENCE_BACKEND=vast` uses the VAST adapter scaffold (current scaffold keeps local fallback while integration lands).
+- `ASSETHARBOR_PERSISTENCE_BACKEND=vast` uses VAST adapter mode.
+- `ASSETHARBOR_VAST_STRICT=true` enforces required VAST endpoint configuration at startup.
+
+## Security baseline
+
+- Set `ASSETHARBOR_API_KEY` to require `x-api-key` on all POST API endpoints (v1 and legacy aliases).
+- Configure `CONTROL_PLANE_API_KEY` for media-worker requests in secured environments.
+- Configure `VITE_API_KEY` for web-ui requests in secured environments.
+
+## Observability baseline
+
+- `x-correlation-id` is echoed on API responses and propagated through workflow/audit traces.
+- `GET /api/v1/metrics` returns queue, job, DLQ, and outbox counters.
 
 ## CI/CD
 
