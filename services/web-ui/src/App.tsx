@@ -1,12 +1,20 @@
 import { FormEvent, useEffect, useState } from "react";
 
 import { fetchAssets, fetchAudit, fetchMetrics, ingestAsset, replayJob, type AssetRow, type AuditRow } from "./api";
+import { deriveHealthState } from "./operator/health";
 import type { MetricsSnapshot } from "./operator/types";
+
+const HEALTH_POLL_INTERVAL_MS = 15_000;
+const HEALTH_STALE_THRESHOLD_MS = 60_000;
+const HEALTH_COOLDOWN_MS = 60_000;
 
 export function App() {
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
-  const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
+  const [metricsHistory, setMetricsHistory] = useState<MetricsSnapshot[]>([]);
+  const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<number | null>(null);
+  const [lastDegradedAt, setLastDegradedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [title, setTitle] = useState("");
   const [sourceUri, setSourceUri] = useState("");
 
@@ -15,17 +23,54 @@ export function App() {
       const [assetList, auditList, metricsSnapshot] = await Promise.all([fetchAssets(), fetchAudit(), fetchMetrics()]);
       setAssets(assetList);
       setAuditRows(auditList);
-      setMetrics(metricsSnapshot);
+      if (metricsSnapshot) {
+        setMetricsHistory((previous) => [...previous.slice(-1), metricsSnapshot]);
+      }
+
+      const refreshedAt = Date.now();
+      setLastSuccessfulRefreshAt(refreshedAt);
+      setNow(refreshedAt);
     } catch {
-      setAssets([]);
-      setAuditRows([]);
-      setMetrics(null);
+      setNow(Date.now());
     }
   }
 
   useEffect(() => {
     void refresh();
+
+    const intervalId = window.setInterval(() => {
+      void refresh();
+    }, HEALTH_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, []);
+
+  const currentMetrics = metricsHistory[metricsHistory.length - 1] ?? null;
+  const previousMetrics = metricsHistory[metricsHistory.length - 2] ?? null;
+  const recentFallbackAudit = auditRows.some((row) => row.message.toLowerCase().includes("vast fallback"));
+
+  const health = deriveHealthState({
+    current: currentMetrics,
+    previous: previousMetrics,
+    recentFallbackAudit,
+    now,
+    lastDegradedAt,
+    cooldownMs: HEALTH_COOLDOWN_MS
+  });
+
+  useEffect(() => {
+    if (health.state === "degraded") {
+      setLastDegradedAt(now);
+    }
+  }, [health.state, now]);
+
+  const isStale = lastSuccessfulRefreshAt !== null && now - lastSuccessfulRefreshAt >= HEALTH_STALE_THRESHOLD_MS;
+  const lastUpdatedText =
+    lastSuccessfulRefreshAt === null
+      ? "Last updated: unavailable"
+      : `Last updated: ${new Date(lastSuccessfulRefreshAt).toLocaleString()}`;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -53,7 +98,11 @@ export function App() {
 
       <section className="panel" aria-labelledby="health-heading">
         <h2 id="health-heading">Operational Health</h2>
-        <p>{metrics ? `Fallback events: ${metrics.degradedMode.fallbackEvents}` : "Metrics unavailable."}</p>
+        <div className={`health-strip health-${health.state}`}>
+          <p className="health-state-label">Status: {health.state}</p>
+          <p className="health-updated">{lastUpdatedText}</p>
+          {isStale ? <p className="health-stale">Stale data</p> : null}
+        </div>
       </section>
 
       <section className="panel" aria-labelledby="ingest-heading">

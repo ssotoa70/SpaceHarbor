@@ -43,6 +43,54 @@ body {
   padding: 1rem;
 }
 
+.health-strip {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid #d8e2ec;
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: #f7fbff;
+}
+
+.health-state-label,
+.health-updated,
+.health-stale {
+  margin: 0;
+}
+
+.health-state-label {
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.health-normal .health-state-label {
+  color: #18603a;
+}
+
+.health-degraded .health-state-label {
+  color: #9c2f2f;
+}
+
+.health-recovering .health-state-label {
+  color: #8b5905;
+}
+
+.health-updated {
+  color: #4d5e72;
+  font-size: 0.92rem;
+}
+
+.health-stale {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: #ffe8bf;
+  color: #7a4b00;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
 .ingest-form {
   display: grid;
   grid-template-columns: 1fr;
