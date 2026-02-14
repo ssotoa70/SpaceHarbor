@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { AuditEvent } from "../../domain/models.js";
+import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
 import type { FailureResult, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
 import type { VastWorkflowClient } from "../vast/workflow-client.js";
@@ -69,6 +70,11 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     lastError: Parameters<PersistenceAdapter["setJobStatus"]>[2],
     context: Parameters<PersistenceAdapter["setJobStatus"]>[3]
   ) {
+    const existing = this.getJobById(jobId);
+    if (existing && !canTransitionWorkflowStatus(existing.status, status)) {
+      return null;
+    }
+
     return this.invokeWorkflowClient(
       "setJobStatus",
       this.workflowClient?.setJobStatus

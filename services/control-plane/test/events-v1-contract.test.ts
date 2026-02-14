@@ -75,3 +75,60 @@ test("POST /api/v1/events rejects invalid contract with unified error envelope",
 
   await app.close();
 });
+
+test("POST /api/v1/events rejects out-of-order transition with deterministic error", async () => {
+  const app = buildApp();
+
+  const ingest = await app.inject({
+    method: "POST",
+    url: "/api/v1/assets/ingest",
+    payload: {
+      title: "Out-of-Order Event Demo",
+      sourceUri: "s3://bucket/out-of-order-event-demo.mov"
+    }
+  });
+
+  const ingestBody = ingest.json();
+
+  const completed = await app.inject({
+    method: "POST",
+    url: "/api/v1/events",
+    payload: {
+      eventId: "evt-order-completed-1",
+      eventType: "asset.processing.completed",
+      eventVersion: "1.0",
+      occurredAt: new Date().toISOString(),
+      correlationId: "corr-order-completed-1",
+      producer: "media-worker",
+      data: {
+        assetId: ingestBody.asset.id,
+        jobId: ingestBody.job.id
+      }
+    }
+  });
+
+  assert.equal(completed.statusCode, 202);
+
+  const outOfOrder = await app.inject({
+    method: "POST",
+    url: "/api/v1/events",
+    payload: {
+      eventId: "evt-order-failed-1",
+      eventType: "asset.processing.failed",
+      eventVersion: "1.0",
+      occurredAt: new Date().toISOString(),
+      correlationId: "corr-order-failed-1",
+      producer: "media-worker",
+      data: {
+        assetId: ingestBody.asset.id,
+        jobId: ingestBody.job.id,
+        error: "out-of-order failure"
+      }
+    }
+  });
+
+  assert.equal(outOfOrder.statusCode, 409);
+  assert.equal(outOfOrder.json().code, "WORKFLOW_TRANSITION_NOT_ALLOWED");
+
+  await app.close();
+});

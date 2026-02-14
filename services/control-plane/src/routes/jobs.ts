@@ -42,6 +42,19 @@ const heartbeatBodySchema = {
   }
 } as const;
 
+function isReplayEnabled(): boolean {
+  return process.env.ASSETHARBOR_REPLAY_ENABLED?.trim().toLowerCase() !== "false";
+}
+
+function resolveReplayMaxPerMinute(): number {
+  const raw = Number(process.env.ASSETHARBOR_REPLAY_MAX_PER_MINUTE ?? "60");
+  if (!Number.isFinite(raw) || raw < 1) {
+    return 60;
+  }
+
+  return Math.floor(raw);
+}
+
 function operationIdForPrefix(prefix: string, baseName: string): string {
   return prefix === "/api/v1" ? `v1${baseName}` : `legacy${baseName}`;
 }
@@ -51,6 +64,32 @@ export async function registerJobsRoute(
   persistence: PersistenceAdapter,
   prefixes: string[]
 ): Promise<void> {
+  const replayWindowMs = 60_000;
+  const replayRequestTimes: number[] = [];
+
+  const consumeReplaySlot = (): { allowed: boolean; retryAfterSeconds?: number } => {
+    const nowMs = Date.now();
+    const oldestAllowed = nowMs - replayWindowMs;
+
+    while (replayRequestTimes.length > 0 && replayRequestTimes[0] <= oldestAllowed) {
+      replayRequestTimes.shift();
+    }
+
+    const replayMaxPerMinute = resolveReplayMaxPerMinute();
+    if (replayRequestTimes.length >= replayMaxPerMinute) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((replayRequestTimes[0] + replayWindowMs - nowMs) / 1000));
+      return {
+        allowed: false,
+        retryAfterSeconds
+      };
+    }
+
+    replayRequestTimes.push(nowMs);
+    return {
+      allowed: true
+    };
+  };
+
   for (const prefix of prefixes) {
     const routePath = withPrefix(prefix, "/jobs/:id");
     app.get<{ Params: { id: string } }>(routePath, {
@@ -145,10 +184,39 @@ export async function registerJobsRoute(
           202: jobWrapperResponseSchema,
           401: errorEnvelopeSchema,
           403: errorEnvelopeSchema,
+          409: errorEnvelopeSchema,
+          429: errorEnvelopeSchema,
           404: errorEnvelopeSchema
         }
       }
     }, async (request, reply) => {
+      if (!isReplayEnabled()) {
+        return sendError(request, reply, 403, "REPLAY_DISABLED", "replay is disabled", {
+          route: withPrefix(prefix, "/jobs/:id/replay")
+        });
+      }
+
+      const existing = persistence.getJobById(request.params.id);
+      if (!existing) {
+        return sendError(request, reply, 404, "NOT_FOUND", "job not found", {
+          jobId: request.params.id
+        });
+      }
+
+      if (existing.status !== "failed" && existing.status !== "needs_replay") {
+        return sendError(request, reply, 409, "REPLAY_NOT_ALLOWED", "job is not replayable in current state", {
+          jobId: request.params.id,
+          status: existing.status
+        });
+      }
+
+      const replaySlot = consumeReplaySlot();
+      if (!replaySlot.allowed) {
+        return sendError(request, reply, 429, "RATE_LIMITED", "replay rate limit exceeded", {
+          retryAfterSeconds: replaySlot.retryAfterSeconds
+        });
+      }
+
       const job = persistence.replayJob(request.params.id, {
         correlationId: resolveCorrelationId(request)
       });

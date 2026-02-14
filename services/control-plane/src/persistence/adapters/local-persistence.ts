@@ -10,6 +10,7 @@ import type {
   WorkflowJob,
   WorkflowStatus
 } from "../../domain/models.js";
+import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import type { FailureResult, IngestInput, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
 
 interface QueueEntry {
@@ -100,6 +101,10 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   ): WorkflowJob | null {
     const existing = this.jobs.get(jobId);
     if (!existing) {
+      return null;
+    }
+
+    if (!canTransitionWorkflowStatus(existing.status, status)) {
       return null;
     }
 

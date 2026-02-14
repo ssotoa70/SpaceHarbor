@@ -23,4 +23,6 @@ test("required docs exist with key headings", () => {
   assert.match(readme, /ASSETHARBOR_VAST_FALLBACK_TO_LOCAL/);
   assert.match(wikiOpsRunbook, /fallback/i);
   assert.match(wikiOpsRunbook, /strict/i);
+  assert.match(eventContracts, /out-of-order/i);
+  assert.match(eventContracts, /REPLAY_NOT_ALLOWED/);
 });

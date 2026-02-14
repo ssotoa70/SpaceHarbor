@@ -72,6 +72,7 @@ export async function registerEventsRoute(
         400: errorEnvelopeSchema,
         401: errorEnvelopeSchema,
         403: errorEnvelopeSchema,
+        409: errorEnvelopeSchema,
         404: errorEnvelopeSchema
       }
     }
@@ -89,6 +90,19 @@ export async function registerEventsRoute(
       enableRetryOnFailure: false
     });
     if (!result.accepted) {
+      if (result.reason === "WORKFLOW_TRANSITION_NOT_ALLOWED") {
+        return sendError(
+          request,
+          reply,
+          409,
+          "WORKFLOW_TRANSITION_NOT_ALLOWED",
+          result.message ?? "workflow transition is not allowed",
+          {
+            route: "/events"
+          }
+        );
+      }
+
       return sendError(request, reply, 404, "NOT_FOUND", result.message ?? "job not found", {
         route: "/events"
       });
@@ -114,6 +128,7 @@ export async function registerEventsRoute(
         400: errorEnvelopeSchema,
         401: errorEnvelopeSchema,
         403: errorEnvelopeSchema,
+        409: errorEnvelopeSchema,
         404: errorEnvelopeSchema
       }
     }
@@ -131,6 +146,19 @@ export async function registerEventsRoute(
       enableRetryOnFailure: true
     });
     if (!result.accepted) {
+      if (result.reason === "WORKFLOW_TRANSITION_NOT_ALLOWED") {
+        return sendError(
+          request,
+          reply,
+          409,
+          "WORKFLOW_TRANSITION_NOT_ALLOWED",
+          result.message ?? "workflow transition is not allowed",
+          {
+            route: "/api/v1/events"
+          }
+        );
+      }
+
       return sendError(request, reply, 404, "NOT_FOUND", result.message ?? "job not found", {
         route: "/api/v1/events"
       });
