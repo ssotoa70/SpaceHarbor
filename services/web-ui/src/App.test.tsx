@@ -203,4 +203,35 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: /escalate response/i })).toBeChecked();
     expect(screen.getByText(/local only/i)).toBeInTheDocument();
   });
+
+  it("announces health state updates through a polite live region", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-14T10:00:00.000Z"));
+
+    mockApiResponses({
+      metricsSnapshots: [buildMetricsSnapshot(0), buildMetricsSnapshot(2)]
+    });
+
+    render(<App />);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    const liveRegion = screen.getByRole("status", { name: /health state updates/i });
+    expect(liveRegion).toHaveAttribute("aria-live", "polite");
+    expect(liveRegion).toHaveTextContent(/health state: degraded/i);
+  });
+
+  it("renders explicit text labels for health badges and keeps guided controls keyboard focusable", async () => {
+    render(<App />);
+
+    expect(await screen.findByText(/health state:/i)).toBeInTheDocument();
+
+    const clearButton = screen.getByRole("button", { name: /clear guided actions/i });
+    clearButton.focus();
+    expect(clearButton).toHaveFocus();
+
+    const acknowledgeToggle = screen.getByRole("checkbox", { name: /acknowledge incident/i });
+    acknowledgeToggle.focus();
+    expect(acknowledgeToggle).toHaveFocus();
+  });
 });

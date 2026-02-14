@@ -12,6 +12,14 @@ body {
   margin: 0;
 }
 
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #1d6fa5;
+  outline-offset: 2px;
+}
+
 .layout {
   display: grid;
   gap: 1rem;

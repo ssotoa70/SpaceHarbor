@@ -138,7 +138,9 @@ export function App() {
       <section className="panel" aria-labelledby="health-heading">
         <h2 id="health-heading">Operational Health</h2>
         <div className={`health-strip health-${health.state}`}>
-          <p className="health-state-label">Status: {health.state}</p>
+          <p className="health-state-label" role="status" aria-live="polite" aria-atomic="true" aria-label="Health state updates">
+            Health state: {health.state}
+          </p>
           <p className="health-updated">{lastUpdatedText}</p>
           {isStale ? <p className="health-stale">Stale data</p> : null}
         </div>
