@@ -537,6 +537,9 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       },
       dlq: {
         total: this.dlq.size
+      },
+      degradedMode: {
+        fallbackEvents: 0
       }
     };
   }

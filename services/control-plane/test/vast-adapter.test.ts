@@ -211,6 +211,44 @@ test("fallback VAST mode attempts setJobStatus via client then falls back to loc
   assert.equal(updated?.status, "completed");
 });
 
+test("fallback VAST mode records an audit signal when client write fails", () => {
+  const adapter = new VastPersistenceAdapter(
+    {
+      databaseUrl: "https://db.example",
+      eventBrokerUrl: "https://events.example",
+      dataEngineUrl: "https://engine.example",
+      strict: false,
+      fallbackToLocal: true
+    },
+    async () => new Response(null, { status: 200 }),
+    {
+      setJobStatus: () => {
+        throw new Error("set status unavailable");
+      }
+    }
+  );
+
+  const ingest = adapter.createIngestAsset(
+    {
+      title: "fallback-audit-signal",
+      sourceUri: "s3://bucket/fallback-audit-signal.mov"
+    },
+    {
+      correlationId: "corr-fallback-audit-signal"
+    }
+  );
+
+  adapter.setJobStatus(ingest.job.id, "completed", null, {
+    correlationId: "corr-fallback-audit-update"
+  });
+
+  const events = adapter.getAuditEvents();
+  assert.equal(
+    events.some((event) => event.message.includes("vast fallback") && event.message.includes("setJobStatus")),
+    true
+  );
+});
+
 test("VAST adapter publishes outbox items to event broker endpoint", async () => {
   const calls: Array<{ url: string; body: unknown }> = [];
 

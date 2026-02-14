@@ -242,3 +242,52 @@ test("VAST mode /api/v1/events preserves retry scheduling and DLQ transition beh
 
   await app.close();
 });
+
+test("VAST mode surfaces fallback usage in audit trail", async () => {
+  const adapter = new VastPersistenceAdapter(
+    {
+      databaseUrl: "https://db.example",
+      eventBrokerUrl: "https://events.example",
+      dataEngineUrl: "https://engine.example",
+      strict: false,
+      fallbackToLocal: true
+    },
+    async () => new Response(null, { status: 202 }),
+    {
+      createIngestAsset: () => {
+        throw new Error("vast db unavailable");
+      }
+    }
+  );
+
+  const app = buildApp({ persistenceAdapter: adapter });
+
+  const ingest = await app.inject({
+    method: "POST",
+    url: "/api/v1/assets/ingest",
+    payload: {
+      title: "fallback-audit-route-signal",
+      sourceUri: "s3://bucket/fallback-audit-route-signal.mov"
+    }
+  });
+  assert.equal(ingest.statusCode, 201);
+
+  const audit = await app.inject({
+    method: "GET",
+    url: "/api/v1/audit"
+  });
+  assert.equal(audit.statusCode, 200);
+  assert.equal(
+    audit.json().events.some((event: { message: string }) => event.message.includes("vast fallback") && event.message.includes("createIngestAsset")),
+    true
+  );
+
+  const metrics = await app.inject({
+    method: "GET",
+    url: "/api/v1/metrics"
+  });
+  assert.equal(metrics.statusCode, 200);
+  assert.equal(metrics.json().degradedMode.fallbackEvents >= 1, true);
+
+  await app.close();
+});

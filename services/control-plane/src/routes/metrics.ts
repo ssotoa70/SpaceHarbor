@@ -10,7 +10,7 @@ export async function registerMetricsRoute(app: FastifyInstance, persistence: Pe
       response: {
         200: {
           type: "object",
-          required: ["assets", "jobs", "queue", "outbox", "dlq"],
+          required: ["assets", "jobs", "queue", "outbox", "dlq", "degradedMode"],
           properties: {
             assets: {
               type: "object",
@@ -52,6 +52,13 @@ export async function registerMetricsRoute(app: FastifyInstance, persistence: Pe
               required: ["total"],
               properties: {
                 total: { type: "number" }
+              }
+            },
+            degradedMode: {
+              type: "object",
+              required: ["fallbackEvents"],
+              properties: {
+                fallbackEvents: { type: "number" }
               }
             }
           }

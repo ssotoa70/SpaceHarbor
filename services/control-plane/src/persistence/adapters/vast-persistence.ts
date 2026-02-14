@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+
+import type { AuditEvent } from "../../domain/models.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
 import type { FailureResult, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
 import type { VastWorkflowClient } from "../vast/workflow-client.js";
@@ -16,6 +19,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "vast" as const;
 
   private readonly localFallback = new LocalPersistenceAdapter();
+  private readonly fallbackAuditEvents: AuditEvent[] = [];
   private readonly fetchFn: FetchLike;
   private readonly workflowClient?: Partial<VastWorkflowClient>;
 
@@ -43,6 +47,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   reset(): void {
     this.localFallback.reset();
+    this.fallbackAuditEvents.length = 0;
   }
 
   createIngestAsset(
@@ -179,7 +184,14 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   getWorkflowStats(nowIso?: string): WorkflowStats {
-    return this.localFallback.getWorkflowStats(nowIso);
+    const stats = this.localFallback.getWorkflowStats(nowIso);
+
+    return {
+      ...stats,
+      degradedMode: {
+        fallbackEvents: stats.degradedMode.fallbackEvents + this.fallbackAuditEvents.length
+      }
+    };
   }
 
   listAssetQueueRows() {
@@ -187,7 +199,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   getAuditEvents() {
-    return this.localFallback.getAuditEvents();
+    const merged = [...this.fallbackAuditEvents, ...this.localFallback.getAuditEvents()];
+    return merged.sort((a, b) => b.at.localeCompare(a.at));
   }
 
   hasProcessedEvent(eventId: string): boolean {
@@ -223,8 +236,19 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
         throw new Error(`vast workflow client failure (${operation}): ${errorMessage}`);
       }
 
+      this.recordFallbackAudit(operation, error);
+
       return fallbackCall();
     }
+  }
+
+  private recordFallbackAudit(operation: string, error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    this.fallbackAuditEvents.unshift({
+      id: randomUUID(),
+      message: `[corr:system] vast fallback (${operation}) due to client error: ${errorMessage}`,
+      at: new Date().toISOString()
+    });
   }
 
   private shouldFallback(_error: unknown): boolean {

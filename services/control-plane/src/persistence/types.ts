@@ -51,6 +51,9 @@ export interface WorkflowStats {
   dlq: {
     total: number;
   };
+  degradedMode: {
+    fallbackEvents: number;
+  };
 }
 
 export interface PersistenceAdapter {
