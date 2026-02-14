@@ -32,6 +32,7 @@ AssetHarbor accepts canonical workflow events on `POST /api/v1/events`.
 - `eventId` is the idempotency key.
 - Duplicate `eventId` values are accepted and treated as no-op.
 - Unknown jobs return `404` with `code: NOT_FOUND`.
+- Out-of-order workflow transitions are rejected with `409` and `code: WORKFLOW_TRANSITION_NOT_ALLOWED`.
 - Invalid envelopes return `400` with `code: CONTRACT_VALIDATION_ERROR`.
 
 ## Retry and DLQ behavior
@@ -39,6 +40,10 @@ AssetHarbor accepts canonical workflow events on `POST /api/v1/events`.
 - Jobs retry with exponential backoff while `attemptCount < maxAttempts`.
 - When retries are exhausted, job moves to DLQ and status becomes `failed`.
 - Replay uses `POST /api/v1/jobs/:id/replay` to requeue the job.
+- Replay returns deterministic guardrail errors:
+  - `403` with `REPLAY_DISABLED` when replay is disabled.
+  - `409` with `REPLAY_NOT_ALLOWED` when job status is not replayable.
+  - `429` with `RATE_LIMITED` when replay request rate exceeds the configured limit.
 
 ## Compatibility
 
