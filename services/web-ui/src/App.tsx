@@ -71,6 +71,16 @@ export function App() {
     lastSuccessfulRefreshAt === null
       ? "Last updated: unavailable"
       : `Last updated: ${new Date(lastSuccessfulRefreshAt).toLocaleString()}`;
+  const fallbackEventsNow = currentMetrics?.degradedMode.fallbackEvents ?? 0;
+  const previousFallbackEvents = previousMetrics?.degradedMode.fallbackEvents ?? 0;
+  const fallbackDelta = fallbackEventsNow - previousFallbackEvents;
+
+  let fallbackTrend: "rising" | "stable" | "falling" = "stable";
+  if (fallbackDelta > 0) {
+    fallbackTrend = "rising";
+  } else if (fallbackDelta < 0) {
+    fallbackTrend = "falling";
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -102,6 +112,30 @@ export function App() {
           <p className="health-state-label">Status: {health.state}</p>
           <p className="health-updated">{lastUpdatedText}</p>
           {isStale ? <p className="health-stale">Stale data</p> : null}
+        </div>
+
+        <div className="impact-panel">
+          <h3>Fallback events</h3>
+          <p className="impact-count">{fallbackEventsNow}</p>
+          <p className={`impact-trend trend-${fallbackTrend}`}>Trend: {fallbackTrend}</p>
+          <dl className="impact-counters">
+            <div>
+              <dt>Pending</dt>
+              <dd>{currentMetrics?.jobs.pending ?? 0}</dd>
+            </div>
+            <div>
+              <dt>Processing</dt>
+              <dd>{currentMetrics?.jobs.processing ?? 0}</dd>
+            </div>
+            <div>
+              <dt>Failed</dt>
+              <dd>{currentMetrics?.jobs.failed ?? 0}</dd>
+            </div>
+            <div>
+              <dt>DLQ</dt>
+              <dd>{currentMetrics?.dlq.total ?? 0}</dd>
+            </div>
+          </dl>
         </div>
       </section>
 

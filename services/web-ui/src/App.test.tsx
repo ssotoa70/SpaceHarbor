@@ -150,4 +150,20 @@ describe("App", () => {
 
     expect(screen.getByText(/stale/i)).toBeInTheDocument();
   });
+
+  it("shows fallback impact count and trend", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-14T10:00:00.000Z"));
+
+    mockApiResponses({
+      metricsSnapshots: [buildMetricsSnapshot(1), buildMetricsSnapshot(4)]
+    });
+
+    render(<App />);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(screen.getByText(/fallback events/i)).toBeInTheDocument();
+    expect(screen.getByText(/rising|stable|falling/i)).toBeInTheDocument();
+  });
 });

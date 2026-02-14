@@ -91,6 +91,69 @@ body {
   font-size: 0.85rem;
 }
 
+.impact-panel {
+  margin-top: 0.85rem;
+  border: 1px solid #d8e2ec;
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: #fff;
+}
+
+.impact-panel h3,
+.impact-count,
+.impact-trend {
+  margin: 0;
+}
+
+.impact-count {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-top: 0.2rem;
+}
+
+.impact-trend {
+  margin-top: 0.2rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.trend-rising {
+  color: #9c2f2f;
+}
+
+.trend-stable {
+  color: #37587a;
+}
+
+.trend-falling {
+  color: #18603a;
+}
+
+.impact-counters {
+  margin: 0.65rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 0.5rem;
+}
+
+.impact-counters div {
+  border: 1px solid #e3ebf3;
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  background: #fafcff;
+}
+
+.impact-counters dt {
+  font-size: 0.8rem;
+  color: #4d5e72;
+}
+
+.impact-counters dd {
+  margin: 0.2rem 0 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
 .ingest-form {
   display: grid;
   grid-template-columns: 1fr;
