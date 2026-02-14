@@ -1,27 +1,115 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { fetchAssets, fetchAudit, ingestAsset, replayJob, type AssetRow, type AuditRow } from "./api";
+import { fetchAssets, fetchAudit, fetchMetrics, ingestAsset, replayJob, type AssetRow, type AuditRow } from "./api";
+import {
+  clearGuidedActions as clearGuidedActionsStorage,
+  DEFAULT_GUIDED_ACTIONS,
+  loadGuidedActions,
+  saveGuidedActions,
+  type GuidedActions
+} from "./operator/actions";
+import { deriveHealthState } from "./operator/health";
+import type { MetricsSnapshot } from "./operator/types";
+
+const HEALTH_POLL_INTERVAL_MS = 15_000;
+const HEALTH_STALE_THRESHOLD_MS = 60_000;
+const HEALTH_COOLDOWN_MS = 60_000;
 
 export function App() {
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
+  const [metricsHistory, setMetricsHistory] = useState<MetricsSnapshot[]>([]);
+  const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<number | null>(null);
+  const [lastDegradedAt, setLastDegradedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [title, setTitle] = useState("");
   const [sourceUri, setSourceUri] = useState("");
+  const [guidedActions, setGuidedActions] = useState<GuidedActions>(() => loadGuidedActions());
 
   async function refresh(): Promise<void> {
     try {
-      const [assetList, auditList] = await Promise.all([fetchAssets(), fetchAudit()]);
+      const [assetList, auditList, metricsSnapshot] = await Promise.all([fetchAssets(), fetchAudit(), fetchMetrics()]);
       setAssets(assetList);
       setAuditRows(auditList);
+      if (metricsSnapshot) {
+        setMetricsHistory((previous) => [...previous.slice(-1), metricsSnapshot]);
+      }
+
+      const refreshedAt = Date.now();
+      setLastSuccessfulRefreshAt(refreshedAt);
+      setNow(refreshedAt);
     } catch {
-      setAssets([]);
-      setAuditRows([]);
+      setNow(Date.now());
     }
   }
 
   useEffect(() => {
     void refresh();
+
+    const intervalId = window.setInterval(() => {
+      void refresh();
+    }, HEALTH_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, []);
+
+  const currentMetrics = metricsHistory[metricsHistory.length - 1] ?? null;
+  const previousMetrics = metricsHistory[metricsHistory.length - 2] ?? null;
+  const recentFallbackAudit = auditRows.some((row) => row.message.toLowerCase().includes("vast fallback"));
+
+  const health = deriveHealthState({
+    current: currentMetrics,
+    previous: previousMetrics,
+    recentFallbackAudit,
+    now,
+    lastDegradedAt,
+    cooldownMs: HEALTH_COOLDOWN_MS
+  });
+
+  useEffect(() => {
+    if (health.state === "degraded") {
+      setLastDegradedAt(now);
+    }
+  }, [health.state, now]);
+
+  const isStale = lastSuccessfulRefreshAt !== null && now - lastSuccessfulRefreshAt >= HEALTH_STALE_THRESHOLD_MS;
+  const lastUpdatedText =
+    lastSuccessfulRefreshAt === null
+      ? "Last updated: unavailable"
+      : `Last updated: ${new Date(lastSuccessfulRefreshAt).toLocaleString()}`;
+  const fallbackEventsNow = currentMetrics?.degradedMode.fallbackEvents ?? 0;
+  const previousFallbackEvents = previousMetrics?.degradedMode.fallbackEvents ?? 0;
+  const fallbackDelta = fallbackEventsNow - previousFallbackEvents;
+
+  let fallbackTrend: "rising" | "stable" | "falling" = "stable";
+  if (fallbackDelta > 0) {
+    fallbackTrend = "rising";
+  } else if (fallbackDelta < 0) {
+    fallbackTrend = "falling";
+  }
+
+  function updateGuidedActions(update: Partial<Omit<GuidedActions, "updatedAt">>): void {
+    const nextActions: GuidedActions = {
+      ...guidedActions,
+      ...update,
+      updatedAt: new Date().toISOString()
+    };
+
+    setGuidedActions(nextActions);
+    saveGuidedActions(nextActions);
+  }
+
+  function resetGuidedActions(): void {
+    setGuidedActions(DEFAULT_GUIDED_ACTIONS);
+    clearGuidedActionsStorage();
+  }
+
+  const guidedUpdatedText =
+    guidedActions.updatedAt === null
+      ? "Updated: not set"
+      : `Updated: ${new Date(guidedActions.updatedAt).toLocaleString()}`;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -46,6 +134,74 @@ export function App() {
         <h1>AssetHarbor</h1>
         <p>Queue-first media operations for ingest, workflow, and audit visibility.</p>
       </header>
+
+      <section className="panel" aria-labelledby="health-heading">
+        <h2 id="health-heading">Operational Health</h2>
+        <div className={`health-strip health-${health.state}`}>
+          <p className="health-state-label" role="status" aria-live="polite" aria-atomic="true" aria-label="Health state updates">
+            Health state: {health.state}
+          </p>
+          <p className="health-updated">{lastUpdatedText}</p>
+          {isStale ? <p className="health-stale">Stale data</p> : null}
+        </div>
+
+        <div className="impact-panel">
+          <h3>Fallback events</h3>
+          <p className="impact-count">{fallbackEventsNow}</p>
+          <p className={`impact-trend trend-${fallbackTrend}`}>Trend: {fallbackTrend}</p>
+          <dl className="impact-counters">
+            <div>
+              <dt>Pending</dt>
+              <dd>{currentMetrics?.jobs.pending ?? 0}</dd>
+            </div>
+            <div>
+              <dt>Processing</dt>
+              <dd>{currentMetrics?.jobs.processing ?? 0}</dd>
+            </div>
+            <div>
+              <dt>Failed</dt>
+              <dd>{currentMetrics?.jobs.failed ?? 0}</dd>
+            </div>
+            <div>
+              <dt>DLQ</dt>
+              <dd>{currentMetrics?.dlq.total ?? 0}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="guided-panel">
+          <h3>Guided actions</h3>
+          <p className="guided-local">Local only: saved in this browser and not shared with backend services.</p>
+          <label className="guided-control">
+            <input
+              type="checkbox"
+              checked={guidedActions.acknowledged}
+              onChange={(event) => updateGuidedActions({ acknowledged: event.target.checked })}
+            />
+            Acknowledge incident
+          </label>
+          <label className="guided-control">
+            Incident owner
+            <input
+              type="text"
+              value={guidedActions.owner}
+              onChange={(event) => updateGuidedActions({ owner: event.target.value })}
+            />
+          </label>
+          <label className="guided-control">
+            <input
+              type="checkbox"
+              checked={guidedActions.escalated}
+              onChange={(event) => updateGuidedActions({ escalated: event.target.checked })}
+            />
+            Escalate response
+          </label>
+          <p className="guided-updated">{guidedUpdatedText}</p>
+          <button type="button" onClick={resetGuidedActions}>
+            Clear guided actions
+          </button>
+        </div>
+      </section>
 
       <section className="panel" aria-labelledby="ingest-heading">
         <h2 id="ingest-heading">Ingest</h2>
@@ -104,15 +260,23 @@ export function App() {
 
       <section className="panel" aria-labelledby="audit-heading">
         <h2 id="audit-heading">Recent Audit</h2>
-        <ul>
+        <ul className="timeline-list">
           {auditRows.length === 0 ? (
-            <li>No audit events yet.</li>
+            <li className="timeline-item">No audit events yet.</li>
           ) : (
-            auditRows.map((row) => (
-              <li key={row.id}>
-                <strong>{row.message}</strong> <span>{row.at}</span>
-              </li>
-            ))
+            auditRows.map((row) => {
+              const isFallbackCorrelated = row.message.toLowerCase().includes("vast fallback");
+
+              return (
+                <li key={row.id} className={`timeline-item${isFallbackCorrelated ? " timeline-fallback" : ""}`}>
+                  <div className="timeline-message-row">
+                    <strong>{row.message}</strong>
+                    {isFallbackCorrelated ? <span className="timeline-label">Fallback correlated</span> : null}
+                  </div>
+                  <span>{row.at}</span>
+                </li>
+              );
+            })
           )}
         </ul>
       </section>
