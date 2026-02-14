@@ -1,21 +1,25 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { fetchAssets, fetchAudit, ingestAsset, replayJob, type AssetRow, type AuditRow } from "./api";
+import { fetchAssets, fetchAudit, fetchMetrics, ingestAsset, replayJob, type AssetRow, type AuditRow } from "./api";
+import type { MetricsSnapshot } from "./operator/types";
 
 export function App() {
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
+  const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
   const [title, setTitle] = useState("");
   const [sourceUri, setSourceUri] = useState("");
 
   async function refresh(): Promise<void> {
     try {
-      const [assetList, auditList] = await Promise.all([fetchAssets(), fetchAudit()]);
+      const [assetList, auditList, metricsSnapshot] = await Promise.all([fetchAssets(), fetchAudit(), fetchMetrics()]);
       setAssets(assetList);
       setAuditRows(auditList);
+      setMetrics(metricsSnapshot);
     } catch {
       setAssets([]);
       setAuditRows([]);
+      setMetrics(null);
     }
   }
 
@@ -46,6 +50,11 @@ export function App() {
         <h1>AssetHarbor</h1>
         <p>Queue-first media operations for ingest, workflow, and audit visibility.</p>
       </header>
+
+      <section className="panel" aria-labelledby="health-heading">
+        <h2 id="health-heading">Operational Health</h2>
+        <p>{metrics ? `Fallback events: ${metrics.degradedMode.fallbackEvents}` : "Metrics unavailable."}</p>
+      </section>
 
       <section className="panel" aria-labelledby="ingest-heading">
         <h2 id="ingest-heading">Ingest</h2>

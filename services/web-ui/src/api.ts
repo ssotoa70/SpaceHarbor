@@ -1,3 +1,5 @@
+import type { MetricsSnapshot } from "./operator/types";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const API_KEY = import.meta.env.VITE_API_KEY;
 
@@ -69,4 +71,13 @@ export async function fetchAudit(): Promise<AuditRow[]> {
 
   const body = (await response.json()) as { events: AuditRow[] };
   return body.events;
+}
+
+export async function fetchMetrics(): Promise<MetricsSnapshot | null> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/metrics`);
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json()) as MetricsSnapshot;
 }
