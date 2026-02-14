@@ -122,6 +122,12 @@ Current common `code` values:
 - Missing key returns `401` with `code: UNAUTHORIZED`.
 - Invalid key returns `403` with `code: FORBIDDEN`.
 
+## VAST strict and fallback behavior
+
+- VAST mode uses `ASSETHARBOR_VAST_STRICT` and `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL` to control fail-fast vs continuity behavior.
+- In strict fail-fast mode, internal VAST workflow client failures surface as `500` with the same unified error envelope.
+- In fallback mode, workflow continuity is preserved and fallback usage is visible via audit events.
+
 ## Compatibility
 
 Legacy non-versioned endpoints remain available for internal compatibility during Phase 1 migration.

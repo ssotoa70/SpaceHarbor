@@ -5,6 +5,7 @@
 1. Copy `.env.example` to `.env` and set:
    - `ASSETHARBOR_PERSISTENCE_BACKEND`
    - `ASSETHARBOR_VAST_STRICT` (recommended `true` for VAST-backed deployments)
+   - `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL` (`true` for continuity, `false` for strict fail-fast)
    - VAST endpoints and token
    - optional API keys (`ASSETHARBOR_API_KEY`, `CONTROL_PLANE_API_KEY`, `VITE_API_KEY`)
 2. Run `docker compose up --build` from `AssetHarbor/`.
@@ -27,6 +28,13 @@
 - When retries are exhausted, verify job appears in `GET /api/v1/dlq`.
 - Replay a failed job with `POST /api/v1/jobs/:id/replay`.
 - Use `POST /api/v1/queue/reap-stale` to requeue expired processing leases.
+
+## VAST strict and fallback policy
+
+- Strict mode: with `ASSETHARBOR_VAST_STRICT=true` and `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=false`, VAST workflow client failures fail-fast.
+- Continuity mode: with `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=true`, client failures fall back to local adapter behavior.
+- Fallback usage is surfaced in audit trail messages (`GET /api/v1/audit`) with `vast fallback` markers.
+- For incident validation, run ingest/event workflow and then confirm fallback markers in audit events.
 
 ## Troubleshooting
 

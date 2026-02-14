@@ -16,6 +16,12 @@
 - Requeue stale processing leases via `/api/v1/queue/reap-stale`.
 - Inspect workflow counters via `/api/v1/metrics`.
 
+## VAST mode policy
+
+- `ASSETHARBOR_VAST_STRICT=true` + `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=false` runs strict fail-fast mode.
+- `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=true` enables fallback continuity mode.
+- Verify fallback usage by checking `/api/v1/audit` for `vast fallback` entries.
+
 ## Security checks
 
 - If API key mode is enabled, verify matching values for:
