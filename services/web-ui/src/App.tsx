@@ -196,15 +196,23 @@ export function App() {
 
       <section className="panel" aria-labelledby="audit-heading">
         <h2 id="audit-heading">Recent Audit</h2>
-        <ul>
+        <ul className="timeline-list">
           {auditRows.length === 0 ? (
-            <li>No audit events yet.</li>
+            <li className="timeline-item">No audit events yet.</li>
           ) : (
-            auditRows.map((row) => (
-              <li key={row.id}>
-                <strong>{row.message}</strong> <span>{row.at}</span>
-              </li>
-            ))
+            auditRows.map((row) => {
+              const isFallbackCorrelated = row.message.toLowerCase().includes("vast fallback");
+
+              return (
+                <li key={row.id} className={`timeline-item${isFallbackCorrelated ? " timeline-fallback" : ""}`}>
+                  <div className="timeline-message-row">
+                    <strong>{row.message}</strong>
+                    {isFallbackCorrelated ? <span className="timeline-label">Fallback correlated</span> : null}
+                  </div>
+                  <span>{row.at}</span>
+                </li>
+              );
+            })
           )}
         </ul>
       </section>

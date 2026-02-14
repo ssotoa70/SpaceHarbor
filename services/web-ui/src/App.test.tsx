@@ -166,4 +166,16 @@ describe("App", () => {
     expect(screen.getByText(/fallback events/i)).toBeInTheDocument();
     expect(screen.getByText(/rising|stable|falling/i)).toBeInTheDocument();
   });
+
+  it("highlights fallback-correlated audit events", async () => {
+    mockApiResponses({
+      auditMessages: ["vast fallback triggered for createIngestAsset"]
+    });
+
+    render(<App />);
+
+    const fallbackMessage = await screen.findByText(/vast fallback/i);
+    expect(fallbackMessage).toBeInTheDocument();
+    expect(fallbackMessage.closest("li")).toHaveClass("timeline-fallback");
+  });
 });
