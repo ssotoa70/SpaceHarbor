@@ -154,6 +154,57 @@ body {
   font-weight: 700;
 }
 
+.guided-panel {
+  margin-top: 0.85rem;
+  border: 1px solid #d8e2ec;
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: #f9fcff;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.guided-panel h3,
+.guided-panel p {
+  margin: 0;
+}
+
+.guided-local {
+  font-size: 0.9rem;
+  color: #3d556f;
+}
+
+.guided-control {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+
+.guided-control input[type="checkbox"] {
+  margin: 0;
+}
+
+.guided-control input[type="text"] {
+  border: 1px solid #bfcfdd;
+  border-radius: 8px;
+  padding: 0.5rem 0.55rem;
+}
+
+.guided-updated {
+  font-size: 0.85rem;
+  color: #4d5e72;
+}
+
+.guided-panel button {
+  width: fit-content;
+  border: 1px solid #8ea4ba;
+  background: #fff;
+  color: #1d3853;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
 .ingest-form {
   display: grid;
   grid-template-columns: 1fr;

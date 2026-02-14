@@ -1,6 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 
 import { fetchAssets, fetchAudit, fetchMetrics, ingestAsset, replayJob, type AssetRow, type AuditRow } from "./api";
+import {
+  clearGuidedActions as clearGuidedActionsStorage,
+  DEFAULT_GUIDED_ACTIONS,
+  loadGuidedActions,
+  saveGuidedActions,
+  type GuidedActions
+} from "./operator/actions";
 import { deriveHealthState } from "./operator/health";
 import type { MetricsSnapshot } from "./operator/types";
 
@@ -17,6 +24,7 @@ export function App() {
   const [now, setNow] = useState(() => Date.now());
   const [title, setTitle] = useState("");
   const [sourceUri, setSourceUri] = useState("");
+  const [guidedActions, setGuidedActions] = useState<GuidedActions>(() => loadGuidedActions());
 
   async function refresh(): Promise<void> {
     try {
@@ -82,6 +90,27 @@ export function App() {
     fallbackTrend = "falling";
   }
 
+  function updateGuidedActions(update: Partial<Omit<GuidedActions, "updatedAt">>): void {
+    const nextActions: GuidedActions = {
+      ...guidedActions,
+      ...update,
+      updatedAt: new Date().toISOString()
+    };
+
+    setGuidedActions(nextActions);
+    saveGuidedActions(nextActions);
+  }
+
+  function resetGuidedActions(): void {
+    setGuidedActions(DEFAULT_GUIDED_ACTIONS);
+    clearGuidedActionsStorage();
+  }
+
+  const guidedUpdatedText =
+    guidedActions.updatedAt === null
+      ? "Updated: not set"
+      : `Updated: ${new Date(guidedActions.updatedAt).toLocaleString()}`;
+
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!title.trim() || !sourceUri.trim()) {
@@ -136,6 +165,39 @@ export function App() {
               <dd>{currentMetrics?.dlq.total ?? 0}</dd>
             </div>
           </dl>
+        </div>
+
+        <div className="guided-panel">
+          <h3>Guided actions</h3>
+          <p className="guided-local">Local only: saved in this browser and not shared with backend services.</p>
+          <label className="guided-control">
+            <input
+              type="checkbox"
+              checked={guidedActions.acknowledged}
+              onChange={(event) => updateGuidedActions({ acknowledged: event.target.checked })}
+            />
+            Acknowledge incident
+          </label>
+          <label className="guided-control">
+            Incident owner
+            <input
+              type="text"
+              value={guidedActions.owner}
+              onChange={(event) => updateGuidedActions({ owner: event.target.value })}
+            />
+          </label>
+          <label className="guided-control">
+            <input
+              type="checkbox"
+              checked={guidedActions.escalated}
+              onChange={(event) => updateGuidedActions({ escalated: event.target.checked })}
+            />
+            Escalate response
+          </label>
+          <p className="guided-updated">{guidedUpdatedText}</p>
+          <button type="button" onClick={resetGuidedActions}>
+            Clear guided actions
+          </button>
         </div>
       </section>
 

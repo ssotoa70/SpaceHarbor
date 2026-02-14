@@ -1,7 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import { clearGuidedActions } from "./operator/actions";
 import type { MetricsSnapshot } from "./operator/types";
 
 function buildMetricsSnapshot(fallbackEvents: number): MetricsSnapshot {
@@ -99,6 +100,8 @@ function mockApiResponses(options?: {
 beforeEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  clearGuidedActions();
+  window.localStorage?.clear?.();
   mockApiResponses();
 });
 
@@ -106,6 +109,8 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  clearGuidedActions();
+  window.localStorage?.clear?.();
 });
 
 describe("App", () => {
@@ -177,5 +182,25 @@ describe("App", () => {
     const fallbackMessage = await screen.findByText(/vast fallback/i);
     expect(fallbackMessage).toBeInTheDocument();
     expect(fallbackMessage.closest("li")).toHaveClass("timeline-fallback");
+  });
+
+  it("persists guided actions in local storage", async () => {
+    render(<App />);
+
+    const acknowledgeToggle = await screen.findByRole("checkbox", { name: /acknowledge incident/i });
+    const ownerInput = screen.getByRole("textbox", { name: /incident owner/i });
+    const escalateToggle = screen.getByRole("checkbox", { name: /escalate response/i });
+
+    fireEvent.click(acknowledgeToggle);
+    fireEvent.change(ownerInput, { target: { value: "oncall-ops" } });
+    fireEvent.click(escalateToggle);
+
+    cleanup();
+    render(<App />);
+
+    expect(await screen.findByRole("checkbox", { name: /acknowledge incident/i })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: /incident owner/i })).toHaveValue("oncall-ops");
+    expect(screen.getByRole("checkbox", { name: /escalate response/i })).toBeChecked();
+    expect(screen.getByText(/local only/i)).toBeInTheDocument();
   });
 });
