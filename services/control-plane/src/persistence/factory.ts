@@ -4,6 +4,10 @@ import type { PersistenceAdapter, PersistenceBackend } from "./types.js";
 
 const SUPPORTED_BACKENDS: PersistenceBackend[] = ["local", "vast"];
 
+export function resolveVastFallbackToLocal(rawValue: string | undefined): boolean {
+  return rawValue?.trim().toLowerCase() !== "false";
+}
+
 export function resolvePersistenceBackend(rawBackend: string | undefined): PersistenceBackend {
   const normalized = rawBackend?.trim().toLowerCase();
   if (!normalized) {
@@ -22,12 +26,14 @@ export function createPersistenceAdapter(rawBackend = process.env.ASSETHARBOR_PE
 
   if (backend === "vast") {
     const strict = process.env.ASSETHARBOR_VAST_STRICT?.toLowerCase() === "true";
+    const fallbackToLocal = resolveVastFallbackToLocal(process.env.ASSETHARBOR_VAST_FALLBACK_TO_LOCAL);
 
     return new VastPersistenceAdapter({
       databaseUrl: process.env.VAST_DATABASE_URL,
       eventBrokerUrl: process.env.VAST_EVENT_BROKER_URL,
       dataEngineUrl: process.env.VAST_DATAENGINE_URL,
-      strict
+      strict,
+      fallbackToLocal
     });
   }
 

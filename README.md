@@ -65,6 +65,8 @@ Legacy-compatible aliases (for existing internal clients):
 - `ASSETHARBOR_PERSISTENCE_BACKEND=local` uses local in-memory adapter.
 - `ASSETHARBOR_PERSISTENCE_BACKEND=vast` uses VAST adapter mode.
 - `ASSETHARBOR_VAST_STRICT=true` enforces required VAST endpoint configuration at startup.
+- `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=true` enables continuity fallback when VAST workflow client operations fail.
+- `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=false` enables fail-fast behavior for VAST workflow client failures.
 
 ## Security baseline
 
@@ -76,6 +78,7 @@ Legacy-compatible aliases (for existing internal clients):
 
 - `x-correlation-id` is echoed on API responses and propagated through workflow/audit traces.
 - `GET /api/v1/metrics` returns queue, job, DLQ, and outbox counters.
+- `GET /api/v1/audit` includes `vast fallback` markers when continuity fallback is used.
 
 ## CI/CD
 
