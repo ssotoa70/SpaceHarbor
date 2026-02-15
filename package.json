@@ -4,7 +4,7 @@
   "private": true,
   "description": "AssetHarbor MVP monorepo",
   "scripts": {
-    "test:compose": "node --test tests/compose/compose-config.test.js",
+    "test:compose": "node --test tests/compose/*.test.js",
     "test:docs": "node --test tests/docs/docs-presence.test.js",
     "test:control-plane": "npm --prefix services/control-plane test",
     "test:contracts": "npm --prefix services/control-plane run test:contracts",

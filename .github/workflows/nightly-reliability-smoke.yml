@@ -1,0 +1,53 @@
+name: Nightly Reliability Smoke
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  reliability-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Start docker compose stack
+        run: docker compose up -d --build
+
+      - name: Wait for control-plane readiness
+        run: |
+          for i in {1..30}; do
+            if curl -fsS "http://localhost:8080/health" >/dev/null && curl -fsS "http://localhost:8080/api/v1/metrics" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "control-plane did not become ready" >&2
+          exit 1
+
+      - name: Run reliability smoke harness
+        run: node tests/reliability/run-smoke.mjs
+
+      - name: Upload reliability artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reliability-smoke-artifact
+          path: artifacts/reliability/*.json
+          if-no-files-found: warn
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop docker compose stack
+        if: always()
+        run: docker compose down -v
