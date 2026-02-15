@@ -36,6 +36,41 @@
 - Fallback usage is surfaced in audit trail messages (`GET /api/v1/audit`) with `vast fallback` markers.
 - For incident validation, run ingest/event workflow and then confirm fallback markers in audit events.
 
+## SLO Definitions
+
+- **Availability SLO:** `GET /health` success rate >= 99.9% over 30 days.
+- **Workflow SLO:** 99% of ingest jobs reach a terminal state (`completed` or `failed`) within 15 minutes.
+- **Reliability SLO:** degraded-mode fallback events remain below 0.5% of workflow write operations per 24 hours.
+
+## Warning and Critical Thresholds
+
+| Signal | Warning threshold | Critical threshold | Source |
+| --- | --- | --- | --- |
+| Fallback events (`degradedMode.fallbackEvents`) | +5 in 10 minutes | +20 in 10 minutes | `GET /api/v1/metrics` |
+| DLQ growth (`dlq.total`) | +3 in 15 minutes | +10 in 15 minutes | `GET /api/v1/metrics` |
+| Pending queue (`queue.pending`) | >50 for 15 minutes | >150 for 15 minutes | `GET /api/v1/metrics` |
+
+## Ownership and Escalation Matrix
+
+| Scenario | Primary owner | Secondary owner | Escalation target | Escalation window |
+| --- | --- | --- | --- | --- |
+| Warning threshold breach | On-call operator | Service owner | Engineering manager | 30 minutes |
+| Critical threshold breach | Service owner | Incident commander | Director on-call | 15 minutes |
+| Security or data integrity risk | Incident commander | Security lead | Executive on-call | Immediate |
+
+## Canary Promotion and Rollback Gates
+
+1. Promote canary only when warning/critical thresholds are clear for 30 minutes and no new `vast fallback` entries appear in audit feed.
+2. Halt promotion if any critical threshold trips, job terminal-state latency exceeds SLO budget, or canary error rate exceeds baseline by 2x.
+3. Roll back immediately when critical thresholds persist for 10 minutes after mitigation actions.
+
+## Go/No-Go Checklist
+
+- [ ] SLO and threshold dashboards reviewed for pre-release baseline.
+- [ ] On-call ownership and escalation contacts confirmed for the release window.
+- [ ] Canary gates, rollback owner, and rollback command path verified.
+- [ ] Release-day checklist completed (`docs/runbooks/release-day-checklist.md`).
+
 ## Troubleshooting
 
 - `400` on `/api/v1/events`: verify canonical event envelope fields (`eventId`, `eventType`, `eventVersion`, `occurredAt`, `correlationId`, `producer`, `data.assetId`, `data.jobId`).
