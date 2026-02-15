@@ -36,4 +36,5 @@ Rollback owner: release commander (primary) and incident commander (backup).
 
 ## Publish
 
-- CD workflow publishes service images to GHCR on tag.
+- CD workflow publishes service images to GHCR on `main` pushes as `edge` images.
+- CD workflow also publishes versioned images when semantic tags (`vX.Y.Z`) are pushed.

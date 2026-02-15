@@ -56,7 +56,7 @@
 | --- | --- | --- | --- | --- |
 | Warning threshold breach | On-call operator | Service owner | Engineering manager | 30 minutes |
 | Critical threshold breach | Service owner | Incident commander | Director on-call | 15 minutes |
-| Security or data integrity risk | Incident commander | Security lead | CTO delegate | Immediate |
+| Security or data integrity risk | Incident commander | Security lead | Executive on-call | Immediate |
 
 ## Canary Promotion and Rollback Gates
 
