@@ -8,6 +8,7 @@ on:
 jobs:
   reliability-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -21,15 +22,15 @@ jobs:
       - name: Start docker compose stack
         run: docker compose up -d --build
 
-      - name: Wait for control-plane health
+      - name: Wait for control-plane readiness
         run: |
           for i in {1..30}; do
-            if curl -fsS "http://localhost:8080/health" >/dev/null; then
+            if curl -fsS "http://localhost:8080/health" >/dev/null && curl -fsS "http://localhost:8080/api/v1/metrics" >/dev/null; then
               exit 0
             fi
             sleep 2
           done
-          echo "control-plane did not become healthy" >&2
+          echo "control-plane did not become ready" >&2
           exit 1
 
       - name: Run reliability smoke harness

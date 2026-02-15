@@ -78,6 +78,12 @@ async function scenarioIngestClaim({ baseUrl, fetchImpl }) {
     throw new Error(`claim failed with status ${claim.status}`);
   }
 
+  if (claim.body.job.id !== ingest.body.job.id) {
+    throw new Error(
+      `claimed job ${claim.body.job.id} does not match ingested job ${ingest.body.job.id}`
+    );
+  }
+
   return `ingest+claim ok for job ${ingest.body.job.id}`;
 }
 
@@ -97,12 +103,13 @@ async function scenarioDuplicateEventIdempotency({ baseUrl, fetchImpl }) {
     throw new Error(`idempotency setup failed with status ${ingest.status}`);
   }
 
+  const uniqueId = Date.now();
   const payload = {
-    eventId: "evt-smoke-1",
+    eventId: `evt-smoke-${uniqueId}`,
     eventType: "asset.processing.started",
     eventVersion: "1.0",
     occurredAt: new Date().toISOString(),
-    correlationId: "corr-reliability-smoke-1",
+    correlationId: `corr-reliability-smoke-${uniqueId}`,
     producer: "reliability-harness",
     data: {
       assetId: ingest.body.asset.id,
