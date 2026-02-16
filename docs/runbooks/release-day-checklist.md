@@ -6,6 +6,7 @@
 - [ ] `npm run test:all` passed on release branch.
 - [ ] SLO and threshold dashboards reviewed.
 - [ ] On-call and escalation assignments confirmed.
+- [ ] Shared incident coordination baseline recorded (`GET /api/v1/incident/coordination`).
 
 ## Canary Promotion Gates
 
@@ -19,6 +20,7 @@
 - Decision: go / no-go
 - Release commander:
 - Incident commander:
+- Active operator handoff state (`none` / `handoff_requested` / `handoff_accepted`):
 - Notes:
 
 ## Rollback Plan

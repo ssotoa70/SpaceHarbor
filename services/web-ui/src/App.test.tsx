@@ -2,8 +2,51 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import { clearGuidedActions } from "./operator/actions";
 import type { MetricsSnapshot } from "./operator/types";
+
+interface CoordinationState {
+  guidedActions: {
+    acknowledged: boolean;
+    owner: string;
+    escalated: boolean;
+    nextUpdateEta: string | null;
+    updatedAt: string | null;
+  };
+  handoff: {
+    state: "none" | "handoff_requested" | "handoff_accepted";
+    fromOwner: string;
+    toOwner: string;
+    summary: string;
+    updatedAt: string | null;
+  };
+  notes: Array<{
+    id: string;
+    message: string;
+    correlationId: string;
+    author: string;
+    at: string;
+  }>;
+}
+
+function defaultCoordinationState(): CoordinationState {
+  return {
+    guidedActions: {
+      acknowledged: false,
+      owner: "",
+      escalated: false,
+      nextUpdateEta: null,
+      updatedAt: null
+    },
+    handoff: {
+      state: "none",
+      fromOwner: "",
+      toOwner: "",
+      summary: "",
+      updatedAt: null
+    },
+    notes: []
+  };
+}
 
 function buildMetricsSnapshot(fallbackEvents: number): MetricsSnapshot {
   return {
@@ -48,6 +91,7 @@ function mockApiResponses(options?: {
   metricsSnapshots?: MetricsSnapshot[];
   auditMessages?: string[];
   failAfterRequestCount?: number;
+  coordination?: CoordinationState;
 }): void {
   const metricsSnapshots = options?.metricsSnapshots ?? [buildMetricsSnapshot(0)];
   const auditRows = (options?.auditMessages ?? []).map((message, index) => ({
@@ -58,10 +102,11 @@ function mockApiResponses(options?: {
 
   let requestCount = 0;
   let metricsIndex = 0;
+  let coordination = options?.coordination ?? defaultCoordinationState();
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requestCount += 1;
 
       if (options?.failAfterRequestCount !== undefined && requestCount > options.failAfterRequestCount) {
@@ -69,6 +114,7 @@ function mockApiResponses(options?: {
       }
 
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? "GET";
 
       if (url.endsWith("/api/v1/assets")) {
         return jsonResponse({ assets: [] });
@@ -88,6 +134,110 @@ function mockApiResponses(options?: {
         return new Response(null, { status: 201 });
       }
 
+      if (url.endsWith("/api/v1/incident/coordination") && method === "GET") {
+        return jsonResponse(coordination);
+      }
+
+      if (url.endsWith("/api/v1/incident/coordination/actions") && method === "PUT") {
+        const body = JSON.parse(String(init?.body)) as {
+          acknowledged: boolean;
+          owner: string;
+          escalated: boolean;
+          nextUpdateEta: string | null;
+          expectedUpdatedAt: string | null;
+        };
+
+        if (body.expectedUpdatedAt !== coordination.guidedActions.updatedAt) {
+          return new Response(
+            JSON.stringify({
+              code: "COORDINATION_CONFLICT",
+              message: "guided actions changed; refresh and retry",
+              requestId: "req-conflict-guided-actions",
+              details: {
+                expectedUpdatedAt: body.expectedUpdatedAt,
+                currentUpdatedAt: coordination.guidedActions.updatedAt
+              }
+            }),
+            {
+              status: 409,
+              headers: { "content-type": "application/json" }
+            }
+          );
+        }
+
+        const { expectedUpdatedAt: _expectedUpdatedAt, ...nextGuidedActions } = body;
+
+        coordination = {
+          ...coordination,
+          guidedActions: {
+            ...coordination.guidedActions,
+            ...nextGuidedActions,
+            updatedAt: new Date().toISOString()
+          }
+        };
+
+        return jsonResponse({ guidedActions: coordination.guidedActions });
+      }
+
+      if (url.endsWith("/api/v1/incident/coordination/notes") && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as {
+          message: string;
+          correlationId: string;
+          author: string;
+        };
+        const note = {
+          id: `note-${coordination.notes.length + 1}`,
+          message: body.message,
+          correlationId: body.correlationId,
+          author: body.author,
+          at: new Date().toISOString()
+        };
+        coordination = {
+          ...coordination,
+          notes: [...coordination.notes, note]
+        };
+        return new Response(JSON.stringify({ note }), { status: 201, headers: { "content-type": "application/json" } });
+      }
+
+      if (url.endsWith("/api/v1/incident/coordination/handoff") && method === "PUT") {
+        const body = JSON.parse(String(init?.body)) as {
+          state: "none" | "handoff_requested" | "handoff_accepted";
+          fromOwner: string;
+          toOwner: string;
+          summary: string;
+          expectedUpdatedAt: string | null;
+        };
+
+        if (body.expectedUpdatedAt !== coordination.handoff.updatedAt) {
+          return new Response(
+            JSON.stringify({
+              code: "COORDINATION_CONFLICT",
+              message: "incident handoff changed; refresh and retry",
+              requestId: "req-conflict-handoff",
+              details: {
+                expectedUpdatedAt: body.expectedUpdatedAt,
+                currentUpdatedAt: coordination.handoff.updatedAt
+              }
+            }),
+            {
+              status: 409,
+              headers: { "content-type": "application/json" }
+            }
+          );
+        }
+
+        const { expectedUpdatedAt: _expectedUpdatedAt, ...nextHandoff } = body;
+
+        coordination = {
+          ...coordination,
+          handoff: {
+            ...nextHandoff,
+            updatedAt: new Date().toISOString()
+          }
+        };
+        return jsonResponse({ handoff: coordination.handoff });
+      }
+
       if (/\/api\/v1\/jobs\/.+\/replay$/.test(url)) {
         return new Response(null, { status: 202 });
       }
@@ -100,8 +250,6 @@ function mockApiResponses(options?: {
 beforeEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  clearGuidedActions();
-  window.localStorage?.clear?.();
   mockApiResponses();
 });
 
@@ -109,8 +257,6 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  clearGuidedActions();
-  window.localStorage?.clear?.();
 });
 
 describe("App", () => {
@@ -145,7 +291,7 @@ describe("App", () => {
 
     mockApiResponses({
       metricsSnapshots: [buildMetricsSnapshot(0)],
-      failAfterRequestCount: 3
+      failAfterRequestCount: 4
     });
 
     render(<App />);
@@ -184,24 +330,130 @@ describe("App", () => {
     expect(fallbackMessage.closest("li")).toHaveClass("timeline-fallback");
   });
 
-  it("persists guided actions in local storage", async () => {
+  it("loads shared guided actions from incident coordination", async () => {
+    mockApiResponses({
+      coordination: {
+        ...defaultCoordinationState(),
+        guidedActions: {
+          acknowledged: true,
+          owner: "operator-a",
+          escalated: true,
+          nextUpdateEta: "2026-02-14T11:00:00.000Z",
+          updatedAt: "2026-02-14T10:55:00.000Z"
+        },
+        notes: [
+          {
+            id: "note-1",
+            message: "Fallback correlated with worker saturation",
+            correlationId: "corr-1",
+            author: "operator-a",
+            at: "2026-02-14T10:45:00.000Z"
+          }
+        ]
+      }
+    });
+
     render(<App />);
 
     const acknowledgeToggle = await screen.findByRole("checkbox", { name: /acknowledge incident/i });
     const ownerInput = screen.getByRole("textbox", { name: /incident owner/i });
     const escalateToggle = screen.getByRole("checkbox", { name: /escalate response/i });
 
-    fireEvent.click(acknowledgeToggle);
-    fireEvent.change(ownerInput, { target: { value: "oncall-ops" } });
-    fireEvent.click(escalateToggle);
+    expect(acknowledgeToggle).toBeChecked();
+    expect(ownerInput).toHaveValue("operator-a");
+    expect(escalateToggle).toBeChecked();
+    expect(screen.queryByText(/local only/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/fallback correlated with worker saturation/i)).toBeInTheDocument();
+  });
 
-    cleanup();
+  it("updates shared guided actions through the coordination API", async () => {
     render(<App />);
 
-    expect(await screen.findByRole("checkbox", { name: /acknowledge incident/i })).toBeChecked();
-    expect(screen.getByRole("textbox", { name: /incident owner/i })).toHaveValue("oncall-ops");
-    expect(screen.getByRole("checkbox", { name: /escalate response/i })).toBeChecked();
-    expect(screen.getByText(/local only/i)).toBeInTheDocument();
+    const ownerInput = await screen.findByRole("textbox", { name: /incident owner/i });
+    fireEvent.change(ownerInput, { target: { value: "operator-b" } });
+
+    const acknowledgeToggle = screen.getByRole("checkbox", { name: /acknowledge incident/i });
+    fireEvent.click(acknowledgeToggle);
+
+    const fetchCalls = vi.mocked(fetch).mock.calls;
+    const updateCalls = fetchCalls
+      .map((call) => ({ url: String(call[0]), init: call[1] as RequestInit | undefined }))
+      .filter((call) => call.url.endsWith("/api/v1/incident/coordination/actions"));
+
+    const ownerCall = updateCalls.find((call) => {
+      const body = JSON.parse(String(call.init?.body)) as {
+        acknowledged: boolean;
+        owner: string;
+        escalated: boolean;
+        nextUpdateEta: string | null;
+        expectedUpdatedAt: string | null;
+      };
+      return body.owner === "operator-b";
+    });
+
+    expect(ownerCall).toBeDefined();
+    expect(ownerCall?.init?.method).toBe("PUT");
+    expect(JSON.parse(String(ownerCall?.init?.body))).toEqual({
+      acknowledged: false,
+      owner: "operator-b",
+      escalated: false,
+      nextUpdateEta: null,
+      expectedUpdatedAt: null
+    });
+  });
+
+  it("supports shared notes and handoff controls", async () => {
+    render(<App />);
+
+    fireEvent.change(await screen.findByRole("textbox", { name: /note message/i }), {
+      target: { value: "Investigating queue backlog" }
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: /correlation id/i }), {
+      target: { value: "corr-vast-fallback-123" }
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: /note author/i }), {
+      target: { value: "operator-a" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /add note/i }));
+
+    expect(await screen.findByText(/investigating queue backlog/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: /handoff state/i }), {
+      target: { value: "handoff_requested" }
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: /handoff from owner/i }), {
+      target: { value: "operator-a" }
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: /handoff to owner/i }), {
+      target: { value: "operator-b" }
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: /handoff summary/i }), {
+      target: { value: "Shift change at 19:00 UTC" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save handoff/i }));
+
+    const fetchCalls = vi.mocked(fetch).mock.calls;
+    const noteCall = fetchCalls
+      .map((call) => ({ url: String(call[0]), init: call[1] as RequestInit | undefined }))
+      .find((call) => call.url.endsWith("/api/v1/incident/coordination/notes"));
+    const handoffCall = fetchCalls
+      .map((call) => ({ url: String(call[0]), init: call[1] as RequestInit | undefined }))
+      .find((call) => call.url.endsWith("/api/v1/incident/coordination/handoff"));
+
+    expect(noteCall?.init?.method).toBe("POST");
+    expect(JSON.parse(String(noteCall?.init?.body))).toEqual({
+      message: "Investigating queue backlog",
+      correlationId: "corr-vast-fallback-123",
+      author: "operator-a"
+    });
+    expect(handoffCall?.init?.method).toBe("PUT");
+    expect(JSON.parse(String(handoffCall?.init?.body))).toEqual({
+      state: "handoff_requested",
+      fromOwner: "operator-a",
+      toOwner: "operator-b",
+      summary: "Shift change at 19:00 UTC",
+      expectedUpdatedAt: null
+    });
   });
 
   it("announces health state updates through a polite live region", async () => {
