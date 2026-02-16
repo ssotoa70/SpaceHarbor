@@ -88,6 +88,8 @@
 
 - `GET /api/v1/incident/coordination` returns shared incident state for guided actions, handoff, and timeline notes.
 - `notes` are returned newest-first (reverse chronological order).
+- Current durability semantics: coordination state is in-process memory for local/fallback adapters and is reset on service restart.
+- Coordination writes are shared across operators connected to the same running control-plane instance; cross-instance durable coordination is tracked as a follow-up phase.
 
 ```json
 {
@@ -244,6 +246,7 @@ Current common `code` values:
 - If `ASSETHARBOR_API_KEY` is configured, all write API requests (`POST`, `PUT`, `PATCH`, `DELETE`) require header `x-api-key` (versioned and legacy aliases).
 - Missing key returns `401` with `code: UNAUTHORIZED`.
 - Invalid key returns `403` with `code: FORBIDDEN`.
+- Read-only incident coordination endpoints (`GET /api/v1/incident/coordination`, `GET /api/v1/audit`, `GET /api/v1/metrics`) intentionally remain accessible without API key to preserve operator dashboard visibility during active incidents.
 
 ## VAST strict and fallback behavior
 
