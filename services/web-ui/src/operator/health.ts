@@ -5,7 +5,7 @@ export type HealthState = "normal" | "degraded" | "recovering";
 interface DeriveHealthStateInput {
   current: MetricsSnapshot | null;
   previous: MetricsSnapshot | null;
-  recentFallbackAudit: boolean;
+  recentFallbackSignal: boolean;
   now: number;
   lastDegradedAt: number | null;
   cooldownMs: number;
@@ -24,7 +24,7 @@ export function deriveHealthState(input: DeriveHealthStateInput): DerivedHealthS
   const previousFallback = fallbackCount(input.previous);
   const fallbackDelta = currentFallback - previousFallback;
 
-  if (fallbackDelta > 0 || input.recentFallbackAudit) {
+  if (fallbackDelta > 0 || input.recentFallbackSignal) {
     return {
       state: "degraded"
     };

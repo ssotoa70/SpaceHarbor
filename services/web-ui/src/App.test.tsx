@@ -48,6 +48,19 @@ function defaultCoordinationState(): CoordinationState {
   };
 }
 
+interface AuditSignalFixture {
+  type: "fallback";
+  code: "VAST_FALLBACK";
+  severity: "warning" | "critical";
+}
+
+interface AuditRowFixture {
+  id: string;
+  message: string;
+  at: string;
+  signal: AuditSignalFixture | null;
+}
+
 function buildMetricsSnapshot(fallbackEvents: number): MetricsSnapshot {
   return {
     assets: {
@@ -89,16 +102,20 @@ function jsonResponse(body: unknown): Response {
 
 function mockApiResponses(options?: {
   metricsSnapshots?: MetricsSnapshot[];
+  auditRows?: AuditRowFixture[];
   auditMessages?: string[];
   failAfterRequestCount?: number;
   coordination?: CoordinationState;
 }): void {
   const metricsSnapshots = options?.metricsSnapshots ?? [buildMetricsSnapshot(0)];
-  const auditRows = (options?.auditMessages ?? []).map((message, index) => ({
-    id: `audit-${index}`,
-    message,
-    at: new Date().toISOString()
-  }));
+  const auditRows =
+    options?.auditRows ??
+    (options?.auditMessages ?? []).map((message, index) => ({
+      id: `audit-${index}`,
+      message,
+      at: new Date().toISOString(),
+      signal: null
+    }));
 
   let requestCount = 0;
   let metricsIndex = 0;
@@ -285,6 +302,56 @@ describe("App", () => {
     expect(await screen.findByText(/degraded/i)).toBeInTheDocument();
   });
 
+  it("shows degraded state when recent fallback signal exists", async () => {
+    const now = Date.now();
+
+    mockApiResponses({
+      metricsSnapshots: [buildMetricsSnapshot(0)],
+      auditRows: [
+        {
+          id: "audit-recent-signal",
+          message: "storage fallback observed",
+          at: new Date(now - 2 * 60_000).toISOString(),
+          signal: {
+            type: "fallback",
+            code: "VAST_FALLBACK",
+            severity: "warning"
+          }
+        }
+      ]
+    });
+
+    render(<App />);
+
+    await screen.findByText(/storage fallback observed/i);
+    expect(screen.getByText(/health state:\s*degraded/i)).toBeInTheDocument();
+  });
+
+  it("does not show degraded state for stale fallback signals", async () => {
+    const now = Date.now();
+
+    mockApiResponses({
+      metricsSnapshots: [buildMetricsSnapshot(0)],
+      auditRows: [
+        {
+          id: "audit-old-signal",
+          message: "vast fallback historical event",
+          at: new Date(now - 30 * 60_000).toISOString(),
+          signal: {
+            type: "fallback",
+            code: "VAST_FALLBACK",
+            severity: "warning"
+          }
+        }
+      ]
+    });
+
+    render(<App />);
+
+    await screen.findByText(/historical event/i);
+    expect(screen.queryByText(/health state:\s*degraded/i)).not.toBeInTheDocument();
+  });
+
   it("shows stale marker when health data is outdated", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-14T10:00:00.000Z"));
@@ -318,16 +385,36 @@ describe("App", () => {
     expect(screen.getByText(/rising|stable|falling/i)).toBeInTheDocument();
   });
 
-  it("highlights fallback-correlated audit events", async () => {
+  it("highlights fallback-correlated audit events by signal code", async () => {
     mockApiResponses({
-      auditMessages: ["vast fallback triggered for createIngestAsset"]
+      auditRows: [
+        {
+          id: "audit-signal-based",
+          message: "storage write fallback triggered",
+          at: "2026-02-14T10:00:00.000Z",
+          signal: {
+            type: "fallback",
+            code: "VAST_FALLBACK",
+            severity: "warning"
+          }
+        },
+        {
+          id: "audit-text-only",
+          message: "vast fallback string without signal",
+          at: "2026-02-14T10:00:10.000Z",
+          signal: null
+        }
+      ]
     });
 
     render(<App />);
 
-    const fallbackMessage = await screen.findByText(/vast fallback/i);
+    const fallbackMessage = await screen.findByText(/storage write fallback triggered/i);
     expect(fallbackMessage).toBeInTheDocument();
     expect(fallbackMessage.closest("li")).toHaveClass("timeline-fallback");
+
+    const textOnlyFallbackMessage = screen.getByText(/string without signal/i);
+    expect(textOnlyFallbackMessage.closest("li")).not.toHaveClass("timeline-fallback");
   });
 
   it("loads shared guided actions from incident coordination", async () => {

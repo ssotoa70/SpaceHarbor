@@ -22,10 +22,17 @@ export interface AssetRow {
   status: string;
 }
 
+export interface AuditSignal {
+  type: "fallback";
+  code: "VAST_FALLBACK";
+  severity: "warning" | "critical";
+}
+
 export interface AuditRow {
   id: string;
   message: string;
   at: string;
+  signal: AuditSignal | null;
 }
 
 export interface IncidentGuidedActions {
