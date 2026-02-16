@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   Asset,
+  AuditSignal,
   AssetQueueRow,
   AuditEvent,
   DlqItem,
@@ -699,11 +700,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     });
   }
 
-  private recordAudit(message: string, correlationId: string, now: Date): AuditEvent {
+  private recordAudit(message: string, correlationId: string, now: Date, signal?: AuditSignal): AuditEvent {
     const event: AuditEvent = {
       id: randomUUID(),
       message: `[corr:${correlationId}] ${message}`,
-      at: now.toISOString()
+      at: now.toISOString(),
+      ...(signal ? { signal } : {})
     };
     this.auditEvents.unshift(event);
     return event;

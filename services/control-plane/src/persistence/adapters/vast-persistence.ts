@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { AuditEvent } from "../../domain/models.js";
+import type { AuditEvent, AuditSignal } from "../../domain/models.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
 import type {
@@ -274,10 +274,17 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   private recordFallbackAudit(operation: string, error: unknown): void {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    const signal: AuditSignal = {
+      type: "fallback",
+      code: "VAST_FALLBACK",
+      severity: "warning"
+    };
+
     this.fallbackAuditEvents.unshift({
       id: randomUUID(),
       message: `[corr:system] vast fallback (${operation}) due to client error: ${errorMessage}`,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
+      signal
     });
   }
 
