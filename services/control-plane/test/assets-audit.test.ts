@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildApp } from "../src/app";
+import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence";
 
 test("GET /assets returns queue rows with status", async () => {
   const app = buildApp();
@@ -61,6 +62,54 @@ test("GET /audit returns event history", async () => {
   const audit = await app.inject({ method: "GET", url: "/audit" });
   assert.equal(audit.statusCode, 200);
   assert.ok(audit.json().events.length >= 1);
+
+  await app.close();
+});
+
+test("GET /api/v1/audit returns structured fallback signal shape", async () => {
+  const adapter = new VastPersistenceAdapter(
+    {
+      databaseUrl: "https://db.example",
+      eventBrokerUrl: "https://events.example",
+      dataEngineUrl: "https://engine.example",
+      strict: false,
+      fallbackToLocal: true
+    },
+    async () => new Response(null, { status: 202 }),
+    {
+      createIngestAsset: () => {
+        throw new Error("vast db unavailable");
+      }
+    }
+  );
+
+  const app = buildApp({ persistenceAdapter: adapter });
+
+  const ingest = await app.inject({
+    method: "POST",
+    url: "/api/v1/assets/ingest",
+    payload: {
+      title: "audit-contract-fallback-asset",
+      sourceUri: "s3://bucket/audit-contract-fallback-asset.mov"
+    }
+  });
+  assert.equal(ingest.statusCode, 201);
+
+  const audit = await app.inject({ method: "GET", url: "/api/v1/audit" });
+  assert.equal(audit.statusCode, 200);
+
+  const fallbackEvent = audit.json().events.find(
+    (event: {
+      message: string;
+      signal?: {
+        code?: string;
+      };
+    }) => event.message.includes("vast fallback") && event.message.includes("createIngestAsset")
+  );
+
+  assert.ok(fallbackEvent);
+  assert.deepEqual(Object.keys(fallbackEvent).sort(), ["at", "id", "message", "signal"]);
+  assert.equal(fallbackEvent.signal?.code, "VAST_FALLBACK");
 
   await app.close();
 });
