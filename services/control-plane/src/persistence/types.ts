@@ -2,6 +2,11 @@ import type {
   AssetQueueRow,
   AuditEvent,
   DlqItem,
+  IncidentCoordination,
+  IncidentGuidedActions,
+  IncidentHandoff,
+  IncidentHandoffState,
+  IncidentNote,
   IngestResult,
   OutboxItem,
   WorkflowJob,
@@ -56,6 +61,26 @@ export interface WorkflowStats {
   };
 }
 
+export interface IncidentGuidedActionsUpdate {
+  acknowledged: boolean;
+  owner: string;
+  escalated: boolean;
+  nextUpdateEta: string | null;
+}
+
+export interface IncidentNoteInput {
+  message: string;
+  correlationId: string;
+  author: string;
+}
+
+export interface IncidentHandoffUpdate {
+  state: IncidentHandoffState;
+  fromOwner: string;
+  toOwner: string;
+  summary: string;
+}
+
 export interface PersistenceAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
@@ -79,6 +104,10 @@ export interface PersistenceAdapter {
   getWorkflowStats(nowIso?: string): WorkflowStats;
   listAssetQueueRows(): AssetQueueRow[];
   getAuditEvents(): AuditEvent[];
+  getIncidentCoordination(): IncidentCoordination;
+  updateIncidentGuidedActions(update: IncidentGuidedActionsUpdate, context: WriteContext): IncidentGuidedActions;
+  addIncidentNote(input: IncidentNoteInput, context: WriteContext): IncidentNote;
+  updateIncidentHandoff(update: IncidentHandoffUpdate, context: WriteContext): IncidentHandoff;
   hasProcessedEvent(eventId: string): boolean;
   markProcessedEvent(eventId: string): void;
 }

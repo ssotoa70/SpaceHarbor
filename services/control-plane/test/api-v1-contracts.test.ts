@@ -57,3 +57,53 @@ test("POST /api/v1/assets/ingest succeeds with stable v1 response shape", async 
 
   await app.close();
 });
+
+test("incident coordination write routes return validation envelope for invalid payloads", async () => {
+  const app = buildApp();
+
+  const invalidRequests = [
+    {
+      method: "PUT",
+      url: "/api/v1/incident/coordination/actions",
+      payload: {
+        acknowledged: true,
+        owner: "oncall-supervisor",
+        escalated: false,
+        nextUpdateEta: "not-a-date",
+        expectedUpdatedAt: null
+      }
+    },
+    {
+      method: "POST",
+      url: "/api/v1/incident/coordination/notes",
+      payload: {
+        message: "   ",
+        correlationId: "corr-incident-note-1",
+        author: "operator-a"
+      }
+    },
+    {
+      method: "PUT",
+      url: "/api/v1/incident/coordination/handoff",
+      payload: {
+        state: "handoff_requested",
+        fromOwner: "",
+        toOwner: "",
+        summary: "shift handoff",
+        expectedUpdatedAt: null
+      }
+    }
+  ] as const;
+
+  for (const requestConfig of invalidRequests) {
+    const response = await app.inject(requestConfig);
+
+    assert.equal(response.statusCode, 400, `expected 400 for ${requestConfig.method} ${requestConfig.url}`);
+    const envelope = response.json();
+    assert.deepEqual(Object.keys(envelope).sort(), ["code", "details", "message", "requestId"]);
+    assert.equal(envelope.code, "VALIDATION_ERROR");
+    assert.equal(typeof envelope.requestId, "string");
+  }
+
+  await app.close();
+});
