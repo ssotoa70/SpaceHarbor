@@ -84,6 +84,29 @@
 
 - `GET /api/v1/audit` returns recent audit events in reverse chronological order.
 
+```json
+{
+  "events": [
+    {
+      "id": "uuid",
+      "message": "[corr:system] vast fallback (createIngestAsset) due to client error: db write failed",
+      "at": "2026-02-16T12:00:00.000Z",
+      "signal": {
+        "type": "fallback",
+        "code": "VAST_FALLBACK",
+        "severity": "warning"
+      }
+    }
+  ]
+}
+```
+
+- `signal` is optional and currently used for structured fallback classification.
+- `signal.type` is `fallback` when present.
+- `signal.code` is `VAST_FALLBACK` when present.
+- `signal.severity` is `warning` or `critical`.
+- Fallback signals should be used by operator clients instead of parsing `message` text.
+
 ## Incident Coordination
 
 - `GET /api/v1/incident/coordination` returns shared incident state for guided actions, handoff, and timeline notes.
@@ -253,6 +276,7 @@ Current common `code` values:
 - VAST mode uses `ASSETHARBOR_VAST_STRICT` and `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL` to control fail-fast vs continuity behavior.
 - In strict fail-fast mode, internal VAST workflow client failures surface as `500` with the same unified error envelope.
 - In fallback mode, workflow continuity is preserved and fallback usage is visible via audit events.
+- Durability semantics (current): fallback counters and fallback audit signals are derived from in-process adapter state and reset on control-plane restart.
 
 ## Compatibility
 
