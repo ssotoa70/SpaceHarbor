@@ -33,8 +33,10 @@
 
 - Strict mode: with `ASSETHARBOR_VAST_STRICT=true` and `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=false`, VAST workflow client failures fail-fast.
 - Continuity mode: with `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=true`, client failures fall back to local adapter behavior.
-- Fallback usage is surfaced in audit trail messages (`GET /api/v1/audit`) with `vast fallback` markers.
-- For incident validation, run ingest/event workflow and then confirm fallback markers in audit events.
+- Fallback usage is surfaced in `GET /api/v1/audit` as structured signal fields (`signal.type=fallback`, `signal.code=VAST_FALLBACK`, `signal.severity`).
+- Operator dashboards should classify degraded/recovering state from structured `signal` values and event recency, not from audit message text parsing.
+- Durability semantics (current): fallback counters and fallback signals are in-process and reset on control-plane restart; treat them as operational indicators, not durable compliance history.
+- For incident validation, run ingest/event workflow and then confirm fallback `signal` values in audit events.
 
 ## SLO Definitions
 

@@ -19,6 +19,7 @@ test("GET /openapi.json returns OpenAPI document with critical workflow paths", 
   const requiredPaths = [
     "/api/v1/assets/ingest",
     "/api/v1/events",
+    "/api/v1/audit",
     "/api/v1/queue/claim",
     "/api/v1/jobs/{id}/heartbeat",
     "/api/v1/jobs/{id}/replay",
@@ -31,6 +32,30 @@ test("GET /openapi.json returns OpenAPI document with critical workflow paths", 
   for (const path of requiredPaths) {
     assert.ok(body.paths[path], `missing path in OpenAPI doc: ${path}`);
   }
+
+  await app.close();
+});
+
+test("OpenAPI includes explicit /api/v1/audit schema metadata", async () => {
+  const app = buildApp();
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/openapi.json"
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+
+  const operation = body.paths?.["/api/v1/audit"]?.get;
+  assert.ok(operation, "missing GET /api/v1/audit operation");
+  assert.equal(operation.operationId, "v1ListAuditEvents");
+  assert.equal(operation.tags.includes("audit"), true);
+
+  const eventSchema = operation.responses?.["200"]?.content?.["application/json"]?.schema?.properties?.events?.items;
+  assert.ok(eventSchema, "missing audit event schema");
+  assert.deepEqual(eventSchema.required, ["id", "message", "at", "signal"]);
+  assert.deepEqual(eventSchema.properties?.signal?.anyOf?.[0]?.required, ["type", "code", "severity"]);
 
   await app.close();
 });

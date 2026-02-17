@@ -38,6 +38,13 @@ export interface AuditEvent {
   id: string;
   message: string;
   at: string;
+  signal?: AuditSignal;
+}
+
+export interface AuditSignal {
+  type: "fallback";
+  code: "VAST_FALLBACK";
+  severity: "warning" | "critical";
 }
 
 export interface IncidentGuidedActions {

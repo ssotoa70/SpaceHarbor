@@ -23,6 +23,7 @@ import type { MetricsSnapshot } from "./operator/types";
 const HEALTH_POLL_INTERVAL_MS = 15_000;
 const HEALTH_STALE_THRESHOLD_MS = 60_000;
 const HEALTH_COOLDOWN_MS = 60_000;
+const FALLBACK_SIGNAL_RECENCY_MS = 5 * 60_000;
 
 function isCoordinationConflictError(error: unknown): boolean {
   return error instanceof Error && error.message.includes(": 409");
@@ -102,22 +103,29 @@ export function App() {
 
   const currentMetrics = metricsHistory[metricsHistory.length - 1] ?? null;
   const previousMetrics = metricsHistory[metricsHistory.length - 2] ?? null;
-  const recentFallbackAudit = auditRows.some((row) => row.message.toLowerCase().includes("vast fallback"));
+  const healthEvaluationNow = lastSuccessfulRefreshAt ?? now;
+  const recentFallbackSignal = auditRows.some((row) => {
+    if (row.signal?.code !== "VAST_FALLBACK") {
+      return false;
+    }
+
+    return healthEvaluationNow - new Date(row.at).getTime() < FALLBACK_SIGNAL_RECENCY_MS;
+  });
 
   const health = deriveHealthState({
     current: currentMetrics,
     previous: previousMetrics,
-    recentFallbackAudit,
-    now,
+    recentFallbackSignal,
+    now: healthEvaluationNow,
     lastDegradedAt,
     cooldownMs: HEALTH_COOLDOWN_MS
   });
 
   useEffect(() => {
     if (health.state === "degraded") {
-      setLastDegradedAt(now);
+      setLastDegradedAt(healthEvaluationNow);
     }
-  }, [health.state, now]);
+  }, [health.state, healthEvaluationNow]);
 
   const isStale = lastSuccessfulRefreshAt !== null && now - lastSuccessfulRefreshAt >= HEALTH_STALE_THRESHOLD_MS;
   const lastUpdatedText =
@@ -509,7 +517,7 @@ export function App() {
             <li className="timeline-item">No audit events yet.</li>
           ) : (
             auditRows.map((row) => {
-              const isFallbackCorrelated = row.message.toLowerCase().includes("vast fallback");
+              const isFallbackCorrelated = row.signal?.code === "VAST_FALLBACK";
 
               return (
                 <li key={row.id} className={`timeline-item${isFallbackCorrelated ? " timeline-fallback" : ""}`}>

@@ -243,10 +243,26 @@ test("fallback VAST mode records an audit signal when client write fails", () =>
   });
 
   const events = adapter.getAuditEvents();
+  const fallbackEvent = events.find((event) =>
+    event.message.includes("vast fallback") && event.message.includes("setJobStatus")
+  ) as
+    | {
+        signal?: {
+          type?: string;
+          code?: string;
+          severity?: string;
+        };
+      }
+    | undefined;
+
+  assert.ok(fallbackEvent);
   assert.equal(
     events.some((event) => event.message.includes("vast fallback") && event.message.includes("setJobStatus")),
     true
   );
+  assert.equal(fallbackEvent.signal?.type, "fallback");
+  assert.equal(fallbackEvent.signal?.code, "VAST_FALLBACK");
+  assert.equal(fallbackEvent.signal?.severity, "warning");
 });
 
 test("VAST adapter publishes outbox items to event broker endpoint", async () => {

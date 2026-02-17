@@ -277,10 +277,27 @@ test("VAST mode surfaces fallback usage in audit trail", async () => {
     url: "/api/v1/audit"
   });
   assert.equal(audit.statusCode, 200);
+  const fallbackEvent = audit
+    .json()
+    .events.find(
+      (event: {
+        message: string;
+        signal?: {
+          type?: string;
+          code?: string;
+          severity?: string;
+        };
+      }) => event.message.includes("vast fallback") && event.message.includes("createIngestAsset")
+    );
+
+  assert.ok(fallbackEvent);
   assert.equal(
     audit.json().events.some((event: { message: string }) => event.message.includes("vast fallback") && event.message.includes("createIngestAsset")),
     true
   );
+  assert.equal(fallbackEvent.signal?.type, "fallback");
+  assert.equal(fallbackEvent.signal?.code, "VAST_FALLBACK");
+  assert.equal(fallbackEvent.signal?.severity, "warning");
 
   const metrics = await app.inject({
     method: "GET",

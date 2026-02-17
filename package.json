@@ -4,8 +4,9 @@
   "private": true,
   "description": "AssetHarbor MVP monorepo",
   "scripts": {
+    "check:workspace": "bash scripts/check-worktree.sh",
     "test:compose": "node --test tests/compose/*.test.js",
-    "test:docs": "node --test tests/docs/docs-presence.test.js",
+    "test:docs": "node --test tests/docs/*.test.js",
     "test:control-plane": "npm --prefix services/control-plane test",
     "test:contracts": "npm --prefix services/control-plane run test:contracts",
     "test:worker": "PYTHONPATH=services/media-worker python3 -m pytest services/media-worker/tests -q",
