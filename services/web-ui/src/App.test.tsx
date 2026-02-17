@@ -387,7 +387,7 @@ describe("App", () => {
           }
         }
       ],
-      failAfterRequestCount: 3
+      failAfterRequestCount: 4
     });
 
     render(<App />);
