@@ -369,6 +369,38 @@ describe("App", () => {
     expect(screen.getByText(/stale/i)).toBeInTheDocument();
   });
 
+  it("keeps degraded state while data is stale after fallback signal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-14T10:00:00.000Z"));
+
+    mockApiResponses({
+      metricsSnapshots: [buildMetricsSnapshot(0)],
+      auditRows: [
+        {
+          id: "audit-recent-signal-stale",
+          message: "storage fallback observed",
+          at: new Date("2026-02-14T09:58:00.000Z").toISOString(),
+          signal: {
+            type: "fallback",
+            code: "VAST_FALLBACK",
+            severity: "warning"
+          }
+        }
+      ],
+      failAfterRequestCount: 3
+    });
+
+    render(<App />);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(screen.getByText(/health state:\s*degraded/i)).toBeInTheDocument();
+
+    vi.setSystemTime(new Date("2026-02-14T10:06:00.000Z"));
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+
+    expect(screen.getByText(/stale/i)).toBeInTheDocument();
+    expect(screen.getByText(/health state:\s*degraded/i)).toBeInTheDocument();
+  });
+
   it("shows fallback impact count and trend", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-14T10:00:00.000Z"));

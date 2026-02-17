@@ -103,28 +103,29 @@ export function App() {
 
   const currentMetrics = metricsHistory[metricsHistory.length - 1] ?? null;
   const previousMetrics = metricsHistory[metricsHistory.length - 2] ?? null;
+  const healthEvaluationNow = lastSuccessfulRefreshAt ?? now;
   const recentFallbackSignal = auditRows.some((row) => {
     if (row.signal?.code !== "VAST_FALLBACK") {
       return false;
     }
 
-    return now - new Date(row.at).getTime() < FALLBACK_SIGNAL_RECENCY_MS;
+    return healthEvaluationNow - new Date(row.at).getTime() < FALLBACK_SIGNAL_RECENCY_MS;
   });
 
   const health = deriveHealthState({
     current: currentMetrics,
     previous: previousMetrics,
     recentFallbackSignal,
-    now,
+    now: healthEvaluationNow,
     lastDegradedAt,
     cooldownMs: HEALTH_COOLDOWN_MS
   });
 
   useEffect(() => {
     if (health.state === "degraded") {
-      setLastDegradedAt(now);
+      setLastDegradedAt(healthEvaluationNow);
     }
-  }, [health.state, now]);
+  }, [health.state, healthEvaluationNow]);
 
   const isStale = lastSuccessfulRefreshAt !== null && now - lastSuccessfulRefreshAt >= HEALTH_STALE_THRESHOLD_MS;
   const lastUpdatedText =

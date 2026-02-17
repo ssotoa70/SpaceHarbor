@@ -101,7 +101,7 @@
 }
 ```
 
-- `signal` is optional and currently used for structured fallback classification.
+- `signal` is always present; it is either a structured signal object or `null`.
 - `signal.type` is `fallback` when present.
 - `signal.code` is `VAST_FALLBACK` when present.
 - `signal.severity` is `warning` or `critical`.
