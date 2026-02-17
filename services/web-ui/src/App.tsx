@@ -1,19 +1,50 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { fetchAssets, fetchAudit, fetchMetrics, ingestAsset, replayJob, type AssetRow, type AuditRow } from "./api";
 import {
-  clearGuidedActions as clearGuidedActionsStorage,
-  DEFAULT_GUIDED_ACTIONS,
-  loadGuidedActions,
-  saveGuidedActions,
-  type GuidedActions
-} from "./operator/actions";
+  createIncidentCoordinationNote,
+  fetchAssets,
+  fetchAudit,
+  fetchIncidentCoordination,
+  fetchMetrics,
+  ingestAsset,
+  replayJob,
+  updateIncidentGuidedActions,
+  updateIncidentHandoff,
+  type AssetRow,
+  type AuditRow,
+  type IncidentCoordination,
+  type IncidentGuidedActions,
+  type IncidentHandoff,
+  type IncidentHandoffState
+} from "./api";
 import { deriveHealthState } from "./operator/health";
 import type { MetricsSnapshot } from "./operator/types";
 
 const HEALTH_POLL_INTERVAL_MS = 15_000;
 const HEALTH_STALE_THRESHOLD_MS = 60_000;
 const HEALTH_COOLDOWN_MS = 60_000;
+
+function isCoordinationConflictError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes(": 409");
+}
+
+const DEFAULT_INCIDENT_COORDINATION: IncidentCoordination = {
+  guidedActions: {
+    acknowledged: false,
+    owner: "",
+    escalated: false,
+    nextUpdateEta: null,
+    updatedAt: null
+  },
+  handoff: {
+    state: "none",
+    fromOwner: "",
+    toOwner: "",
+    summary: "",
+    updatedAt: null
+  },
+  notes: []
+};
 
 export function App() {
   const [assets, setAssets] = useState<AssetRow[]>([]);
@@ -24,15 +55,29 @@ export function App() {
   const [now, setNow] = useState(() => Date.now());
   const [title, setTitle] = useState("");
   const [sourceUri, setSourceUri] = useState("");
-  const [guidedActions, setGuidedActions] = useState<GuidedActions>(() => loadGuidedActions());
+  const [coordination, setCoordination] = useState<IncidentCoordination>(DEFAULT_INCIDENT_COORDINATION);
+  const [noteMessage, setNoteMessage] = useState("");
+  const [noteCorrelationId, setNoteCorrelationId] = useState("");
+  const [noteAuthor, setNoteAuthor] = useState("");
+  const [handoffDraft, setHandoffDraft] = useState<IncidentHandoff>(DEFAULT_INCIDENT_COORDINATION.handoff);
 
   async function refresh(): Promise<void> {
     try {
-      const [assetList, auditList, metricsSnapshot] = await Promise.all([fetchAssets(), fetchAudit(), fetchMetrics()]);
+      const [assetList, auditList, metricsSnapshot, coordinationState] = await Promise.all([
+        fetchAssets(),
+        fetchAudit(),
+        fetchMetrics(),
+        fetchIncidentCoordination()
+      ]);
       setAssets(assetList);
       setAuditRows(auditList);
       if (metricsSnapshot) {
         setMetricsHistory((previous) => [...previous.slice(-1), metricsSnapshot]);
+      }
+
+      if (coordinationState) {
+        setCoordination(coordinationState);
+        setHandoffDraft(coordinationState.handoff);
       }
 
       const refreshedAt = Date.now();
@@ -90,26 +135,115 @@ export function App() {
     fallbackTrend = "falling";
   }
 
-  function updateGuidedActions(update: Partial<Omit<GuidedActions, "updatedAt">>): void {
-    const nextActions: GuidedActions = {
-      ...guidedActions,
-      ...update,
-      updatedAt: new Date().toISOString()
+  async function updateGuidedActions(update: Partial<Omit<IncidentGuidedActions, "updatedAt">>): Promise<void> {
+    const nextActions = {
+      ...coordination.guidedActions,
+      ...update
     };
 
-    setGuidedActions(nextActions);
-    saveGuidedActions(nextActions);
+    try {
+      const guidedActions = await updateIncidentGuidedActions({
+        acknowledged: nextActions.acknowledged,
+        owner: nextActions.owner,
+        escalated: nextActions.escalated,
+        nextUpdateEta: nextActions.nextUpdateEta,
+        expectedUpdatedAt: coordination.guidedActions.updatedAt
+      });
+
+      setCoordination((previous) => ({
+        ...previous,
+        guidedActions
+      }));
+    } catch (error) {
+      if (isCoordinationConflictError(error)) {
+        await refresh();
+        return;
+      }
+
+      throw error;
+    }
   }
 
-  function resetGuidedActions(): void {
-    setGuidedActions(DEFAULT_GUIDED_ACTIONS);
-    clearGuidedActionsStorage();
+  async function resetGuidedActions(): Promise<void> {
+    try {
+      const guidedActions = await updateIncidentGuidedActions({
+        acknowledged: false,
+        owner: "",
+        escalated: false,
+        nextUpdateEta: null,
+        expectedUpdatedAt: coordination.guidedActions.updatedAt
+      });
+
+      setCoordination((previous) => ({
+        ...previous,
+        guidedActions
+      }));
+    } catch (error) {
+      if (isCoordinationConflictError(error)) {
+        await refresh();
+        return;
+      }
+
+      throw error;
+    }
   }
 
   const guidedUpdatedText =
-    guidedActions.updatedAt === null
+    coordination.guidedActions.updatedAt === null
       ? "Updated: not set"
-      : `Updated: ${new Date(guidedActions.updatedAt).toLocaleString()}`;
+      : `Updated: ${new Date(coordination.guidedActions.updatedAt).toLocaleString()}`;
+
+  async function onCreateNote(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    const message = noteMessage.trim();
+    const correlationId = noteCorrelationId.trim();
+    const author = noteAuthor.trim();
+    if (!message || !correlationId || !author) {
+      return;
+    }
+
+    const note = await createIncidentCoordinationNote({
+      message,
+      correlationId,
+      author
+    });
+
+    setCoordination((previous) => ({
+      ...previous,
+      notes: [note, ...previous.notes]
+    }));
+    setNoteMessage("");
+    setNoteCorrelationId("");
+    setNoteAuthor("");
+  }
+
+  async function onSaveHandoff(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    try {
+      const handoff = await updateIncidentHandoff({
+        state: handoffDraft.state,
+        fromOwner: handoffDraft.fromOwner,
+        toOwner: handoffDraft.toOwner,
+        summary: handoffDraft.summary,
+        expectedUpdatedAt: coordination.handoff.updatedAt
+      });
+
+      setCoordination((previous) => ({
+        ...previous,
+        handoff
+      }));
+      setHandoffDraft(handoff);
+    } catch (error) {
+      if (isCoordinationConflictError(error)) {
+        await refresh();
+        return;
+      }
+
+      throw error;
+    }
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -171,12 +305,14 @@ export function App() {
 
         <div className="guided-panel">
           <h3>Guided actions</h3>
-          <p className="guided-local">Local only: saved in this browser and not shared with backend services.</p>
+          <p className="guided-shared">Shared coordination state for all operators and services.</p>
           <label className="guided-control">
             <input
               type="checkbox"
-              checked={guidedActions.acknowledged}
-              onChange={(event) => updateGuidedActions({ acknowledged: event.target.checked })}
+              checked={coordination.guidedActions.acknowledged}
+              onChange={(event) => {
+                void updateGuidedActions({ acknowledged: event.target.checked });
+              }}
             />
             Acknowledge incident
           </label>
@@ -184,22 +320,130 @@ export function App() {
             Incident owner
             <input
               type="text"
-              value={guidedActions.owner}
-              onChange={(event) => updateGuidedActions({ owner: event.target.value })}
+              value={coordination.guidedActions.owner}
+              onChange={(event) => {
+                void updateGuidedActions({ owner: event.target.value });
+              }}
             />
           </label>
           <label className="guided-control">
             <input
               type="checkbox"
-              checked={guidedActions.escalated}
-              onChange={(event) => updateGuidedActions({ escalated: event.target.checked })}
+              checked={coordination.guidedActions.escalated}
+              onChange={(event) => {
+                void updateGuidedActions({ escalated: event.target.checked });
+              }}
             />
             Escalate response
           </label>
           <p className="guided-updated">{guidedUpdatedText}</p>
-          <button type="button" onClick={resetGuidedActions}>
+          <button
+            type="button"
+            onClick={() => {
+              void resetGuidedActions();
+            }}
+          >
             Clear guided actions
           </button>
+
+          <div className="coordination-block" aria-labelledby="notes-heading">
+            <h4 id="notes-heading">Incident notes</h4>
+            <form className="coordination-form" onSubmit={onCreateNote}>
+              <label>
+                Note message
+                <input type="text" value={noteMessage} onChange={(event) => setNoteMessage(event.target.value)} />
+              </label>
+              <label>
+                Correlation ID
+                <input
+                  type="text"
+                  value={noteCorrelationId}
+                  onChange={(event) => setNoteCorrelationId(event.target.value)}
+                />
+              </label>
+              <label>
+                Note author
+                <input type="text" value={noteAuthor} onChange={(event) => setNoteAuthor(event.target.value)} />
+              </label>
+              <button type="submit">Add note</button>
+            </form>
+            <ul className="coordination-list">
+              {coordination.notes.length === 0 ? (
+                <li>No notes yet.</li>
+              ) : (
+                coordination.notes.map((note) => (
+                  <li key={note.id}>
+                    <strong>{note.message}</strong>
+                    <span>
+                      {note.author} - {note.correlationId}
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+
+          <div className="coordination-block" aria-labelledby="handoff-heading">
+            <h4 id="handoff-heading">Operator handoff</h4>
+            <form className="coordination-form" onSubmit={onSaveHandoff}>
+              <label>
+                Handoff state
+                <select
+                  value={handoffDraft.state}
+                  onChange={(event) =>
+                    setHandoffDraft((previous) => ({
+                      ...previous,
+                      state: event.target.value as IncidentHandoffState
+                    }))
+                  }
+                >
+                  <option value="none">none</option>
+                  <option value="handoff_requested">handoff_requested</option>
+                  <option value="handoff_accepted">handoff_accepted</option>
+                </select>
+              </label>
+              <label>
+                Handoff from owner
+                <input
+                  type="text"
+                  value={handoffDraft.fromOwner}
+                  onChange={(event) =>
+                    setHandoffDraft((previous) => ({
+                      ...previous,
+                      fromOwner: event.target.value
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Handoff to owner
+                <input
+                  type="text"
+                  value={handoffDraft.toOwner}
+                  onChange={(event) =>
+                    setHandoffDraft((previous) => ({
+                      ...previous,
+                      toOwner: event.target.value
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Handoff summary
+                <input
+                  type="text"
+                  value={handoffDraft.summary}
+                  onChange={(event) =>
+                    setHandoffDraft((previous) => ({
+                      ...previous,
+                      summary: event.target.value
+                    }))
+                  }
+                />
+              </label>
+              <button type="submit">Save handoff</button>
+            </form>
+          </div>
         </div>
       </section>
 

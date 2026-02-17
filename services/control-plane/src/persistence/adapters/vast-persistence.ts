@@ -3,7 +3,15 @@ import { randomUUID } from "node:crypto";
 import type { AuditEvent } from "../../domain/models.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
-import type { FailureResult, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
+import type {
+  FailureResult,
+  IncidentGuidedActionsUpdate,
+  IncidentHandoffUpdate,
+  IncidentNoteInput,
+  PersistenceAdapter,
+  WorkflowStats,
+  WriteContext
+} from "../types.js";
 import type { VastWorkflowClient } from "../vast/workflow-client.js";
 
 interface VastConfig {
@@ -207,6 +215,22 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   getAuditEvents() {
     const merged = [...this.fallbackAuditEvents, ...this.localFallback.getAuditEvents()];
     return merged.sort((a, b) => b.at.localeCompare(a.at));
+  }
+
+  getIncidentCoordination() {
+    return this.localFallback.getIncidentCoordination();
+  }
+
+  updateIncidentGuidedActions(update: IncidentGuidedActionsUpdate, context: WriteContext) {
+    return this.localFallback.updateIncidentGuidedActions(update, context);
+  }
+
+  addIncidentNote(input: IncidentNoteInput, context: WriteContext) {
+    return this.localFallback.addIncidentNote(input, context);
+  }
+
+  updateIncidentHandoff(update: IncidentHandoffUpdate, context: WriteContext) {
+    return this.localFallback.updateIncidentHandoff(update, context);
   }
 
   hasProcessedEvent(eventId: string): boolean {

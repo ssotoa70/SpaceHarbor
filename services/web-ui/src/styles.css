@@ -177,7 +177,7 @@ textarea:focus-visible {
   margin: 0;
 }
 
-.guided-local {
+.guided-shared {
   font-size: 0.9rem;
   color: #3d556f;
 }
@@ -211,6 +211,58 @@ textarea:focus-visible {
   padding: 0.45rem 0.7rem;
   border-radius: 8px;
   cursor: pointer;
+}
+
+.coordination-block {
+  border-top: 1px solid #d8e2ec;
+  margin-top: 0.45rem;
+  padding-top: 0.65rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.coordination-block h4 {
+  margin: 0;
+}
+
+.coordination-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.coordination-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+
+.coordination-form input,
+.coordination-form select {
+  border: 1px solid #bfcfdd;
+  border-radius: 8px;
+  padding: 0.5rem 0.55rem;
+}
+
+.coordination-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.coordination-list li {
+  border: 1px solid #e1e9f2;
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  background: #fcfdff;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.coordination-list li span {
+  font-size: 0.82rem;
+  color: #4d5e72;
 }
 
 .ingest-form {

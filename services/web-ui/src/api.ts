@@ -28,6 +28,38 @@ export interface AuditRow {
   at: string;
 }
 
+export interface IncidentGuidedActions {
+  acknowledged: boolean;
+  owner: string;
+  escalated: boolean;
+  nextUpdateEta: string | null;
+  updatedAt: string | null;
+}
+
+export type IncidentHandoffState = "none" | "handoff_requested" | "handoff_accepted";
+
+export interface IncidentHandoff {
+  state: IncidentHandoffState;
+  fromOwner: string;
+  toOwner: string;
+  summary: string;
+  updatedAt: string | null;
+}
+
+export interface IncidentNote {
+  id: string;
+  message: string;
+  correlationId: string;
+  author: string;
+  at: string;
+}
+
+export interface IncidentCoordination {
+  guidedActions: IncidentGuidedActions;
+  handoff: IncidentHandoff;
+  notes: IncidentNote[];
+}
+
 export async function fetchAssets(): Promise<AssetRow[]> {
   const response = await fetch(`${API_BASE_URL}/api/v1/assets`);
   if (!response.ok) {
@@ -80,4 +112,80 @@ export async function fetchMetrics(): Promise<MetricsSnapshot | null> {
   }
 
   return (await response.json()) as MetricsSnapshot;
+}
+
+export async function fetchIncidentCoordination(): Promise<IncidentCoordination | null> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/incident/coordination`);
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json()) as IncidentCoordination;
+}
+
+export async function updateIncidentGuidedActions(input: {
+  acknowledged: boolean;
+  owner: string;
+  escalated: boolean;
+  nextUpdateEta: string | null;
+  expectedUpdatedAt: string | null;
+}): Promise<IncidentGuidedActions> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/incident/coordination/actions`, {
+    method: "PUT",
+    headers: withAuth({
+      "content-type": "application/json"
+    }),
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(`incident actions update failed: ${response.status}`);
+  }
+
+  const body = (await response.json()) as { guidedActions: IncidentGuidedActions };
+  return body.guidedActions;
+}
+
+export async function createIncidentCoordinationNote(input: {
+  message: string;
+  correlationId: string;
+  author: string;
+}): Promise<IncidentNote> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/incident/coordination/notes`, {
+    method: "POST",
+    headers: withAuth({
+      "content-type": "application/json"
+    }),
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(`incident note create failed: ${response.status}`);
+  }
+
+  const body = (await response.json()) as { note: IncidentNote };
+  return body.note;
+}
+
+export async function updateIncidentHandoff(input: {
+  state: IncidentHandoffState;
+  fromOwner: string;
+  toOwner: string;
+  summary: string;
+  expectedUpdatedAt: string | null;
+}): Promise<IncidentHandoff> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/incident/coordination/handoff`, {
+    method: "PUT",
+    headers: withAuth({
+      "content-type": "application/json"
+    }),
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(`incident handoff update failed: ${response.status}`);
+  }
+
+  const body = (await response.json()) as { handoff: IncidentHandoff };
+  return body.handoff;
 }

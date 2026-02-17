@@ -40,6 +40,38 @@ export interface AuditEvent {
   at: string;
 }
 
+export interface IncidentGuidedActions {
+  acknowledged: boolean;
+  owner: string;
+  escalated: boolean;
+  nextUpdateEta: string | null;
+  updatedAt: string | null;
+}
+
+export type IncidentHandoffState = "none" | "handoff_requested" | "handoff_accepted";
+
+export interface IncidentHandoff {
+  state: IncidentHandoffState;
+  fromOwner: string;
+  toOwner: string;
+  summary: string;
+  updatedAt: string | null;
+}
+
+export interface IncidentNote {
+  id: string;
+  message: string;
+  correlationId: string;
+  author: string;
+  at: string;
+}
+
+export interface IncidentCoordination {
+  guidedActions: IncidentGuidedActions;
+  handoff: IncidentHandoff;
+  notes: IncidentNote[];
+}
+
 export interface OutboxItem {
   id: string;
   eventType: string;

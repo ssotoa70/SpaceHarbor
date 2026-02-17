@@ -9,6 +9,7 @@ import { registerAuditRoute } from "./routes/audit.js";
 import { registerDlqRoute } from "./routes/dlq.js";
 import { registerEventsRoute } from "./routes/events.js";
 import { registerHealthRoute } from "./routes/health.js";
+import { registerIncidentRoute } from "./routes/incident.js";
 import { registerIngestRoute } from "./routes/ingest.js";
 import { registerJobsRoute } from "./routes/jobs.js";
 import { registerMetricsRoute } from "./routes/metrics.js";
@@ -74,6 +75,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerHealthRoute(app);
     void registerAssetsRoute(app, persistence, prefixes);
     void registerAuditRoute(app, persistence, prefixes);
+    void registerIncidentRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);
     void registerEventsRoute(app, persistence, prefixes);
     void registerJobsRoute(app, persistence, prefixes);

@@ -58,6 +58,24 @@
 | Critical threshold breach | Service owner | Incident commander | Director on-call | 15 minutes |
 | Security or data integrity risk | Incident commander | Security lead | Executive on-call | Immediate |
 
+## Shared Operator Coordination and Handoff
+
+1. Read shared state with `GET /api/v1/incident/coordination` before taking ownership changes.
+2. Update guided actions via `PUT /api/v1/incident/coordination/actions` whenever acknowledgement, owner, escalation status, or next update ETA changes.
+3. Add timeline updates via `POST /api/v1/incident/coordination/notes` for each decision, mitigation, and escalation handoff checkpoint.
+4. Use `PUT /api/v1/incident/coordination/handoff` to transition handoff state:
+   - `none`: no active handoff.
+   - `handoff_requested`: outgoing owner requests transition and records summary.
+   - `handoff_accepted`: incoming owner accepts and becomes active responder.
+5. During critical threshold incidents, keep escalation targets aligned with the matrix above and reflect any owner/escalation changes in guided actions immediately.
+
+## Correlation ID Discipline for Incident Timeline Notes
+
+- Reuse the workload `x-correlation-id` when posting incident notes so runbook, audit feed, and API traces remain linkable.
+- If a note references a known fallback or workflow event, set `correlationId` to that event correlation (for example `corr-vast-fallback-123`).
+- Keep note text action-oriented and time-bound (what changed, who owns next action, and next ETA).
+- Validate timeline continuity by checking `GET /api/v1/incident/coordination` and `GET /api/v1/audit` for matching correlation markers.
+
 ## Canary Promotion and Rollback Gates
 
 1. Promote canary only when warning/critical thresholds are clear for 30 minutes and no new `vast fallback` entries appear in audit feed.
