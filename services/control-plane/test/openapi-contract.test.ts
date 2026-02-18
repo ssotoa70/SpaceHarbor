@@ -17,6 +17,7 @@ test("GET /openapi.json returns OpenAPI document with critical workflow paths", 
   assert.equal(body.openapi.startsWith("3."), true);
 
   const requiredPaths = [
+    "/api/v1/assets",
     "/api/v1/assets/ingest",
     "/api/v1/events",
     "/api/v1/audit",
@@ -56,6 +57,34 @@ test("OpenAPI includes explicit /api/v1/audit schema metadata", async () => {
   assert.ok(eventSchema, "missing audit event schema");
   assert.deepEqual(eventSchema.required, ["id", "message", "at", "signal"]);
   assert.deepEqual(eventSchema.properties?.signal?.anyOf?.[0]?.required, ["type", "code", "severity"]);
+
+  await app.close();
+});
+
+test("OpenAPI includes explicit /api/v1/assets schema metadata with production metadata", async () => {
+  const app = buildApp();
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/openapi.json"
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+
+  const operation = body.paths?.["/api/v1/assets"]?.get;
+  assert.ok(operation, "missing GET /api/v1/assets operation");
+  assert.equal(operation.operationId, "v1ListAssets");
+  assert.equal(operation.tags.includes("assets"), true);
+
+  const itemSchema = operation.responses?.["200"]?.content?.["application/json"]?.schema?.properties?.assets?.items;
+  assert.ok(itemSchema, "missing assets item schema");
+  assert.deepEqual(itemSchema.required, ["id", "jobId", "title", "sourceUri", "status", "productionMetadata"]);
+
+  const productionMetadataSchema = itemSchema.properties?.productionMetadata;
+  assert.ok(productionMetadataSchema, "missing productionMetadata schema");
+  assert.deepEqual(productionMetadataSchema.required, ["show", "episode", "sequence", "shot", "version", "vendor", "priority", "dueDate", "owner"]);
+  assert.deepEqual(productionMetadataSchema.properties?.priority?.anyOf?.[0]?.enum, ["low", "normal", "high", "urgent"]);
 
   await app.close();
 });

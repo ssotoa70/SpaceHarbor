@@ -58,6 +58,8 @@
 ## Queue and Jobs
 
 - `GET /api/v1/assets` returns queue rows with current status.
+- Additive contract (Slice 1): each queue row now includes `productionMetadata` on `GET /api/v1/assets`.
+- `productionMetadata` uses stable keys with null-first defaults until metadata write paths are introduced.
 - `GET /api/v1/jobs/pending` returns pending jobs for worker polling.
 - `GET /api/v1/jobs/:id` returns full workflow job state.
 - `POST /api/v1/queue/claim` claims a pending job and sets processing lease.
@@ -81,6 +83,33 @@
 - Slice 4 note: asset/job read models add additive coordinator handoff metadata:
   - `handoffChecklist` (`releaseNotesReady`, `verificationComplete`, `commsDraftReady`, `ownerAssigned`)
   - `handoff` (`status`, `owner`, `lastUpdatedAt`)
+
+```json
+{
+  "assets": [
+    {
+      "id": "uuid",
+      "jobId": "uuid",
+      "title": "Queue Asset",
+      "sourceUri": "s3://bucket/queue-asset.mov",
+      "status": "pending",
+      "productionMetadata": {
+        "show": null,
+        "episode": null,
+        "sequence": null,
+        "shot": null,
+        "version": null,
+        "vendor": null,
+        "priority": null,
+        "dueDate": null,
+        "owner": null
+      }
+    }
+  ]
+}
+```
+
+- Scope note: metadata write/update APIs are intentionally deferred in this slice; this change is read-model exposure only.
 
 ## Outbox
 

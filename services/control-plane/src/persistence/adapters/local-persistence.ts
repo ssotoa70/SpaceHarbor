@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   AnnotationHookMetadata,
   Asset,
+  ProductionMetadata,
   AuditSignal,
   AssetQueueRow,
   AuditEvent,
@@ -78,10 +79,41 @@ const DEFAULT_INCIDENT_HANDOFF: IncidentHandoff = {
   updatedAt: null
 };
 
+function createDefaultProductionMetadata(): ProductionMetadata {
+  return {
+    show: null,
+    episode: null,
+    sequence: null,
+    shot: null,
+    version: null,
+    vendor: null,
+    priority: null,
+    dueDate: null,
+    owner: null
+  };
+}
+
+function coalesceProductionMetadata(
+  metadata: Partial<ProductionMetadata> | null | undefined
+): ProductionMetadata {
+  return {
+    show: metadata?.show ?? null,
+    episode: metadata?.episode ?? null,
+    sequence: metadata?.sequence ?? null,
+    shot: metadata?.shot ?? null,
+    version: metadata?.version ?? null,
+    vendor: metadata?.vendor ?? null,
+    priority: metadata?.priority ?? null,
+    dueDate: metadata?.dueDate ?? null,
+    owner: metadata?.owner ?? null
+  };
+}
+
 export class LocalPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "local" as const;
 
   private readonly assets = new Map<string, Asset>();
+  private readonly assetProductionMetadata = new Map<string, ProductionMetadata>();
   private readonly jobs = new Map<string, WorkflowJob>();
   private readonly queue = new Map<string, QueueEntry>();
   private readonly dlq = new Map<string, DlqItem>();
@@ -109,6 +141,7 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
 
   reset(): void {
     this.assets.clear();
+    this.assetProductionMetadata.clear();
     this.jobs.clear();
     this.queue.clear();
     this.dlq.clear();
@@ -155,6 +188,7 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     };
 
     this.assets.set(asset.id, asset);
+    this.assetProductionMetadata.set(asset.id, createDefaultProductionMetadata());
     this.jobs.set(job.id, job);
     this.queue.set(job.id, {
       jobId: job.id,
@@ -680,18 +714,14 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     }
 
     return [...this.assets.values()].map((asset) => {
-      const latestJob = latestJobByAssetId.get(asset.id);
+      const storedProductionMetadata = this.assetProductionMetadata.get(asset.id);
       return {
         id: asset.id,
-        jobId: latestJob?.id ?? null,
+        jobId: latestJobByAssetId.get(asset.id)?.id ?? null,
         title: asset.title,
         sourceUri: asset.sourceUri,
-        status: latestJob?.status ?? "pending",
-        thumbnail: latestJob?.thumbnail ?? null,
-        proxy: latestJob?.proxy ?? null,
-        annotationHook: latestJob?.annotationHook ?? DEFAULT_ANNOTATION_HOOK,
-        handoffChecklist: latestJob?.handoffChecklist ?? { ...DEFAULT_HANDOFF_CHECKLIST },
-        handoff: latestJob?.handoff ?? { ...DEFAULT_HANDOFF }
+        status: latestJobByAssetId.get(asset.id)?.status ?? "pending",
+        productionMetadata: coalesceProductionMetadata(storedProductionMetadata)
       };
     });
   }
