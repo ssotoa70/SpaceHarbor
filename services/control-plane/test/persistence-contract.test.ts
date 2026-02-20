@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createPersistenceAdapter, resolvePersistenceBackend, resolveVastFallbackToLocal } from "../src/persistence/factory";
+import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence";
 
 test("persistence backend resolution defaults to local", () => {
   assert.equal(resolvePersistenceBackend(undefined), "local");
@@ -69,4 +70,32 @@ test("VAST fallback policy defaults to local fallback unless explicitly false", 
   assert.equal(resolveVastFallbackToLocal("true"), true);
   assert.equal(resolveVastFallbackToLocal("TRUE"), true);
   assert.equal(resolveVastFallbackToLocal("false"), false);
+});
+
+test("local persistence exposes null-safe preview and annotation metadata defaults", () => {
+  const persistence = new LocalPersistenceAdapter();
+  const ingest = persistence.createIngestAsset(
+    {
+      title: "preview-defaults",
+      sourceUri: "s3://bucket/preview-defaults.mov"
+    },
+    { correlationId: "corr-preview-defaults" }
+  );
+
+  assert.equal(ingest.job.thumbnail, null);
+  assert.equal(ingest.job.proxy, null);
+  assert.deepEqual(ingest.job.annotationHook, {
+    enabled: false,
+    provider: null,
+    contextId: null
+  });
+
+  const row = persistence.listAssetQueueRows()[0];
+  assert.equal(row.thumbnail, null);
+  assert.equal(row.proxy, null);
+  assert.deepEqual(row.annotationHook, {
+    enabled: false,
+    provider: null,
+    contextId: null
+  });
 });

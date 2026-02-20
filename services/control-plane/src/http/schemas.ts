@@ -42,6 +42,52 @@ export const assetSchema = {
   }
 } as const;
 
+export const thumbnailSchema = {
+  anyOf: [
+    {
+      type: "object",
+      required: ["uri", "width", "height", "generatedAt"],
+      properties: {
+        uri: { type: "string" },
+        width: { type: "number" },
+        height: { type: "number" },
+        generatedAt: { type: "string", format: "date-time" }
+      }
+    },
+    { type: "null" }
+  ]
+} as const;
+
+export const proxySchema = {
+  anyOf: [
+    {
+      type: "object",
+      required: ["uri", "durationSeconds", "codec", "generatedAt"],
+      properties: {
+        uri: { type: "string" },
+        durationSeconds: { type: "number" },
+        codec: { type: "string" },
+        generatedAt: { type: "string", format: "date-time" }
+      }
+    },
+    { type: "null" }
+  ]
+} as const;
+
+export const annotationHookSchema = {
+  type: "object",
+  required: ["enabled", "provider", "contextId"],
+  properties: {
+    enabled: { type: "boolean" },
+    provider: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    contextId: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    }
+  }
+} as const;
+
 export const workflowJobSchema = {
   type: "object",
   required: [
@@ -55,7 +101,10 @@ export const workflowJobSchema = {
     "maxAttempts",
     "nextAttemptAt",
     "leaseOwner",
-    "leaseExpiresAt"
+    "leaseExpiresAt",
+    "thumbnail",
+    "proxy",
+    "annotationHook"
   ],
   properties: {
     id: { type: "string" },
@@ -76,6 +125,26 @@ export const workflowJobSchema = {
     },
     leaseExpiresAt: {
       anyOf: [{ type: "string", format: "date-time" }, { type: "null" }]
-    }
+    },
+    thumbnail: thumbnailSchema,
+    proxy: proxySchema,
+    annotationHook: annotationHookSchema
+  }
+} as const;
+
+export const assetQueueRowSchema = {
+  type: "object",
+  required: ["id", "jobId", "title", "sourceUri", "status", "thumbnail", "proxy", "annotationHook"],
+  properties: {
+    id: { type: "string" },
+    jobId: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    title: { type: "string" },
+    sourceUri: { type: "string" },
+    status: { type: "string", enum: [...workflowStatusEnum] },
+    thumbnail: thumbnailSchema,
+    proxy: proxySchema,
+    annotationHook: annotationHookSchema
   }
 } as const;

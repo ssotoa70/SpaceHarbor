@@ -112,6 +112,23 @@ test("GET /api/v1/assets returns additive review/QC status values", async () => 
   assert.equal(assets.statusCode, 200);
   assert.ok(Array.isArray(assets.json().assets));
   assert.equal(assets.json().assets[0].status, "qc_pending");
+  assert.equal(assets.json().assets[0].thumbnail, null);
+  assert.equal(assets.json().assets[0].proxy, null);
+  assert.deepEqual(assets.json().assets[0].annotationHook, {
+    enabled: false,
+    provider: null,
+    contextId: null
+  });
+
+  const job = await app.inject({ method: "GET", url: `/api/v1/jobs/${ingestBody.job.id}` });
+  assert.equal(job.statusCode, 200);
+  assert.equal(job.json().thumbnail, null);
+  assert.equal(job.json().proxy, null);
+  assert.deepEqual(job.json().annotationHook, {
+    enabled: false,
+    provider: null,
+    contextId: null
+  });
 
   await app.close();
 });

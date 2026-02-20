@@ -13,6 +13,13 @@ function buildAsset(overrides: Partial<AssetRow> = {}): AssetRow {
     title: "QC Demo Asset",
     sourceUri: "s3://bucket/qc-demo-asset.mov",
     status: "completed",
+    thumbnail: null,
+    proxy: null,
+    annotationHook: {
+      enabled: false,
+      provider: null,
+      contextId: null
+    },
     ...overrides
   };
 }
@@ -273,5 +280,35 @@ describe("App", () => {
 
     const eventCalls = vi.mocked(fetch).mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/events"));
     expect(eventCalls.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("renders preview and annotation hook readiness states", async () => {
+    mockApiResponses({
+      assets: [
+        buildAsset({ title: "No Preview", status: "pending" }),
+        buildAsset({
+          id: "asset-with-preview",
+          title: "With Preview",
+          status: "qc_pending",
+          thumbnail: {
+            uri: "s3://bucket/thumb.jpg",
+            width: 320,
+            height: 180,
+            generatedAt: new Date().toISOString()
+          },
+          annotationHook: {
+            enabled: true,
+            provider: "shotgrid",
+            contextId: "ctx-123"
+          }
+        })
+      ]
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Preview not available")).toBeInTheDocument();
+    expect(screen.getByText("Preview metadata available")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open annotation context" })).toBeInTheDocument();
   });
 });

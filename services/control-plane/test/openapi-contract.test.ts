@@ -195,5 +195,18 @@ test("OpenAPI exposes additive review/QC statuses and event types", async () => 
     assert.ok(eventTypeEnum.includes(eventType), `missing event type enum in OpenAPI: ${eventType}`);
   }
 
+  const assetRowSchemaProperties =
+    body.paths?.["/api/v1/assets"]?.get?.responses?.["200"]?.content?.["application/json"]?.schema?.properties?.assets?.items
+      ?.properties;
+  assert.ok(assetRowSchemaProperties?.thumbnail, "missing thumbnail schema in assets response");
+  assert.ok(assetRowSchemaProperties?.proxy, "missing proxy schema in assets response");
+  assert.ok(assetRowSchemaProperties?.annotationHook, "missing annotationHook schema in assets response");
+
+  const jobSchemaProperties =
+    body.paths?.["/api/v1/jobs/{id}"]?.get?.responses?.["200"]?.content?.["application/json"]?.schema?.properties;
+  assert.ok(jobSchemaProperties?.thumbnail, "missing thumbnail schema in jobs response");
+  assert.ok(jobSchemaProperties?.proxy, "missing proxy schema in jobs response");
+  assert.ok(jobSchemaProperties?.annotationHook, "missing annotationHook schema in jobs response");
+
   await app.close();
 });

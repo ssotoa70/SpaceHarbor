@@ -16,6 +16,26 @@ export interface Asset {
   createdAt: string;
 }
 
+export interface AssetThumbnailPreview {
+  uri: string;
+  width: number;
+  height: number;
+  generatedAt: string;
+}
+
+export interface AssetProxyPreview {
+  uri: string;
+  durationSeconds: number;
+  codec: string;
+  generatedAt: string;
+}
+
+export interface AnnotationHookMetadata {
+  enabled: boolean;
+  provider: string | null;
+  contextId: string | null;
+}
+
 export interface WorkflowJob {
   id: string;
   assetId: string;
@@ -28,6 +48,9 @@ export interface WorkflowJob {
   nextAttemptAt: string | null;
   leaseOwner: string | null;
   leaseExpiresAt: string | null;
+  thumbnail: AssetThumbnailPreview | null;
+  proxy: AssetProxyPreview | null;
+  annotationHook: AnnotationHookMetadata;
 }
 
 export interface IngestResult {
@@ -41,6 +64,9 @@ export interface AssetQueueRow {
   title: string;
   sourceUri: string;
   status: WorkflowStatus;
+  thumbnail: AssetThumbnailPreview | null;
+  proxy: AssetProxyPreview | null;
+  annotationHook: AnnotationHookMetadata;
 }
 
 export interface AuditEvent {

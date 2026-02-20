@@ -20,6 +20,23 @@ export interface AssetRow {
   title: string;
   sourceUri: string;
   status: string;
+  thumbnail: {
+    uri: string;
+    width: number;
+    height: number;
+    generatedAt: string;
+  } | null;
+  proxy: {
+    uri: string;
+    durationSeconds: number;
+    codec: string;
+    generatedAt: string;
+  } | null;
+  annotationHook: {
+    enabled: boolean;
+    provider: string | null;
+    contextId: string | null;
+  };
 }
 
 export interface AuditRow {

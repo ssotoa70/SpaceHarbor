@@ -1,4 +1,5 @@
 import type {
+  AnnotationHookMetadata,
   AssetQueueRow,
   AuditEvent,
   DlqItem,
@@ -13,6 +14,7 @@ export type PersistenceBackend = "local" | "vast";
 export interface IngestInput {
   title: string;
   sourceUri: string;
+  annotationHook?: AnnotationHookMetadata | null;
 }
 
 export interface WriteContext {

@@ -151,6 +151,10 @@ export function App() {
     await refresh();
   }
 
+  function onOpenAnnotationContext(_asset: AssetRow): void {
+    // Slice 2 provides metadata hook visibility only.
+  }
+
   return (
     <main className="layout">
       <header className="hero">
@@ -262,10 +266,16 @@ export function App() {
                 <tr key={asset.id}>
                   <td>{asset.title}</td>
                   <td>{asset.sourceUri}</td>
-                  <td>
-                    <span className={`status status-${asset.status}`}>{asset.status}</span>
-                  </td>
-                  <td>
+                    <td>
+                      <span className={`status status-${asset.status}`}>{asset.status}</span>
+                      <p>{asset.thumbnail || asset.proxy ? "Preview metadata available" : "Preview not available"}</p>
+                    </td>
+                    <td>
+                    {asset.annotationHook.enabled ? (
+                      <button type="button" onClick={() => onOpenAnnotationContext(asset)}>
+                        Open annotation context
+                      </button>
+                    ) : null}
                     {asset.status === "failed" && asset.jobId ? (
                       <button type="button" onClick={() => void onReplay(asset.jobId)}>
                         Replay
@@ -296,7 +306,7 @@ export function App() {
                         Mark needs replay
                       </button>
                     ) : null}
-                    {!asset.jobId || (asset.status !== "failed" && asset.status !== "completed" && asset.status !== "qc_pending" && asset.status !== "qc_in_review" && asset.status !== "qc_rejected") ? (
+                    {!asset.annotationHook.enabled && (!asset.jobId || (asset.status !== "failed" && asset.status !== "completed" && asset.status !== "qc_pending" && asset.status !== "qc_in_review" && asset.status !== "qc_rejected")) ? (
                       <span>-</span>
                     ) : null}
                   </td>

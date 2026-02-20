@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AnnotationHookMetadata,
   Asset,
   AssetQueueRow,
   AuditEvent,
@@ -22,6 +23,12 @@ interface QueueEntry {
 }
 
 const DEFAULT_MAX_ATTEMPTS = 3;
+
+const DEFAULT_ANNOTATION_HOOK: AnnotationHookMetadata = {
+  enabled: false,
+  provider: null,
+  contextId: null
+};
 
 export class LocalPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "local" as const;
@@ -64,7 +71,10 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       maxAttempts: DEFAULT_MAX_ATTEMPTS,
       nextAttemptAt: now.toISOString(),
       leaseOwner: null,
-      leaseExpiresAt: null
+      leaseExpiresAt: null,
+      thumbnail: null,
+      proxy: null,
+      annotationHook: input.annotationHook ?? DEFAULT_ANNOTATION_HOOK
     };
 
     this.assets.set(asset.id, asset);
@@ -555,13 +565,19 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       latestJobByAssetId.set(job.assetId, job);
     }
 
-    return [...this.assets.values()].map((asset) => ({
-      id: asset.id,
-      jobId: latestJobByAssetId.get(asset.id)?.id ?? null,
-      title: asset.title,
-      sourceUri: asset.sourceUri,
-      status: latestJobByAssetId.get(asset.id)?.status ?? "pending"
-    }));
+    return [...this.assets.values()].map((asset) => {
+      const latestJob = latestJobByAssetId.get(asset.id);
+      return {
+        id: asset.id,
+        jobId: latestJob?.id ?? null,
+        title: asset.title,
+        sourceUri: asset.sourceUri,
+        status: latestJob?.status ?? "pending",
+        thumbnail: latestJob?.thumbnail ?? null,
+        proxy: latestJob?.proxy ?? null,
+        annotationHook: latestJob?.annotationHook ?? DEFAULT_ANNOTATION_HOOK
+      };
+    });
   }
 
   getAuditEvents(): AuditEvent[] {

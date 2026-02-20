@@ -18,9 +18,20 @@ test("GET /assets returns queue rows with status", async () => {
   const response = await app.inject({ method: "GET", url: "/assets" });
 
   assert.equal(response.statusCode, 200);
-  const body = response.json() as { assets: Array<{ title: string; status: string }> };
+  const body = response.json() as {
+    assets: Array<{
+      title: string;
+      status: string;
+      thumbnail: null;
+      proxy: null;
+      annotationHook: { enabled: boolean; provider: null; contextId: null };
+    }>;
+  };
   assert.equal(body.assets[0].title, "Queue Asset");
   assert.equal(body.assets[0].status, "pending");
+  assert.equal(body.assets[0].thumbnail, null);
+  assert.equal(body.assets[0].proxy, null);
+  assert.deepEqual(body.assets[0].annotationHook, { enabled: false, provider: null, contextId: null });
 
   await app.close();
 });
