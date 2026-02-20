@@ -1,4 +1,13 @@
-export type WorkflowStatus = "pending" | "processing" | "completed" | "failed" | "needs_replay";
+export type WorkflowStatus =
+  | "pending"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "needs_replay"
+  | "qc_pending"
+  | "qc_in_review"
+  | "qc_approved"
+  | "qc_rejected";
 
 export interface Asset {
   id: string;

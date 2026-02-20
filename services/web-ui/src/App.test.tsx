@@ -2,8 +2,20 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import type { AssetRow } from "./api";
 import { clearGuidedActions } from "./operator/actions";
 import type { MetricsSnapshot } from "./operator/types";
+
+function buildAsset(overrides: Partial<AssetRow> = {}): AssetRow {
+  return {
+    id: "asset-1",
+    jobId: "job-1",
+    title: "QC Demo Asset",
+    sourceUri: "s3://bucket/qc-demo-asset.mov",
+    status: "completed",
+    ...overrides
+  };
+}
 
 function buildMetricsSnapshot(fallbackEvents: number): MetricsSnapshot {
   return {
@@ -45,11 +57,13 @@ function jsonResponse(body: unknown): Response {
 }
 
 function mockApiResponses(options?: {
+  assets?: AssetRow[];
   metricsSnapshots?: MetricsSnapshot[];
   auditMessages?: string[];
   failAfterRequestCount?: number;
 }): void {
   const metricsSnapshots = options?.metricsSnapshots ?? [buildMetricsSnapshot(0)];
+  const assets = options?.assets ?? [];
   const auditRows = (options?.auditMessages ?? []).map((message, index) => ({
     id: `audit-${index}`,
     message,
@@ -71,7 +85,7 @@ function mockApiResponses(options?: {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
       if (url.endsWith("/api/v1/assets")) {
-        return jsonResponse({ assets: [] });
+        return jsonResponse({ assets });
       }
 
       if (url.endsWith("/api/v1/audit")) {
@@ -89,6 +103,10 @@ function mockApiResponses(options?: {
       }
 
       if (/\/api\/v1\/jobs\/.+\/replay$/.test(url)) {
+        return new Response(null, { status: 202 });
+      }
+
+      if (url.endsWith("/api/v1/events")) {
         return new Response(null, { status: 202 });
       }
 
@@ -233,5 +251,27 @@ describe("App", () => {
     const acknowledgeToggle = screen.getByRole("checkbox", { name: /acknowledge incident/i });
     acknowledgeToggle.focus();
     expect(acknowledgeToggle).toHaveFocus();
+  });
+
+  it("renders QC gate actions and submits canonical workflow events", async () => {
+    mockApiResponses({
+      assets: [
+        buildAsset({ id: "asset-completed", jobId: "job-completed", status: "completed", title: "Completed Clip" }),
+        buildAsset({ id: "asset-qc-pending", jobId: "job-qc-pending", status: "qc_pending", title: "QC Pending Clip" }),
+        buildAsset({ id: "asset-qc-review", jobId: "job-qc-review", status: "qc_in_review", title: "QC Review Clip" }),
+        buildAsset({ id: "asset-qc-rejected", jobId: "job-qc-rejected", status: "qc_rejected", title: "QC Rejected Clip" })
+      ]
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Send to QC" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark needs replay" }));
+
+    const eventCalls = vi.mocked(fetch).mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/events"));
+    expect(eventCalls.length).toBeGreaterThanOrEqual(5);
   });
 });

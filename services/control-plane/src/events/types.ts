@@ -2,7 +2,11 @@ export type AssetEventType =
   | "asset.processing.started"
   | "asset.processing.completed"
   | "asset.processing.failed"
-  | "asset.processing.replay_requested";
+  | "asset.processing.replay_requested"
+  | "asset.review.qc_pending"
+  | "asset.review.in_review"
+  | "asset.review.approved"
+  | "asset.review.rejected";
 
 export interface LegacyAssetEventEnvelope {
   event_id: string;
@@ -42,7 +46,11 @@ const EVENT_TYPES: AssetEventType[] = [
   "asset.processing.started",
   "asset.processing.completed",
   "asset.processing.failed",
-  "asset.processing.replay_requested"
+  "asset.processing.replay_requested",
+  "asset.review.qc_pending",
+  "asset.review.in_review",
+  "asset.review.approved",
+  "asset.review.rejected"
 ];
 
 function isAssetEventType(input: string): input is AssetEventType {

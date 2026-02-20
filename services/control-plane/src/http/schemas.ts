@@ -1,4 +1,14 @@
-export const workflowStatusEnum = ["pending", "processing", "completed", "failed", "needs_replay"] as const;
+export const workflowStatusEnum = [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "needs_replay",
+  "qc_pending",
+  "qc_in_review",
+  "qc_approved",
+  "qc_rejected"
+] as const;
 
 export const errorEnvelopeSchema = {
   type: "object",

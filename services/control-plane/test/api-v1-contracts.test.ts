@@ -57,3 +57,61 @@ test("POST /api/v1/assets/ingest succeeds with stable v1 response shape", async 
 
   await app.close();
 });
+
+test("GET /api/v1/assets returns additive review/QC status values", async () => {
+  const app = buildApp();
+
+  const ingest = await app.inject({
+    method: "POST",
+    url: "/api/v1/assets/ingest",
+    payload: {
+      title: "v1 qc status demo",
+      sourceUri: "s3://bucket/v1-qc-status-demo.mov"
+    }
+  });
+
+  const ingestBody = ingest.json();
+
+  const completed = await app.inject({
+    method: "POST",
+    url: "/api/v1/events",
+    payload: {
+      eventId: "evt-api-v1-qc-completed-1",
+      eventType: "asset.processing.completed",
+      eventVersion: "1.0",
+      occurredAt: new Date().toISOString(),
+      correlationId: "corr-api-v1-qc-completed-1",
+      producer: "media-worker",
+      data: {
+        assetId: ingestBody.asset.id,
+        jobId: ingestBody.job.id
+      }
+    }
+  });
+  assert.equal(completed.statusCode, 202);
+
+  const qcPending = await app.inject({
+    method: "POST",
+    url: "/api/v1/events",
+    payload: {
+      eventId: "evt-api-v1-qc-pending-1",
+      eventType: "asset.review.qc_pending",
+      eventVersion: "1.0",
+      occurredAt: new Date().toISOString(),
+      correlationId: "corr-api-v1-qc-pending-1",
+      producer: "post-qc",
+      data: {
+        assetId: ingestBody.asset.id,
+        jobId: ingestBody.job.id
+      }
+    }
+  });
+  assert.equal(qcPending.statusCode, 202);
+
+  const assets = await app.inject({ method: "GET", url: "/api/v1/assets" });
+  assert.equal(assets.statusCode, 200);
+  assert.ok(Array.isArray(assets.json().assets));
+  assert.equal(assets.json().assets[0].status, "qc_pending");
+
+  await app.close();
+});

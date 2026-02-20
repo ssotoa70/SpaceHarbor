@@ -13,6 +13,14 @@ function mapEventToStatus(eventType: NormalizedAssetEvent["eventType"]): Workflo
       return "failed";
     case "asset.processing.replay_requested":
       return "needs_replay";
+    case "asset.review.qc_pending":
+      return "qc_pending";
+    case "asset.review.in_review":
+      return "qc_in_review";
+    case "asset.review.approved":
+      return "qc_approved";
+    case "asset.review.rejected":
+      return "qc_rejected";
     default:
       return "pending";
   }

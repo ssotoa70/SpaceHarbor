@@ -1,6 +1,15 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { fetchAssets, fetchAudit, fetchMetrics, ingestAsset, replayJob, type AssetRow, type AuditRow } from "./api";
+import {
+  fetchAssets,
+  fetchAudit,
+  fetchMetrics,
+  ingestAsset,
+  replayJob,
+  submitWorkflowEvent,
+  type AssetRow,
+  type AuditRow
+} from "./api";
 import {
   clearGuidedActions as clearGuidedActionsStorage,
   DEFAULT_GUIDED_ACTIONS,
@@ -128,6 +137,20 @@ export function App() {
     await refresh();
   }
 
+  async function onGateTransition(asset: AssetRow, eventType: Parameters<typeof submitWorkflowEvent>[0]["eventType"]): Promise<void> {
+    if (!asset.jobId) {
+      return;
+    }
+
+    await submitWorkflowEvent({
+      assetId: asset.id,
+      jobId: asset.jobId,
+      eventType,
+      producer: "web-ui"
+    });
+    await refresh();
+  }
+
   return (
     <main className="layout">
       <header className="hero">
@@ -247,9 +270,35 @@ export function App() {
                       <button type="button" onClick={() => void onReplay(asset.jobId)}>
                         Replay
                       </button>
-                    ) : (
+                    ) : null}
+                    {asset.status === "completed" && asset.jobId ? (
+                      <button type="button" onClick={() => void onGateTransition(asset, "asset.review.qc_pending")}>
+                        Send to QC
+                      </button>
+                    ) : null}
+                    {asset.status === "qc_pending" && asset.jobId ? (
+                      <button type="button" onClick={() => void onGateTransition(asset, "asset.review.in_review")}>
+                        Start review
+                      </button>
+                    ) : null}
+                    {asset.status === "qc_in_review" && asset.jobId ? (
+                      <>
+                        <button type="button" onClick={() => void onGateTransition(asset, "asset.review.approved")}>
+                          Approve
+                        </button>
+                        <button type="button" onClick={() => void onGateTransition(asset, "asset.review.rejected")}>
+                          Reject
+                        </button>
+                      </>
+                    ) : null}
+                    {asset.status === "qc_rejected" && asset.jobId ? (
+                      <button type="button" onClick={() => void onGateTransition(asset, "asset.processing.replay_requested")}>
+                        Mark needs replay
+                      </button>
+                    ) : null}
+                    {!asset.jobId || (asset.status !== "failed" && asset.status !== "completed" && asset.status !== "qc_pending" && asset.status !== "qc_in_review" && asset.status !== "qc_rejected") ? (
                       <span>-</span>
-                    )}
+                    ) : null}
                   </td>
                 </tr>
               ))

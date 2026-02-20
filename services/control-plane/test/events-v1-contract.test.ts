@@ -132,3 +132,63 @@ test("POST /api/v1/events rejects out-of-order transition with deterministic err
 
   await app.close();
 });
+
+test("POST /api/v1/events accepts additive review/QC canonical event types", async () => {
+  const app = buildApp();
+
+  const ingest = await app.inject({
+    method: "POST",
+    url: "/api/v1/assets/ingest",
+    payload: {
+      title: "QC Canonical Event Demo",
+      sourceUri: "s3://bucket/qc-canonical-event-demo.mov"
+    }
+  });
+
+  const ingestBody = ingest.json();
+
+  const completed = await app.inject({
+    method: "POST",
+    url: "/api/v1/events",
+    payload: {
+      eventId: "evt-v1-qc-completed-1",
+      eventType: "asset.processing.completed",
+      eventVersion: "1.0",
+      occurredAt: new Date().toISOString(),
+      correlationId: "corr-v1-qc-completed-1",
+      producer: "media-worker",
+      data: {
+        assetId: ingestBody.asset.id,
+        jobId: ingestBody.job.id
+      }
+    }
+  });
+  assert.equal(completed.statusCode, 202);
+
+  const qcPending = await app.inject({
+    method: "POST",
+    url: "/api/v1/events",
+    payload: {
+      eventId: "evt-v1-qc-pending-1",
+      eventType: "asset.review.qc_pending",
+      eventVersion: "1.0",
+      occurredAt: new Date().toISOString(),
+      correlationId: "corr-v1-qc-pending-1",
+      producer: "post-qc",
+      data: {
+        assetId: ingestBody.asset.id,
+        jobId: ingestBody.job.id
+      }
+    }
+  });
+  assert.equal(qcPending.statusCode, 202);
+
+  const job = await app.inject({
+    method: "GET",
+    url: `/api/v1/jobs/${ingestBody.job.id}`
+  });
+  assert.equal(job.statusCode, 200);
+  assert.equal(job.json().status, "qc_pending");
+
+  await app.close();
+});

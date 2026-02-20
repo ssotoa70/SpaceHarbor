@@ -65,6 +65,8 @@
 - `POST /api/v1/queue/reap-stale` requeues processing jobs with expired leases.
 - `POST /api/v1/jobs/:id/replay` moves failed/DLQ job back to pending queue.
 - `GET /api/v1/dlq` lists dead-lettered jobs.
+- Review/QC Slice 1 note: workflow status is additive with `qc_pending`, `qc_in_review`, `qc_approved`, and `qc_rejected`.
+- Review/QC Slice 1 note: canonical event types are additive with `asset.review.qc_pending`, `asset.review.in_review`, `asset.review.approved`, and `asset.review.rejected`.
 
 ## Outbox
 
