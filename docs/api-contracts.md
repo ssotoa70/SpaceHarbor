@@ -67,6 +67,15 @@
 - `GET /api/v1/dlq` lists dead-lettered jobs.
 - Review/QC Slice 1 note: workflow status is additive with `qc_pending`, `qc_in_review`, `qc_approved`, and `qc_rejected`.
 - Review/QC Slice 1 note: canonical event types are additive with `asset.review.qc_pending`, `asset.review.in_review`, `asset.review.approved`, and `asset.review.rejected`.
+- SERGIO-17 note: canonical event types are additive with review annotation/approval contracts:
+  - `asset.review.annotation_created`
+  - `asset.review.annotation_resolved`
+  - `asset.review.task_linked`
+  - `asset.review.submission_created`
+  - `asset.review.decision_recorded`
+  - `asset.review.decision_overridden`
+- SERGIO-17 traceability note: review-to-task correlation fields are contract-level and additive:
+  - `reviewId`, `submissionId`, `versionId`, `annotationId`, `taskId`, `taskSystem`
 - Slice 2 note: asset/job read models add optional preview metadata fields `thumbnail` and `proxy` (nullable).
 - Slice 2 note: asset/job read models add `annotationHook` integration metadata (`enabled`, `provider`, `contextId`) with default disabled/null values.
 - Slice 4 note: asset/job read models add additive coordinator handoff metadata:

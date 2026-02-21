@@ -1,4 +1,4 @@
-export type AssetEventType =
+export type LegacyAssetEventType =
   | "asset.processing.started"
   | "asset.processing.completed"
   | "asset.processing.failed"
@@ -8,9 +8,18 @@ export type AssetEventType =
   | "asset.review.approved"
   | "asset.review.rejected";
 
+export type AssetEventType =
+  | LegacyAssetEventType
+  | "asset.review.annotation_created"
+  | "asset.review.annotation_resolved"
+  | "asset.review.task_linked"
+  | "asset.review.submission_created"
+  | "asset.review.decision_recorded"
+  | "asset.review.decision_overridden";
+
 export interface LegacyAssetEventEnvelope {
   event_id: string;
-  event_type: AssetEventType;
+  event_type: LegacyAssetEventType;
   asset_id: string;
   occurred_at: string;
   producer: string;
@@ -32,6 +41,29 @@ export interface CanonicalAssetEventEnvelope {
     assetId: string;
     jobId: string;
     error?: string;
+    projectId?: string;
+    shotId?: string;
+    reviewId?: string;
+    submissionId?: string;
+    versionId?: string;
+    actorId?: string;
+    actorRole?: "artist" | "coordinator" | "supervisor" | "producer";
+    annotationId?: string;
+    content?: string;
+    anchor?: {
+      frame?: number;
+      timecode?: string;
+      [key: string]: unknown;
+    };
+    resolvedBy?: string;
+    resolutionNote?: string;
+    taskId?: string;
+    taskSystem?: string;
+    submissionStatus?: string;
+    decision?: "approved" | "changes_requested" | "rejected";
+    decisionReasonCode?: string;
+    priorDecisionEventId?: string;
+    overrideReasonCode?: string;
   };
 }
 
@@ -42,7 +74,7 @@ export interface NormalizedAssetEvent {
   error?: string;
 }
 
-const EVENT_TYPES: AssetEventType[] = [
+const LEGACY_EVENT_TYPES: LegacyAssetEventType[] = [
   "asset.processing.started",
   "asset.processing.completed",
   "asset.processing.failed",
@@ -53,8 +85,90 @@ const EVENT_TYPES: AssetEventType[] = [
   "asset.review.rejected"
 ];
 
+const EVENT_TYPES: AssetEventType[] = [
+  ...LEGACY_EVENT_TYPES,
+  "asset.review.annotation_created",
+  "asset.review.annotation_resolved",
+  "asset.review.task_linked",
+  "asset.review.submission_created",
+  "asset.review.decision_recorded",
+  "asset.review.decision_overridden"
+];
+
+function isLegacyAssetEventType(input: string): input is LegacyAssetEventType {
+  return LEGACY_EVENT_TYPES.includes(input as LegacyAssetEventType);
+}
+
 function isAssetEventType(input: string): input is AssetEventType {
   return EVENT_TYPES.includes(input as AssetEventType);
+}
+
+function hasReviewCommonFields(data: CanonicalAssetEventEnvelope["data"]): boolean {
+  return (
+    typeof data.projectId === "string" &&
+    typeof data.shotId === "string" &&
+    typeof data.reviewId === "string" &&
+    typeof data.submissionId === "string" &&
+    typeof data.versionId === "string" &&
+    typeof data.actorId === "string" &&
+    (data.actorRole === "artist" ||
+      data.actorRole === "coordinator" ||
+      data.actorRole === "supervisor" ||
+      data.actorRole === "producer")
+  );
+}
+
+function hasReviewContractData(eventType: AssetEventType, data: CanonicalAssetEventEnvelope["data"]): boolean {
+  switch (eventType) {
+    case "asset.review.annotation_created":
+      if (!hasReviewCommonFields(data)) {
+        return false;
+      }
+      return (
+        typeof data.annotationId === "string" &&
+        typeof data.content === "string" &&
+        !!data.anchor &&
+        typeof data.anchor === "object"
+      );
+    case "asset.review.annotation_resolved":
+      if (!hasReviewCommonFields(data)) {
+        return false;
+      }
+      return typeof data.annotationId === "string" && typeof data.resolvedBy === "string";
+    case "asset.review.task_linked":
+      if (!hasReviewCommonFields(data)) {
+        return false;
+      }
+      return (
+        typeof data.annotationId === "string" &&
+        typeof data.taskId === "string" &&
+        typeof data.taskSystem === "string"
+      );
+    case "asset.review.submission_created":
+      if (!hasReviewCommonFields(data)) {
+        return false;
+      }
+      return typeof data.submissionStatus === "string";
+    case "asset.review.decision_recorded":
+      if (!hasReviewCommonFields(data)) {
+        return false;
+      }
+      return (
+        (data.decision === "approved" || data.decision === "changes_requested" || data.decision === "rejected") &&
+        typeof data.decisionReasonCode === "string"
+      );
+    case "asset.review.decision_overridden":
+      if (!hasReviewCommonFields(data)) {
+        return false;
+      }
+      return (
+        typeof data.priorDecisionEventId === "string" &&
+        (data.decision === "approved" || data.decision === "changes_requested" || data.decision === "rejected") &&
+        typeof data.overrideReasonCode === "string"
+      );
+    default:
+      return true;
+  }
 }
 
 export function isLegacyAssetEventEnvelope(input: unknown): input is LegacyAssetEventEnvelope {
@@ -67,7 +181,7 @@ export function isLegacyAssetEventEnvelope(input: unknown): input is LegacyAsset
   return (
     typeof value.event_id === "string" &&
     typeof value.event_type === "string" &&
-    isAssetEventType(value.event_type) &&
+    isLegacyAssetEventType(value.event_type) &&
     typeof value.asset_id === "string" &&
     typeof value.occurred_at === "string" &&
     typeof value.producer === "string" &&
@@ -85,7 +199,7 @@ export function isCanonicalAssetEventEnvelope(input: unknown): input is Canonica
 
   const value = input as Partial<CanonicalAssetEventEnvelope>;
 
-  return (
+  const hasBaseFields =
     typeof value.eventId === "string" &&
     typeof value.eventType === "string" &&
     isAssetEventType(value.eventType) &&
@@ -96,8 +210,13 @@ export function isCanonicalAssetEventEnvelope(input: unknown): input is Canonica
     !!value.data &&
     typeof value.data === "object" &&
     typeof (value.data as { assetId?: string }).assetId === "string" &&
-    typeof (value.data as { jobId?: string }).jobId === "string"
-  );
+    typeof (value.data as { jobId?: string }).jobId === "string";
+
+  if (!hasBaseFields) {
+    return false;
+  }
+
+  return hasReviewContractData(value.eventType, value.data);
 }
 
 export function normalizeLegacyEvent(event: LegacyAssetEventEnvelope): NormalizedAssetEvent {

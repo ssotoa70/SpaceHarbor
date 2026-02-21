@@ -3,6 +3,17 @@ import type { PersistenceAdapter, WriteContext } from "../persistence/types.js";
 import { canTransitionWorkflowStatus } from "../workflow/transitions.js";
 import type { NormalizedAssetEvent } from "./types.js";
 
+function isReviewContractEvent(eventType: NormalizedAssetEvent["eventType"]): boolean {
+  return (
+    eventType === "asset.review.annotation_created" ||
+    eventType === "asset.review.annotation_resolved" ||
+    eventType === "asset.review.task_linked" ||
+    eventType === "asset.review.submission_created" ||
+    eventType === "asset.review.decision_recorded" ||
+    eventType === "asset.review.decision_overridden"
+  );
+}
+
 function mapEventToStatus(eventType: NormalizedAssetEvent["eventType"]): WorkflowStatus {
   switch (eventType) {
     case "asset.processing.started":
@@ -105,6 +116,25 @@ export function processAssetEvent(
       status: failedResult.status,
       movedToDlq: failedResult.movedToDlq,
       retryScheduled: failedResult.retryScheduled
+    };
+  }
+
+  if (isReviewContractEvent(event.eventType)) {
+    const existing = persistence.getJobById(event.jobId);
+    if (!existing) {
+      return {
+        accepted: false,
+        duplicate: false,
+        reason: "NOT_FOUND",
+        message: `job not found: ${event.jobId}`
+      };
+    }
+
+    persistence.markProcessedEvent(event.eventId);
+    return {
+      accepted: true,
+      duplicate: false,
+      status: existing.status
     };
   }
 
