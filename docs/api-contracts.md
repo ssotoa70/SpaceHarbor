@@ -102,6 +102,7 @@
 ## Audit
 
 - `GET /api/v1/audit` returns recent audit events in reverse chronological order.
+- SERGIO-18 note: automated retention can remove audit entries older than configured retention window (default 90 days) when mode is set to `apply`; default mode is `dry-run`.
 
 ```json
 {

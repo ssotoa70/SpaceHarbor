@@ -109,6 +109,32 @@
 - Use `docs/runbooks/release-day-checklist.md` communication templates for promotion/rollback/post-release updates.
 - Post-release verification is mandatory at T+15m and T+60m before final sign-off.
 
+## Audit Retention Automation (90 Days)
+
+- Retention job defaults to `dry-run` and can be switched to `apply` mode explicitly.
+- Configure with environment variables:
+  - `ASSETHARBOR_AUDIT_RETENTION_ENABLED` (`true`/`false`, default `true`)
+  - `ASSETHARBOR_AUDIT_RETENTION_MODE` (`dry-run`/`apply`, default `dry-run`)
+  - `ASSETHARBOR_AUDIT_RETENTION_DAYS` (default `90`)
+  - `ASSETHARBOR_AUDIT_RETENTION_INTERVAL_SECONDS` (default `3600`)
+  - `ASSETHARBOR_AUDIT_RETENTION_MAX_DELETE_PER_RUN` (optional safety cap)
+- Eligibility rule: audit records where `at < cutoff` are eligible for retention apply.
+- Boundary rule: records at exactly cutoff timestamp are retained.
+
+### Dry-run and Apply Operations
+
+1. Start in `dry-run` mode and run at least one full cycle.
+2. Confirm eligible counts and cutoff behavior match expectations.
+3. Set mode to `apply` only after verification.
+4. Keep `ASSETHARBOR_AUDIT_RETENTION_MAX_DELETE_PER_RUN` set during initial rollout.
+
+### Rollback and Restore Guidance
+
+1. If unexpected deletions are detected, switch mode to `dry-run` immediately (or disable retention).
+2. Restart control-plane to apply updated mode safely.
+3. Restore audit records from latest backup snapshot if required by incident/compliance response.
+4. Capture restoration activity in incident timeline notes and attach correlation IDs.
+
 ## Troubleshooting
 
 - `400` on `/api/v1/events`: verify canonical event envelope fields (`eventId`, `eventType`, `eventVersion`, `occurredAt`, `correlationId`, `producer`, `data.assetId`, `data.jobId`).

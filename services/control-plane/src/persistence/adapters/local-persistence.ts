@@ -21,6 +21,8 @@ import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
 import type { OutboundConfig, OutboundTarget } from "../../integrations/outbound/types.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import type {
+  AuditRetentionApplyResult,
+  AuditRetentionPreview,
   FailureResult,
   IncidentGuidedActionsUpdate,
   IncidentHandoffUpdate,
@@ -696,6 +698,77 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
 
   getAuditEvents(): AuditEvent[] {
     return [...this.auditEvents];
+  }
+
+  previewAuditRetention(cutoffIso: string): AuditRetentionPreview {
+    const cutoff = Date.parse(cutoffIso);
+    if (Number.isNaN(cutoff)) {
+      return {
+        eligibleCount: 0,
+        oldestEligibleAt: null,
+        newestEligibleAt: null
+      };
+    }
+
+    const eligible = this.auditEvents
+      .map((event) => ({ event, atMs: Date.parse(event.at) }))
+      .filter((entry) => !Number.isNaN(entry.atMs) && entry.atMs < cutoff)
+      .sort((a, b) => a.atMs - b.atMs);
+
+    if (eligible.length === 0) {
+      return {
+        eligibleCount: 0,
+        oldestEligibleAt: null,
+        newestEligibleAt: null
+      };
+    }
+
+    return {
+      eligibleCount: eligible.length,
+      oldestEligibleAt: eligible[0].event.at,
+      newestEligibleAt: eligible[eligible.length - 1].event.at
+    };
+  }
+
+  applyAuditRetention(cutoffIso: string, maxDeletePerRun?: number): AuditRetentionApplyResult {
+    const cutoff = Date.parse(cutoffIso);
+    if (Number.isNaN(cutoff)) {
+      return {
+        deletedCount: 0,
+        remainingCount: this.auditEvents.length
+      };
+    }
+
+    const eligible = this.auditEvents
+      .map((event) => ({ event, atMs: Date.parse(event.at) }))
+      .filter((entry) => !Number.isNaN(entry.atMs) && entry.atMs < cutoff)
+      .sort((a, b) => a.atMs - b.atMs);
+
+    if (eligible.length === 0) {
+      return {
+        deletedCount: 0,
+        remainingCount: this.auditEvents.length
+      };
+    }
+
+    const deleteLimit =
+      maxDeletePerRun === undefined ? eligible.length : Math.max(0, Math.min(maxDeletePerRun, eligible.length));
+    if (deleteLimit === 0) {
+      return {
+        deletedCount: 0,
+        remainingCount: this.auditEvents.length
+      };
+    }
+
+    const deleteIds = new Set(eligible.slice(0, deleteLimit).map((entry) => entry.event.id));
+    const retained = this.auditEvents.filter((event) => !deleteIds.has(event.id));
+    this.auditEvents.length = 0;
+    this.auditEvents.push(...retained);
+
+    return {
+      deletedCount: deleteLimit,
+      remainingCount: this.auditEvents.length
+    };
   }
 
   getIncidentCoordination(): IncidentCoordination {

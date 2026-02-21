@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildApp } from "../src/app";
+import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence";
 import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence";
 
 test("GET /assets returns queue rows with status", async () => {
@@ -145,4 +146,79 @@ test("GET /api/v1/audit returns structured fallback signal shape", async () => {
   assert.equal(fallbackEvent.signal?.code, "VAST_FALLBACK");
 
   await app.close();
+});
+
+test("local audit retention preview is non-mutating and uses strict cutoff", () => {
+  const persistence = new LocalPersistenceAdapter();
+
+  persistence.createIngestAsset(
+    {
+      title: "retention-old-1",
+      sourceUri: "s3://bucket/retention-old-1.mov"
+    },
+    { correlationId: "corr-retention-old-1", now: "2025-09-01T00:00:00.000Z" }
+  );
+  persistence.createIngestAsset(
+    {
+      title: "retention-old-2",
+      sourceUri: "s3://bucket/retention-old-2.mov"
+    },
+    { correlationId: "corr-retention-old-2", now: "2025-12-31T23:59:59.000Z" }
+  );
+  persistence.createIngestAsset(
+    {
+      title: "retention-boundary",
+      sourceUri: "s3://bucket/retention-boundary.mov"
+    },
+    { correlationId: "corr-retention-boundary", now: "2026-01-01T00:00:00.000Z" }
+  );
+
+  const before = persistence.getAuditEvents();
+  assert.equal(before.length, 3);
+
+  const preview = persistence.previewAuditRetention("2026-01-01T00:00:00.000Z");
+  assert.equal(preview.eligibleCount, 2);
+  assert.equal(preview.oldestEligibleAt, "2025-09-01T00:00:00.000Z");
+  assert.equal(preview.newestEligibleAt, "2025-12-31T23:59:59.000Z");
+
+  const after = persistence.getAuditEvents();
+  assert.equal(after.length, 3);
+});
+
+test("local audit retention apply respects max-delete cap and idempotency", () => {
+  const persistence = new LocalPersistenceAdapter();
+
+  persistence.createIngestAsset(
+    {
+      title: "retention-old-1",
+      sourceUri: "s3://bucket/retention-old-1.mov"
+    },
+    { correlationId: "corr-retention-old-1", now: "2025-09-01T00:00:00.000Z" }
+  );
+  persistence.createIngestAsset(
+    {
+      title: "retention-old-2",
+      sourceUri: "s3://bucket/retention-old-2.mov"
+    },
+    { correlationId: "corr-retention-old-2", now: "2025-12-31T23:59:59.000Z" }
+  );
+  persistence.createIngestAsset(
+    {
+      title: "retention-new",
+      sourceUri: "s3://bucket/retention-new.mov"
+    },
+    { correlationId: "corr-retention-new", now: "2026-02-01T00:00:00.000Z" }
+  );
+
+  const firstApply = persistence.applyAuditRetention("2026-01-01T00:00:00.000Z", 1);
+  assert.equal(firstApply.deletedCount, 1);
+  assert.equal(firstApply.remainingCount, 2);
+
+  const secondApply = persistence.applyAuditRetention("2026-01-01T00:00:00.000Z");
+  assert.equal(secondApply.deletedCount, 1);
+  assert.equal(secondApply.remainingCount, 1);
+
+  const thirdApply = persistence.applyAuditRetention("2026-01-01T00:00:00.000Z");
+  assert.equal(thirdApply.deletedCount, 0);
+  assert.equal(thirdApply.remainingCount, 1);
 });

@@ -11,7 +11,9 @@ function createBridgedVastAdapter() {
     setJobStatus: 0,
     handleJobFailure: 0,
     hasProcessedEvent: 0,
-    markProcessedEvent: 0
+    markProcessedEvent: 0,
+    previewAuditRetention: 0,
+    applyAuditRetention: 0
   };
 
   const adapter = new VastPersistenceAdapter(
@@ -44,6 +46,14 @@ function createBridgedVastAdapter() {
       markProcessedEvent: (eventId) => {
         calls.markProcessedEvent += 1;
         backing.markProcessedEvent(eventId);
+      },
+      previewAuditRetention: (cutoffIso) => {
+        calls.previewAuditRetention += 1;
+        return backing.previewAuditRetention(cutoffIso);
+      },
+      applyAuditRetention: (cutoffIso, maxDeletePerRun) => {
+        calls.applyAuditRetention += 1;
+        return backing.applyAuditRetention(cutoffIso, maxDeletePerRun);
       }
     }
   );
@@ -128,6 +138,51 @@ test("strict VAST workflow failures return unified 500 envelope", async () => {
   assert.deepEqual(Object.keys(response.json()).sort(), ["code", "details", "message", "requestId"]);
 
   await app.close();
+});
+
+test("VAST adapter delegates audit retention preview/apply through workflow client", () => {
+  const { adapter, calls } = createBridgedVastAdapter();
+
+  const ingest = adapter.createIngestAsset(
+    {
+      title: "vast-retention-delegate",
+      sourceUri: "s3://bucket/vast-retention-delegate.mov"
+    },
+    { correlationId: "corr-vast-retention-delegate", now: "2025-10-01T00:00:00.000Z" }
+  );
+  assert.ok(ingest.job.id);
+
+  const preview = adapter.previewAuditRetention("2026-01-01T00:00:00.000Z");
+  assert.equal(preview.eligibleCount, 1);
+
+  const apply = adapter.applyAuditRetention("2026-01-01T00:00:00.000Z");
+  assert.equal(apply.deletedCount, 1);
+
+  assert.equal(calls.previewAuditRetention, 1);
+  assert.equal(calls.applyAuditRetention, 1);
+});
+
+test("strict VAST retention operations fail fast when workflow client throws", () => {
+  const adapter = new VastPersistenceAdapter(
+    {
+      databaseUrl: "https://db.example",
+      eventBrokerUrl: "https://events.example",
+      dataEngineUrl: "https://engine.example",
+      strict: true,
+      fallbackToLocal: false
+    },
+    async () => new Response(null, { status: 202 }),
+    {
+      previewAuditRetention: () => {
+        throw new Error("retention preview unavailable");
+      }
+    }
+  );
+
+  assert.throws(
+    () => adapter.previewAuditRetention("2026-01-01T00:00:00.000Z"),
+    /vast workflow client failure \(previewAuditRetention\): retention preview unavailable/i
+  );
 });
 
 test("VAST mode /api/v1/events preserves duplicate-event behavior and uses workflow idempotency path", async () => {

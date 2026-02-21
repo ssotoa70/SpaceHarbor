@@ -93,6 +93,17 @@ export interface IncidentHandoffUpdate {
   summary: string;
 }
 
+export interface AuditRetentionPreview {
+  eligibleCount: number;
+  oldestEligibleAt: string | null;
+  newestEligibleAt: string | null;
+}
+
+export interface AuditRetentionApplyResult {
+  deletedCount: number;
+  remainingCount: number;
+}
+
 export interface PersistenceAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
@@ -116,6 +127,8 @@ export interface PersistenceAdapter {
   getWorkflowStats(nowIso?: string): WorkflowStats;
   listAssetQueueRows(): AssetQueueRow[];
   getAuditEvents(): AuditEvent[];
+  previewAuditRetention(cutoffIso: string): AuditRetentionPreview;
+  applyAuditRetention(cutoffIso: string, maxDeletePerRun?: number): AuditRetentionApplyResult;
   getIncidentCoordination(): IncidentCoordination;
   updateIncidentGuidedActions(update: IncidentGuidedActionsUpdate, context: WriteContext): IncidentGuidedActions;
   addIncidentNote(input: IncidentNoteInput, context: WriteContext): IncidentNote;
