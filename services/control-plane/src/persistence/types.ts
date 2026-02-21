@@ -56,6 +56,16 @@ export interface WorkflowStats {
   degradedMode: {
     fallbackEvents: number;
   };
+  outbound: {
+    attempts: number;
+    success: number;
+    failure: number;
+    byTarget: {
+      slack: { attempts: number; success: number; failure: number };
+      teams: { attempts: number; success: number; failure: number };
+      production: { attempts: number; success: number; failure: number };
+    };
+  };
 }
 
 export interface PersistenceAdapter {

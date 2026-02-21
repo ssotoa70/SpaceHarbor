@@ -1,3 +1,5 @@
+import { resolveOutboundConfig } from "../integrations/outbound/config.js";
+import { WebhookOutboundNotifier } from "../integrations/outbound/webhook-notifier.js";
 import { LocalPersistenceAdapter } from "./adapters/local-persistence.js";
 import { VastPersistenceAdapter } from "./adapters/vast-persistence.js";
 import type { PersistenceAdapter, PersistenceBackend } from "./types.js";
@@ -23,6 +25,9 @@ export function resolvePersistenceBackend(rawBackend: string | undefined): Persi
 
 export function createPersistenceAdapter(rawBackend = process.env.ASSETHARBOR_PERSISTENCE_BACKEND): PersistenceAdapter {
   const backend = resolvePersistenceBackend(rawBackend);
+  const outboundConfig = resolveOutboundConfig(process.env);
+  const outboundNotifier =
+    outboundConfig.targets.length > 0 ? new WebhookOutboundNotifier(outboundConfig.signingSecret) : null;
 
   if (backend === "vast") {
     const strict = process.env.ASSETHARBOR_VAST_STRICT?.toLowerCase() === "true";
@@ -34,8 +39,8 @@ export function createPersistenceAdapter(rawBackend = process.env.ASSETHARBOR_PE
       dataEngineUrl: process.env.VAST_DATAENGINE_URL,
       strict,
       fallbackToLocal
-    });
+    }, undefined, undefined, outboundConfig, outboundNotifier ?? undefined);
   }
 
-  return new LocalPersistenceAdapter();
+  return new LocalPersistenceAdapter(outboundConfig, outboundNotifier);
 }

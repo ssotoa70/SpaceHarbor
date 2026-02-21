@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import type { AuditEvent } from "../../domain/models.js";
+import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
+import type { OutboundConfig } from "../../integrations/outbound/types.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
 import type { FailureResult, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
@@ -19,14 +21,21 @@ type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 export class VastPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "vast" as const;
 
-  private readonly localFallback = new LocalPersistenceAdapter();
+  private readonly localFallback: LocalPersistenceAdapter;
   private readonly fallbackAuditEvents: AuditEvent[] = [];
   private readonly fetchFn: FetchLike;
   private readonly workflowClient?: Partial<VastWorkflowClient>;
 
-  constructor(private readonly config: VastConfig, fetchFn?: FetchLike, workflowClient?: Partial<VastWorkflowClient>) {
+  constructor(
+    private readonly config: VastConfig,
+    fetchFn?: FetchLike,
+    workflowClient?: Partial<VastWorkflowClient>,
+    outboundConfig?: OutboundConfig,
+    outboundNotifier?: OutboundNotifier
+  ) {
     this.fetchFn = fetchFn ?? globalThis.fetch;
     this.workflowClient = workflowClient;
+    this.localFallback = new LocalPersistenceAdapter(outboundConfig, outboundNotifier);
 
     if (this.config.strict) {
       const missing: string[] = [];

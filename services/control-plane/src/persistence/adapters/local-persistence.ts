@@ -11,6 +11,9 @@ import type {
   WorkflowJob,
   WorkflowStatus
 } from "../../domain/models.js";
+import { mapOutboxItemToOutboundPayload } from "../../integrations/outbound/payload-mapper.js";
+import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
+import type { OutboundConfig, OutboundTarget } from "../../integrations/outbound/types.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import type { FailureResult, IngestInput, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
 
@@ -40,6 +43,21 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   private readonly outbox: OutboxItem[] = [];
   private readonly auditEvents: AuditEvent[] = [];
   private readonly processedEventIds = new Set<string>();
+  private readonly outboundCounters = {
+    attempts: 0,
+    success: 0,
+    failure: 0,
+    byTarget: {
+      slack: { attempts: 0, success: 0, failure: 0 },
+      teams: { attempts: 0, success: 0, failure: 0 },
+      production: { attempts: 0, success: 0, failure: 0 }
+    }
+  };
+
+  constructor(
+    private readonly outboundConfig: OutboundConfig | null = null,
+    private readonly outboundNotifier: OutboundNotifier | null = null
+  ) {}
 
   reset(): void {
     this.assets.clear();
@@ -49,6 +67,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.outbox.length = 0;
     this.auditEvents.length = 0;
     this.processedEventIds.clear();
+    this.outboundCounters.attempts = 0;
+    this.outboundCounters.success = 0;
+    this.outboundCounters.failure = 0;
+    this.outboundCounters.byTarget.slack = { attempts: 0, success: 0, failure: 0 };
+    this.outboundCounters.byTarget.teams = { attempts: 0, success: 0, failure: 0 };
+    this.outboundCounters.byTarget.production = { attempts: 0, success: 0, failure: 0 };
   }
 
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult {
@@ -473,6 +497,33 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       if (item.publishedAt) {
         continue;
       }
+
+      const targets = this.outboundConfig?.targets ?? [];
+      let deliveryFailed = false;
+      if (targets.length > 0 && this.outboundNotifier) {
+        for (const target of targets) {
+          const payload = mapOutboxItemToOutboundPayload(item, target.target);
+          this.incrementOutboundCounter(target.target, "attempts");
+          try {
+            await this.outboundNotifier.notify(target, payload);
+            this.incrementOutboundCounter(target.target, "success");
+          } catch (error) {
+            this.incrementOutboundCounter(target.target, "failure");
+            this.recordAudit(
+              `outbound ${target.target} delivery failed for ${item.eventType}: ${error instanceof Error ? error.message : String(error)}`,
+              context.correlationId,
+              new Date(now)
+            );
+            deliveryFailed = true;
+            break;
+          }
+        }
+      }
+
+      if (deliveryFailed) {
+        continue;
+      }
+
       item.publishedAt = now;
       publishedCount += 1;
     }
@@ -555,6 +606,16 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       },
       degradedMode: {
         fallbackEvents: 0
+      },
+      outbound: {
+        attempts: this.outboundCounters.attempts,
+        success: this.outboundCounters.success,
+        failure: this.outboundCounters.failure,
+        byTarget: {
+          slack: { ...this.outboundCounters.byTarget.slack },
+          teams: { ...this.outboundCounters.byTarget.teams },
+          production: { ...this.outboundCounters.byTarget.production }
+        }
       }
     };
   }
@@ -628,5 +689,10 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       return new Date(context.now);
     }
     return new Date();
+  }
+
+  private incrementOutboundCounter(target: OutboundTarget, key: "attempts" | "success" | "failure"): void {
+    this.outboundCounters[key] += 1;
+    this.outboundCounters.byTarget[target][key] += 1;
   }
 }

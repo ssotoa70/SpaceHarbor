@@ -23,6 +23,8 @@ test("required docs exist with key headings", () => {
   assert.match(eventContracts, /^# Event Contracts/m);
 
   assert.match(runbook, /ASSETHARBOR_VAST_FALLBACK_TO_LOCAL/);
+  assert.match(runbook, /ASSETHARBOR_WEBHOOK_SLACK_URL/);
+  assert.match(runbook, /ASSETHARBOR_WEBHOOK_SIGNING_SECRET/);
   assert.match(runbook, /fail-fast/i);
   assert.match(runbook, /## SLO Definitions/i);
   assert.match(runbook, /## Warning and Critical Thresholds/i);
@@ -48,4 +50,5 @@ test("required docs exist with key headings", () => {
   assert.match(wikiOpsRunbook, /strict/i);
   assert.match(eventContracts, /out-of-order/i);
   assert.match(eventContracts, /REPLAY_NOT_ALLOWED/);
+  assert.match(apiContracts, /x-assetharbor-signature/);
 });

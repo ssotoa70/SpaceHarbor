@@ -74,6 +74,8 @@
 
 - `GET /api/v1/outbox` lists outbox events.
 - `POST /api/v1/outbox/publish` marks unpublished outbox items as published.
+- Slice 3 note: outbox publish triggers webhook outbound delivery for configured `slack`, `teams`, and `production` targets.
+- Slice 3 note: outbound payloads include signed headers (`x-assetharbor-signature`, `x-assetharbor-timestamp`) and retain pending outbox state on delivery failure.
 
 ## Metrics
 
@@ -82,7 +84,8 @@
   - jobs by status
   - queue pending/leased
   - outbox pending/published
-  - DLQ total
+- DLQ total
+- outbound attempts/success/failure (including per-target counters)
 
 ## Audit
 
