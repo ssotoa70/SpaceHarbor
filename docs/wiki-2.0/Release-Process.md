@@ -34,6 +34,18 @@ Rollback owner: release commander (primary) and incident commander (backup).
 - [ ] On-call ownership/escalation matrix reviewed in `docs/wiki-2.0/Operations-Runbook.md`.
 - [ ] Communications plan prepared for promotion and rollback announcements.
 
+## Post-Release Verification Checkpoints
+
+- T+15m: health endpoint, queue metrics, and outbound delivery counters are stable.
+- T+60m: SLO/error budget and fallback trend remain within baseline.
+- Any rollback trigger requires immediate incident commander acknowledgment.
+
+## Communication Templates
+
+- Promotion announcement template: `docs/runbooks/release-day-checklist.md#promotion-announcement`
+- Rollback notice template: `docs/runbooks/release-day-checklist.md#rollback-notice`
+- Post-release completion template: `docs/runbooks/release-day-checklist.md#post-release-verification-complete`
+
 ## Publish
 
 - CD workflow publishes service images to GHCR on `main` pushes as `edge` images.

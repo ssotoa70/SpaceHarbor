@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AnnotationHookMetadata,
   Asset,
   AuditSignal,
   AssetQueueRow,
@@ -15,6 +16,9 @@ import type {
   WorkflowJob,
   WorkflowStatus
 } from "../../domain/models.js";
+import { mapOutboxItemToOutboundPayload } from "../../integrations/outbound/payload-mapper.js";
+import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
+import type { OutboundConfig, OutboundTarget } from "../../integrations/outbound/types.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import type {
   FailureResult,
@@ -36,6 +40,25 @@ interface QueueEntry {
 }
 
 const DEFAULT_MAX_ATTEMPTS = 3;
+
+const DEFAULT_ANNOTATION_HOOK: AnnotationHookMetadata = {
+  enabled: false,
+  provider: null,
+  contextId: null
+};
+
+const DEFAULT_HANDOFF_CHECKLIST = {
+  releaseNotesReady: false,
+  verificationComplete: false,
+  commsDraftReady: false,
+  ownerAssigned: false
+} as const;
+
+const DEFAULT_HANDOFF = {
+  status: "not_ready",
+  owner: null,
+  lastUpdatedAt: null
+} as const;
 
 const DEFAULT_INCIDENT_GUIDED_ACTIONS: IncidentGuidedActions = {
   acknowledged: false,
@@ -66,6 +89,21 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   private incidentHandoff: IncidentHandoff = { ...DEFAULT_INCIDENT_HANDOFF };
   private readonly incidentNotes: IncidentNote[] = [];
   private readonly processedEventIds = new Set<string>();
+  private readonly outboundCounters = {
+    attempts: 0,
+    success: 0,
+    failure: 0,
+    byTarget: {
+      slack: { attempts: 0, success: 0, failure: 0 },
+      teams: { attempts: 0, success: 0, failure: 0 },
+      production: { attempts: 0, success: 0, failure: 0 }
+    }
+  };
+
+  constructor(
+    private readonly outboundConfig: OutboundConfig | null = null,
+    private readonly outboundNotifier: OutboundNotifier | null = null
+  ) {}
 
   reset(): void {
     this.assets.clear();
@@ -78,6 +116,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.incidentHandoff = { ...DEFAULT_INCIDENT_HANDOFF };
     this.incidentNotes.length = 0;
     this.processedEventIds.clear();
+    this.outboundCounters.attempts = 0;
+    this.outboundCounters.success = 0;
+    this.outboundCounters.failure = 0;
+    this.outboundCounters.byTarget.slack = { attempts: 0, success: 0, failure: 0 };
+    this.outboundCounters.byTarget.teams = { attempts: 0, success: 0, failure: 0 };
+    this.outboundCounters.byTarget.production = { attempts: 0, success: 0, failure: 0 };
   }
 
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult {
@@ -100,7 +144,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       maxAttempts: DEFAULT_MAX_ATTEMPTS,
       nextAttemptAt: now.toISOString(),
       leaseOwner: null,
-      leaseExpiresAt: null
+      leaseExpiresAt: null,
+      thumbnail: null,
+      proxy: null,
+      annotationHook: input.annotationHook ?? DEFAULT_ANNOTATION_HOOK,
+      handoffChecklist: { ...DEFAULT_HANDOFF_CHECKLIST },
+      handoff: { ...DEFAULT_HANDOFF }
     };
 
     this.assets.set(asset.id, asset);
@@ -499,6 +548,33 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       if (item.publishedAt) {
         continue;
       }
+
+      const targets = this.outboundConfig?.targets ?? [];
+      let deliveryFailed = false;
+      if (targets.length > 0 && this.outboundNotifier) {
+        for (const target of targets) {
+          const payload = mapOutboxItemToOutboundPayload(item, target.target);
+          this.incrementOutboundCounter(target.target, "attempts");
+          try {
+            await this.outboundNotifier.notify(target, payload);
+            this.incrementOutboundCounter(target.target, "success");
+          } catch (error) {
+            this.incrementOutboundCounter(target.target, "failure");
+            this.recordAudit(
+              `outbound ${target.target} delivery failed for ${item.eventType}: ${error instanceof Error ? error.message : String(error)}`,
+              context.correlationId,
+              new Date(now)
+            );
+            deliveryFailed = true;
+            break;
+          }
+        }
+      }
+
+      if (deliveryFailed) {
+        continue;
+      }
+
       item.publishedAt = now;
       publishedCount += 1;
     }
@@ -581,6 +657,16 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       },
       degradedMode: {
         fallbackEvents: 0
+      },
+      outbound: {
+        attempts: this.outboundCounters.attempts,
+        success: this.outboundCounters.success,
+        failure: this.outboundCounters.failure,
+        byTarget: {
+          slack: { ...this.outboundCounters.byTarget.slack },
+          teams: { ...this.outboundCounters.byTarget.teams },
+          production: { ...this.outboundCounters.byTarget.production }
+        }
       }
     };
   }
@@ -591,13 +677,21 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       latestJobByAssetId.set(job.assetId, job);
     }
 
-    return [...this.assets.values()].map((asset) => ({
-      id: asset.id,
-      jobId: latestJobByAssetId.get(asset.id)?.id ?? null,
-      title: asset.title,
-      sourceUri: asset.sourceUri,
-      status: latestJobByAssetId.get(asset.id)?.status ?? "pending"
-    }));
+    return [...this.assets.values()].map((asset) => {
+      const latestJob = latestJobByAssetId.get(asset.id);
+      return {
+        id: asset.id,
+        jobId: latestJob?.id ?? null,
+        title: asset.title,
+        sourceUri: asset.sourceUri,
+        status: latestJob?.status ?? "pending",
+        thumbnail: latestJob?.thumbnail ?? null,
+        proxy: latestJob?.proxy ?? null,
+        annotationHook: latestJob?.annotationHook ?? DEFAULT_ANNOTATION_HOOK,
+        handoffChecklist: latestJob?.handoffChecklist ?? { ...DEFAULT_HANDOFF_CHECKLIST },
+        handoff: latestJob?.handoff ?? { ...DEFAULT_HANDOFF }
+      };
+    });
   }
 
   getAuditEvents(): AuditEvent[] {
@@ -716,5 +810,10 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       return new Date(context.now);
     }
     return new Date();
+  }
+
+  private incrementOutboundCounter(target: OutboundTarget, key: "attempts" | "success" | "failure"): void {
+    this.outboundCounters[key] += 1;
+    this.outboundCounters.byTarget[target][key] += 1;
   }
 }

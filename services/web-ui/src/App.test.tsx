@@ -2,7 +2,37 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import type { AssetRow } from "./api";
 import type { MetricsSnapshot } from "./operator/types";
+
+function buildAsset(overrides: Partial<AssetRow> = {}): AssetRow {
+  return {
+    id: "asset-1",
+    jobId: "job-1",
+    title: "QC Demo Asset",
+    sourceUri: "s3://bucket/qc-demo-asset.mov",
+    status: "completed",
+    thumbnail: null,
+    proxy: null,
+    annotationHook: {
+      enabled: false,
+      provider: null,
+      contextId: null
+    },
+    handoffChecklist: {
+      releaseNotesReady: false,
+      verificationComplete: false,
+      commsDraftReady: false,
+      ownerAssigned: false
+    },
+    handoff: {
+      status: "not_ready",
+      owner: null,
+      lastUpdatedAt: null
+    },
+    ...overrides
+  };
+}
 
 interface CoordinationState {
   guidedActions: {
@@ -60,7 +90,6 @@ interface AuditRowFixture {
   at: string;
   signal: AuditSignalFixture | null;
 }
-
 function buildMetricsSnapshot(fallbackEvents: number): MetricsSnapshot {
   return {
     assets: {
@@ -101,6 +130,7 @@ function jsonResponse(body: unknown): Response {
 }
 
 function mockApiResponses(options?: {
+  assets?: AssetRow[];
   metricsSnapshots?: MetricsSnapshot[];
   auditRows?: AuditRowFixture[];
   auditMessages?: string[];
@@ -108,6 +138,7 @@ function mockApiResponses(options?: {
   coordination?: CoordinationState;
 }): void {
   const metricsSnapshots = options?.metricsSnapshots ?? [buildMetricsSnapshot(0)];
+  const assets = options?.assets ?? [];
   const auditRows =
     options?.auditRows ??
     (options?.auditMessages ?? []).map((message, index) => ({
@@ -134,7 +165,7 @@ function mockApiResponses(options?: {
       const method = init?.method ?? "GET";
 
       if (url.endsWith("/api/v1/assets")) {
-        return jsonResponse({ assets: [] });
+        return jsonResponse({ assets });
       }
 
       if (url.endsWith("/api/v1/audit")) {
@@ -256,6 +287,10 @@ function mockApiResponses(options?: {
       }
 
       if (/\/api\/v1\/jobs\/.+\/replay$/.test(url)) {
+        return new Response(null, { status: 202 });
+      }
+
+      if (url.endsWith("/api/v1/events")) {
         return new Response(null, { status: 202 });
       }
 
@@ -604,5 +639,84 @@ describe("App", () => {
     const acknowledgeToggle = screen.getByRole("checkbox", { name: /acknowledge incident/i });
     acknowledgeToggle.focus();
     expect(acknowledgeToggle).toHaveFocus();
+  });
+
+  it("renders QC gate actions and submits canonical workflow events", async () => {
+    mockApiResponses({
+      assets: [
+        buildAsset({ id: "asset-completed", jobId: "job-completed", status: "completed", title: "Completed Clip" }),
+        buildAsset({ id: "asset-qc-pending", jobId: "job-qc-pending", status: "qc_pending", title: "QC Pending Clip" }),
+        buildAsset({ id: "asset-qc-review", jobId: "job-qc-review", status: "qc_in_review", title: "QC Review Clip" }),
+        buildAsset({ id: "asset-qc-rejected", jobId: "job-qc-rejected", status: "qc_rejected", title: "QC Rejected Clip" })
+      ]
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Send to QC" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark needs replay" }));
+
+    const eventCalls = vi.mocked(fetch).mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/events"));
+    expect(eventCalls.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("renders preview and annotation hook readiness states", async () => {
+    mockApiResponses({
+      assets: [
+        buildAsset({ title: "No Preview", status: "pending" }),
+        buildAsset({
+          id: "asset-with-preview",
+          title: "With Preview",
+          status: "qc_pending",
+          thumbnail: {
+            uri: "s3://bucket/thumb.jpg",
+            width: 320,
+            height: 180,
+            generatedAt: new Date().toISOString()
+          },
+          annotationHook: {
+            enabled: true,
+            provider: "shotgrid",
+            contextId: "ctx-123"
+          }
+        })
+      ]
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Preview not available")).toBeInTheDocument();
+    expect(screen.getByText("Preview metadata available")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open annotation context" })).toBeInTheDocument();
+  });
+
+  it("gates coordinator handoff release-ready action until checklist and owner are complete", async () => {
+    mockApiResponses({
+      assets: [
+        buildAsset({
+          id: "asset-qc-approved",
+          title: "QC Approved Clip",
+          status: "qc_approved"
+        })
+      ]
+    });
+
+    render(<App />);
+
+    const markReadyButton = await screen.findByRole("button", { name: "Mark release-ready" });
+    expect(markReadyButton).toBeDisabled();
+    expect(screen.getByText("Blocked: complete checklist and assign handoff owner.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Release notes ready" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Verification complete" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Comms draft ready" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Handoff owner" }), { target: { value: "coordinator-1" } });
+
+    expect(markReadyButton).toBeEnabled();
+    fireEvent.click(markReadyButton);
+    expect(screen.getByText("Release-ready marked.")).toBeInTheDocument();
   });
 });

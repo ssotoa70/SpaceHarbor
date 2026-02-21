@@ -65,11 +65,20 @@
 - `POST /api/v1/queue/reap-stale` requeues processing jobs with expired leases.
 - `POST /api/v1/jobs/:id/replay` moves failed/DLQ job back to pending queue.
 - `GET /api/v1/dlq` lists dead-lettered jobs.
+- Review/QC Slice 1 note: workflow status is additive with `qc_pending`, `qc_in_review`, `qc_approved`, and `qc_rejected`.
+- Review/QC Slice 1 note: canonical event types are additive with `asset.review.qc_pending`, `asset.review.in_review`, `asset.review.approved`, and `asset.review.rejected`.
+- Slice 2 note: asset/job read models add optional preview metadata fields `thumbnail` and `proxy` (nullable).
+- Slice 2 note: asset/job read models add `annotationHook` integration metadata (`enabled`, `provider`, `contextId`) with default disabled/null values.
+- Slice 4 note: asset/job read models add additive coordinator handoff metadata:
+  - `handoffChecklist` (`releaseNotesReady`, `verificationComplete`, `commsDraftReady`, `ownerAssigned`)
+  - `handoff` (`status`, `owner`, `lastUpdatedAt`)
 
 ## Outbox
 
 - `GET /api/v1/outbox` lists outbox events.
 - `POST /api/v1/outbox/publish` marks unpublished outbox items as published.
+- Slice 3 note: outbox publish triggers webhook outbound delivery for configured `slack`, `teams`, and `production` targets.
+- Slice 3 note: outbound payloads include signed headers (`x-assetharbor-signature`, `x-assetharbor-timestamp`) and retain pending outbox state on delivery failure.
 
 ## Metrics
 
@@ -78,7 +87,8 @@
   - jobs by status
   - queue pending/leased
   - outbox pending/published
-  - DLQ total
+- DLQ total
+- outbound attempts/success/failure (including per-target counters)
 
 ## Audit
 

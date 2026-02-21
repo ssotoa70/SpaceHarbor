@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createPersistenceAdapter, resolvePersistenceBackend, resolveVastFallbackToLocal } from "../src/persistence/factory";
+import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence";
+import type { OutboundNotifier } from "../src/integrations/outbound/notifier";
+import type { OutboundConfig } from "../src/integrations/outbound/types";
 
 test("persistence backend resolution defaults to local", () => {
   assert.equal(resolvePersistenceBackend(undefined), "local");
@@ -69,4 +72,126 @@ test("VAST fallback policy defaults to local fallback unless explicitly false", 
   assert.equal(resolveVastFallbackToLocal("true"), true);
   assert.equal(resolveVastFallbackToLocal("TRUE"), true);
   assert.equal(resolveVastFallbackToLocal("false"), false);
+});
+
+test("local persistence exposes null-safe preview and annotation metadata defaults", () => {
+  const persistence = new LocalPersistenceAdapter();
+  const ingest = persistence.createIngestAsset(
+    {
+      title: "preview-defaults",
+      sourceUri: "s3://bucket/preview-defaults.mov"
+    },
+    { correlationId: "corr-preview-defaults" }
+  );
+
+  assert.equal(ingest.job.thumbnail, null);
+  assert.equal(ingest.job.proxy, null);
+  assert.deepEqual(ingest.job.annotationHook, {
+    enabled: false,
+    provider: null,
+    contextId: null
+  });
+  assert.deepEqual(ingest.job.handoffChecklist, {
+    releaseNotesReady: false,
+    verificationComplete: false,
+    commsDraftReady: false,
+    ownerAssigned: false
+  });
+  assert.deepEqual(ingest.job.handoff, {
+    status: "not_ready",
+    owner: null,
+    lastUpdatedAt: null
+  });
+
+  const row = persistence.listAssetQueueRows()[0];
+  assert.equal(row.thumbnail, null);
+  assert.equal(row.proxy, null);
+  assert.deepEqual(row.annotationHook, {
+    enabled: false,
+    provider: null,
+    contextId: null
+  });
+  assert.deepEqual(row.handoffChecklist, {
+    releaseNotesReady: false,
+    verificationComplete: false,
+    commsDraftReady: false,
+    ownerAssigned: false
+  });
+  assert.deepEqual(row.handoff, {
+    status: "not_ready",
+    owner: null,
+    lastUpdatedAt: null
+  });
+});
+
+test("local outbox publish sends webhook notifications and marks items published", async () => {
+  const deliveredTargets: string[] = [];
+  const notifier: OutboundNotifier = {
+    notify: async (target) => {
+      deliveredTargets.push(target.target);
+    }
+  };
+
+  const outboundConfig: OutboundConfig = {
+    strictMode: false,
+    signingSecret: "secret",
+    targets: [
+      { target: "slack", url: "https://hooks.example.com/slack" },
+      { target: "teams", url: "https://hooks.example.com/teams" }
+    ]
+  };
+
+  const persistence = new LocalPersistenceAdapter(outboundConfig, notifier);
+  persistence.createIngestAsset(
+    {
+      title: "outbound-success",
+      sourceUri: "s3://bucket/outbound-success.mov"
+    },
+    { correlationId: "corr-outbound-success" }
+  );
+
+  const published = await persistence.publishOutbox({ correlationId: "corr-outbound-publish" });
+  assert.equal(published, 1);
+  assert.deepEqual(deliveredTargets, ["slack", "teams"]);
+
+  const stats = persistence.getWorkflowStats();
+  assert.equal(stats.outbound.attempts, 2);
+  assert.equal(stats.outbound.success, 2);
+  assert.equal(stats.outbound.failure, 0);
+});
+
+test("local outbox publish keeps item pending when webhook delivery fails", async () => {
+  const notifier: OutboundNotifier = {
+    notify: async (target) => {
+      if (target.target === "production") {
+        throw new Error("simulated webhook failure");
+      }
+    }
+  };
+
+  const outboundConfig: OutboundConfig = {
+    strictMode: false,
+    signingSecret: "secret",
+    targets: [{ target: "production", url: "https://hooks.example.com/production" }]
+  };
+
+  const persistence = new LocalPersistenceAdapter(outboundConfig, notifier);
+  persistence.createIngestAsset(
+    {
+      title: "outbound-failure",
+      sourceUri: "s3://bucket/outbound-failure.mov"
+    },
+    { correlationId: "corr-outbound-failure" }
+  );
+
+  const published = await persistence.publishOutbox({ correlationId: "corr-outbound-publish-failure" });
+  assert.equal(published, 0);
+
+  const outboxItems = persistence.getOutboxItems().filter((item) => !item.publishedAt);
+  assert.equal(outboxItems.length, 1);
+
+  const stats = persistence.getWorkflowStats();
+  assert.equal(stats.outbound.attempts, 1);
+  assert.equal(stats.outbound.success, 0);
+  assert.equal(stats.outbound.failure, 1);
 });

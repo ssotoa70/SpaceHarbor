@@ -224,3 +224,54 @@ test("OpenAPI workflow operations keep tags, parameter docs, and error envelope 
 
   await app.close();
 });
+
+test("OpenAPI exposes additive review/QC statuses and event types", async () => {
+  const app = buildApp();
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/openapi.json"
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+
+  const queueStatusEnum =
+    body.paths?.["/api/v1/jobs/{id}"]?.get?.responses?.["200"]?.content?.["application/json"]?.schema?.properties?.status?.
+      enum ?? [];
+
+  for (const status of ["qc_pending", "qc_in_review", "qc_approved", "qc_rejected"]) {
+    assert.ok(queueStatusEnum.includes(status), `missing workflow status enum in OpenAPI: ${status}`);
+  }
+
+  const eventTypeEnum = body.paths?.["/api/v1/events"]?.post?.requestBody?.content?.["application/json"]?.schema?.properties
+    ?.eventType?.enum ?? [];
+
+  for (const eventType of [
+    "asset.review.qc_pending",
+    "asset.review.in_review",
+    "asset.review.approved",
+    "asset.review.rejected"
+  ]) {
+    assert.ok(eventTypeEnum.includes(eventType), `missing event type enum in OpenAPI: ${eventType}`);
+  }
+
+  const assetRowSchemaProperties =
+    body.paths?.["/api/v1/assets"]?.get?.responses?.["200"]?.content?.["application/json"]?.schema?.properties?.assets?.items
+      ?.properties;
+  assert.ok(assetRowSchemaProperties?.thumbnail, "missing thumbnail schema in assets response");
+  assert.ok(assetRowSchemaProperties?.proxy, "missing proxy schema in assets response");
+  assert.ok(assetRowSchemaProperties?.annotationHook, "missing annotationHook schema in assets response");
+  assert.ok(assetRowSchemaProperties?.handoffChecklist, "missing handoffChecklist schema in assets response");
+  assert.ok(assetRowSchemaProperties?.handoff, "missing handoff schema in assets response");
+
+  const jobSchemaProperties =
+    body.paths?.["/api/v1/jobs/{id}"]?.get?.responses?.["200"]?.content?.["application/json"]?.schema?.properties;
+  assert.ok(jobSchemaProperties?.thumbnail, "missing thumbnail schema in jobs response");
+  assert.ok(jobSchemaProperties?.proxy, "missing proxy schema in jobs response");
+  assert.ok(jobSchemaProperties?.annotationHook, "missing annotationHook schema in jobs response");
+  assert.ok(jobSchemaProperties?.handoffChecklist, "missing handoffChecklist schema in jobs response");
+  assert.ok(jobSchemaProperties?.handoff, "missing handoff schema in jobs response");
+
+  await app.close();
+});

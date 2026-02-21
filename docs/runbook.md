@@ -8,6 +8,12 @@
    - `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL` (`true` for continuity, `false` for strict fail-fast)
    - VAST endpoints and token
    - optional API keys (`ASSETHARBOR_API_KEY`, `CONTROL_PLANE_API_KEY`, `VITE_API_KEY`)
+   - webhook outbound integration config (optional):
+     - `ASSETHARBOR_WEBHOOK_SLACK_URL`
+     - `ASSETHARBOR_WEBHOOK_TEAMS_URL`
+     - `ASSETHARBOR_WEBHOOK_PRODUCTION_URL`
+     - `ASSETHARBOR_WEBHOOK_SIGNING_SECRET`
+     - `ASSETHARBOR_WEBHOOK_STRICT_MODE` (`true`/`false`)
 2. Run `docker compose up --build` from `AssetHarbor/`.
 3. Verify:
    - API: `http://localhost:8080/health`
@@ -28,6 +34,12 @@
 - When retries are exhausted, verify job appears in `GET /api/v1/dlq`.
 - Replay a failed job with `POST /api/v1/jobs/:id/replay`.
 - Use `POST /api/v1/queue/reap-stale` to requeue expired processing leases.
+
+## Outbound webhook integrations
+
+- Outbox publish (`POST /api/v1/outbox/publish`) dispatches webhook payloads to configured targets (`slack`, `teams`, `production`).
+- Deliveries include HMAC signature header (`x-assetharbor-signature`) and timestamp (`x-assetharbor-timestamp`).
+- On outbound failure, outbox entries stay pending for retry and audit logs include target-specific failure details.
 
 ## VAST strict and fallback policy
 
@@ -90,6 +102,12 @@
 - [ ] On-call ownership and escalation contacts confirmed for the release window.
 - [ ] Canary gates, rollback owner, and rollback command path verified.
 - [ ] Release-day checklist completed (`docs/runbooks/release-day-checklist.md`).
+
+## Coordinator Handoff and Release Readiness
+
+- For `qc_approved` assets, coordinator completes handoff checklist (release notes, verification, comms draft, owner assignment).
+- Use `docs/runbooks/release-day-checklist.md` communication templates for promotion/rollback/post-release updates.
+- Post-release verification is mandatory at T+15m and T+60m before final sign-off.
 
 ## Troubleshooting
 

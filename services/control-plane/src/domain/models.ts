@@ -1,10 +1,52 @@
-export type WorkflowStatus = "pending" | "processing" | "completed" | "failed" | "needs_replay";
+export type WorkflowStatus =
+  | "pending"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "needs_replay"
+  | "qc_pending"
+  | "qc_in_review"
+  | "qc_approved"
+  | "qc_rejected";
 
 export interface Asset {
   id: string;
   title: string;
   sourceUri: string;
   createdAt: string;
+}
+
+export interface AssetThumbnailPreview {
+  uri: string;
+  width: number;
+  height: number;
+  generatedAt: string;
+}
+
+export interface AssetProxyPreview {
+  uri: string;
+  durationSeconds: number;
+  codec: string;
+  generatedAt: string;
+}
+
+export interface AnnotationHookMetadata {
+  enabled: boolean;
+  provider: string | null;
+  contextId: string | null;
+}
+
+export interface HandoffChecklistMetadata {
+  releaseNotesReady: boolean;
+  verificationComplete: boolean;
+  commsDraftReady: boolean;
+  ownerAssigned: boolean;
+}
+
+export interface HandoffMetadata {
+  status: "not_ready" | "ready_for_release";
+  owner: string | null;
+  lastUpdatedAt: string | null;
 }
 
 export interface WorkflowJob {
@@ -19,6 +61,11 @@ export interface WorkflowJob {
   nextAttemptAt: string | null;
   leaseOwner: string | null;
   leaseExpiresAt: string | null;
+  thumbnail: AssetThumbnailPreview | null;
+  proxy: AssetProxyPreview | null;
+  annotationHook: AnnotationHookMetadata;
+  handoffChecklist: HandoffChecklistMetadata;
+  handoff: HandoffMetadata;
 }
 
 export interface IngestResult {
@@ -32,6 +79,11 @@ export interface AssetQueueRow {
   title: string;
   sourceUri: string;
   status: WorkflowStatus;
+  thumbnail: AssetThumbnailPreview | null;
+  proxy: AssetProxyPreview | null;
+  annotationHook: AnnotationHookMetadata;
+  handoffChecklist: HandoffChecklistMetadata;
+  handoff: HandoffMetadata;
 }
 
 export interface AuditEvent {

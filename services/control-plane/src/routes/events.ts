@@ -20,13 +20,17 @@ const canonicalEventBodySchema = {
     eventId: { type: "string" },
     eventType: {
       type: "string",
-      enum: [
-        "asset.processing.started",
-        "asset.processing.completed",
-        "asset.processing.failed",
-        "asset.processing.replay_requested"
-      ]
-    },
+        enum: [
+          "asset.processing.started",
+          "asset.processing.completed",
+          "asset.processing.failed",
+          "asset.processing.replay_requested",
+          "asset.review.qc_pending",
+          "asset.review.in_review",
+          "asset.review.approved",
+          "asset.review.rejected"
+        ]
+      },
     eventVersion: { type: "string" },
     occurredAt: { type: "string", format: "date-time" },
     correlationId: { type: "string" },

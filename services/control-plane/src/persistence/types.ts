@@ -1,4 +1,5 @@
 import type {
+  AnnotationHookMetadata,
   AssetQueueRow,
   AuditEvent,
   DlqItem,
@@ -18,6 +19,7 @@ export type PersistenceBackend = "local" | "vast";
 export interface IngestInput {
   title: string;
   sourceUri: string;
+  annotationHook?: AnnotationHookMetadata | null;
 }
 
 export interface WriteContext {
@@ -58,6 +60,16 @@ export interface WorkflowStats {
   };
   degradedMode: {
     fallbackEvents: number;
+  };
+  outbound: {
+    attempts: number;
+    success: number;
+    failure: number;
+    byTarget: {
+      slack: { attempts: number; success: number; failure: number };
+      teams: { attempts: number; success: number; failure: number };
+      production: { attempts: number; success: number; failure: number };
+    };
   };
 }
 

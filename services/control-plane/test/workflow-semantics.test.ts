@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { buildApp } from "../src/app";
 import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence";
+import { canTransitionWorkflowStatus } from "../src/workflow/transitions";
 
 function context(correlationId: string) {
   return { correlationId };
@@ -186,4 +187,17 @@ test("replay endpoint enforces replay rate limit", async () => {
   } else {
     process.env.ASSETHARBOR_REPLAY_MAX_PER_MINUTE = previousReplayMax;
   }
+});
+
+test("review/QC transitions allow expected progression", () => {
+  assert.equal(canTransitionWorkflowStatus("completed", "qc_pending"), true);
+  assert.equal(canTransitionWorkflowStatus("qc_pending", "qc_in_review"), true);
+  assert.equal(canTransitionWorkflowStatus("qc_in_review", "qc_approved"), true);
+  assert.equal(canTransitionWorkflowStatus("qc_in_review", "qc_rejected"), true);
+  assert.equal(canTransitionWorkflowStatus("qc_rejected", "needs_replay"), true);
+});
+
+test("review/QC transitions block invalid jumps", () => {
+  assert.equal(canTransitionWorkflowStatus("pending", "qc_in_review"), false);
+  assert.equal(canTransitionWorkflowStatus("processing", "qc_approved"), false);
 });

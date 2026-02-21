@@ -20,6 +20,34 @@ export interface AssetRow {
   title: string;
   sourceUri: string;
   status: string;
+  thumbnail: {
+    uri: string;
+    width: number;
+    height: number;
+    generatedAt: string;
+  } | null;
+  proxy: {
+    uri: string;
+    durationSeconds: number;
+    codec: string;
+    generatedAt: string;
+  } | null;
+  annotationHook: {
+    enabled: boolean;
+    provider: string | null;
+    contextId: string | null;
+  };
+  handoffChecklist: {
+    releaseNotesReady: boolean;
+    verificationComplete: boolean;
+    commsDraftReady: boolean;
+    ownerAssigned: boolean;
+  };
+  handoff: {
+    status: "not_ready" | "ready_for_release";
+    owner: string | null;
+    lastUpdatedAt: string | null;
+  };
 }
 
 export interface AuditSignal {
@@ -67,6 +95,13 @@ export interface IncidentCoordination {
   notes: IncidentNote[];
 }
 
+export type WorkflowEventType =
+  | "asset.processing.replay_requested"
+  | "asset.review.qc_pending"
+  | "asset.review.in_review"
+  | "asset.review.approved"
+  | "asset.review.rejected";
+
 export async function fetchAssets(): Promise<AssetRow[]> {
   const response = await fetch(`${API_BASE_URL}/api/v1/assets`);
   if (!response.ok) {
@@ -99,6 +134,36 @@ export async function replayJob(jobId: string): Promise<void> {
 
   if (!response.ok) {
     throw new Error(`replay failed: ${response.status}`);
+  }
+}
+
+export async function submitWorkflowEvent(input: {
+  assetId: string;
+  jobId: string;
+  eventType: WorkflowEventType;
+  producer: string;
+}): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/events`, {
+    method: "POST",
+    headers: withAuth({
+      "content-type": "application/json"
+    }),
+    body: JSON.stringify({
+      eventId: `web-ui-${input.eventType}-${input.jobId}-${Date.now()}`,
+      eventType: input.eventType,
+      eventVersion: "1.0",
+      occurredAt: new Date().toISOString(),
+      correlationId: `web-ui-${input.jobId}`,
+      producer: input.producer,
+      data: {
+        assetId: input.assetId,
+        jobId: input.jobId
+      }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`event submit failed: ${response.status}`);
   }
 }
 

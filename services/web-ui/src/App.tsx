@@ -8,6 +8,7 @@ import {
   fetchMetrics,
   ingestAsset,
   replayJob,
+  submitWorkflowEvent,
   updateIncidentGuidedActions,
   updateIncidentHandoff,
   type AssetRow,
@@ -19,6 +20,31 @@ import {
 } from "./api";
 import { deriveHealthState } from "./operator/health";
 import type { MetricsSnapshot } from "./operator/types";
+
+interface HandoffDraft {
+  owner: string;
+  releaseNotesReady: boolean;
+  verificationComplete: boolean;
+  commsDraftReady: boolean;
+}
+
+function createHandoffDraft(asset: AssetRow): HandoffDraft {
+  return {
+    owner: asset.handoff.owner ?? "",
+    releaseNotesReady: asset.handoffChecklist.releaseNotesReady,
+    verificationComplete: asset.handoffChecklist.verificationComplete,
+    commsDraftReady: asset.handoffChecklist.commsDraftReady
+  };
+}
+
+function isHandoffReady(draft: HandoffDraft): boolean {
+  return (
+    draft.owner.trim().length > 0 &&
+    draft.releaseNotesReady &&
+    draft.verificationComplete &&
+    draft.commsDraftReady
+  );
+}
 
 const HEALTH_POLL_INTERVAL_MS = 15_000;
 const HEALTH_STALE_THRESHOLD_MS = 60_000;
@@ -61,6 +87,8 @@ export function App() {
   const [noteCorrelationId, setNoteCorrelationId] = useState("");
   const [noteAuthor, setNoteAuthor] = useState("");
   const [handoffDraft, setHandoffDraft] = useState<IncidentHandoff>(DEFAULT_INCIDENT_COORDINATION.handoff);
+  const [handoffDrafts, setHandoffDrafts] = useState<Record<string, HandoffDraft>>({});
+  const [releaseReadyAssetIds, setReleaseReadyAssetIds] = useState<Record<string, boolean>>({});
 
   async function refresh(): Promise<void> {
     try {
@@ -100,6 +128,18 @@ export function App() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    setHandoffDrafts((previous) => {
+      const next = { ...previous };
+      for (const asset of assets) {
+        if (!next[asset.id]) {
+          next[asset.id] = createHandoffDraft(asset);
+        }
+      }
+      return next;
+    });
+  }, [assets]);
 
   const currentMetrics = metricsHistory[metricsHistory.length - 1] ?? null;
   const previousMetrics = metricsHistory[metricsHistory.length - 2] ?? null;
@@ -268,6 +308,49 @@ export function App() {
   async function onReplay(jobId: string): Promise<void> {
     await replayJob(jobId);
     await refresh();
+  }
+
+  async function onGateTransition(asset: AssetRow, eventType: Parameters<typeof submitWorkflowEvent>[0]["eventType"]): Promise<void> {
+    if (!asset.jobId) {
+      return;
+    }
+
+    await submitWorkflowEvent({
+      assetId: asset.id,
+      jobId: asset.jobId,
+      eventType,
+      producer: "web-ui"
+    });
+    await refresh();
+  }
+
+  function onOpenAnnotationContext(_asset: AssetRow): void {
+    // Slice 2 provides metadata hook visibility only.
+  }
+
+  function updateHandoffDraft(assetId: string, patch: Partial<HandoffDraft>): void {
+    setHandoffDrafts((previous) => {
+      const current = previous[assetId] ?? {
+        owner: "",
+        releaseNotesReady: false,
+        verificationComplete: false,
+        commsDraftReady: false
+      };
+      return {
+        ...previous,
+        [assetId]: {
+          ...current,
+          ...patch
+        }
+      };
+    });
+  }
+
+  function markReleaseReady(assetId: string): void {
+    setReleaseReadyAssetIds((previous) => ({
+      ...previous,
+      [assetId]: true
+    }));
   }
 
   return (
@@ -492,16 +575,111 @@ export function App() {
                   <td>{asset.title}</td>
                   <td>{asset.sourceUri}</td>
                   <td>
-                    <span className={`status status-${asset.status}`}>{asset.status}</span>
+                      <span className={`status status-${asset.status}`}>{asset.status}</span>
+                      <p>{asset.thumbnail || asset.proxy ? "Preview metadata available" : "Preview not available"}</p>
                   </td>
                   <td>
+                    {asset.annotationHook.enabled ? (
+                      <button type="button" onClick={() => onOpenAnnotationContext(asset)}>
+                        Open annotation context
+                      </button>
+                    ) : null}
+                    {asset.status === "qc_approved" ? (
+                      <div>
+                        <p>Coordinator handoff checklist</p>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={(handoffDrafts[asset.id] ?? createHandoffDraft(asset)).releaseNotesReady}
+                            onChange={(event) =>
+                              updateHandoffDraft(asset.id, { releaseNotesReady: event.target.checked })
+                            }
+                          />
+                          Release notes ready
+                        </label>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={(handoffDrafts[asset.id] ?? createHandoffDraft(asset)).verificationComplete}
+                            onChange={(event) =>
+                              updateHandoffDraft(asset.id, { verificationComplete: event.target.checked })
+                            }
+                          />
+                          Verification complete
+                        </label>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={(handoffDrafts[asset.id] ?? createHandoffDraft(asset)).commsDraftReady}
+                            onChange={(event) =>
+                              updateHandoffDraft(asset.id, { commsDraftReady: event.target.checked })
+                            }
+                          />
+                          Comms draft ready
+                        </label>
+                        <label>
+                          Handoff owner
+                          <input
+                            type="text"
+                            value={(handoffDrafts[asset.id] ?? createHandoffDraft(asset)).owner}
+                            onChange={(event) => updateHandoffDraft(asset.id, { owner: event.target.value })}
+                          />
+                        </label>
+                        {isHandoffReady(handoffDrafts[asset.id] ?? createHandoffDraft(asset)) ? (
+                          <p>Handoff ready for release.</p>
+                        ) : (
+                          <p>Blocked: complete checklist and assign handoff owner.</p>
+                        )}
+                        <button
+                          type="button"
+                          disabled={!isHandoffReady(handoffDrafts[asset.id] ?? createHandoffDraft(asset))}
+                          onClick={() => markReleaseReady(asset.id)}
+                        >
+                          Mark release-ready
+                        </button>
+                        {releaseReadyAssetIds[asset.id] ? <p>Release-ready marked.</p> : null}
+                      </div>
+                    ) : null}
                     {asset.status === "failed" && asset.jobId ? (
                       <button type="button" onClick={() => void onReplay(asset.jobId)}>
                         Replay
                       </button>
-                    ) : (
+                    ) : null}
+                    {asset.status === "completed" && asset.jobId ? (
+                      <button type="button" onClick={() => void onGateTransition(asset, "asset.review.qc_pending")}>
+                        Send to QC
+                      </button>
+                    ) : null}
+                    {asset.status === "qc_pending" && asset.jobId ? (
+                      <button type="button" onClick={() => void onGateTransition(asset, "asset.review.in_review")}>
+                        Start review
+                      </button>
+                    ) : null}
+                    {asset.status === "qc_in_review" && asset.jobId ? (
+                      <>
+                        <button type="button" onClick={() => void onGateTransition(asset, "asset.review.approved")}>
+                          Approve
+                        </button>
+                        <button type="button" onClick={() => void onGateTransition(asset, "asset.review.rejected")}>
+                          Reject
+                        </button>
+                      </>
+                    ) : null}
+                    {asset.status === "qc_rejected" && asset.jobId ? (
+                      <button type="button" onClick={() => void onGateTransition(asset, "asset.processing.replay_requested")}>
+                        Mark needs replay
+                      </button>
+                    ) : null}
+                    {!asset.annotationHook.enabled &&
+                    asset.status !== "qc_approved" &&
+                    (!asset.jobId ||
+                      (asset.status !== "failed" &&
+                        asset.status !== "completed" &&
+                        asset.status !== "qc_pending" &&
+                        asset.status !== "qc_in_review" &&
+                        asset.status !== "qc_rejected")) ? (
                       <span>-</span>
-                    )}
+                    ) : null}
                   </td>
                 </tr>
               ))

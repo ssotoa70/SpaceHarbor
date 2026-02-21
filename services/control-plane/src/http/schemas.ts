@@ -1,4 +1,14 @@
-export const workflowStatusEnum = ["pending", "processing", "completed", "failed", "needs_replay"] as const;
+export const workflowStatusEnum = [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "needs_replay",
+  "qc_pending",
+  "qc_in_review",
+  "qc_approved",
+  "qc_rejected"
+] as const;
 
 export const errorEnvelopeSchema = {
   type: "object",
@@ -32,6 +42,77 @@ export const assetSchema = {
   }
 } as const;
 
+export const thumbnailSchema = {
+  anyOf: [
+    {
+      type: "object",
+      required: ["uri", "width", "height", "generatedAt"],
+      properties: {
+        uri: { type: "string" },
+        width: { type: "number" },
+        height: { type: "number" },
+        generatedAt: { type: "string", format: "date-time" }
+      }
+    },
+    { type: "null" }
+  ]
+} as const;
+
+export const proxySchema = {
+  anyOf: [
+    {
+      type: "object",
+      required: ["uri", "durationSeconds", "codec", "generatedAt"],
+      properties: {
+        uri: { type: "string" },
+        durationSeconds: { type: "number" },
+        codec: { type: "string" },
+        generatedAt: { type: "string", format: "date-time" }
+      }
+    },
+    { type: "null" }
+  ]
+} as const;
+
+export const annotationHookSchema = {
+  type: "object",
+  required: ["enabled", "provider", "contextId"],
+  properties: {
+    enabled: { type: "boolean" },
+    provider: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    contextId: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    }
+  }
+} as const;
+
+export const handoffChecklistSchema = {
+  type: "object",
+  required: ["releaseNotesReady", "verificationComplete", "commsDraftReady", "ownerAssigned"],
+  properties: {
+    releaseNotesReady: { type: "boolean" },
+    verificationComplete: { type: "boolean" },
+    commsDraftReady: { type: "boolean" },
+    ownerAssigned: { type: "boolean" }
+  }
+} as const;
+
+export const handoffSchema = {
+  type: "object",
+  required: ["status", "owner", "lastUpdatedAt"],
+  properties: {
+    status: { type: "string", enum: ["not_ready", "ready_for_release"] },
+    owner: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    lastUpdatedAt: {
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }]
+    }
+  }
+} as const;
+
 export const workflowJobSchema = {
   type: "object",
   required: [
@@ -45,7 +126,12 @@ export const workflowJobSchema = {
     "maxAttempts",
     "nextAttemptAt",
     "leaseOwner",
-    "leaseExpiresAt"
+    "leaseExpiresAt",
+    "thumbnail",
+    "proxy",
+    "annotationHook",
+    "handoffChecklist",
+    "handoff"
   ],
   properties: {
     id: { type: "string" },
@@ -66,7 +152,42 @@ export const workflowJobSchema = {
     },
     leaseExpiresAt: {
       anyOf: [{ type: "string", format: "date-time" }, { type: "null" }]
-    }
+    },
+    thumbnail: thumbnailSchema,
+    proxy: proxySchema,
+    annotationHook: annotationHookSchema,
+    handoffChecklist: handoffChecklistSchema,
+    handoff: handoffSchema
+  }
+} as const;
+
+export const assetQueueRowSchema = {
+  type: "object",
+  required: [
+    "id",
+    "jobId",
+    "title",
+    "sourceUri",
+    "status",
+    "thumbnail",
+    "proxy",
+    "annotationHook",
+    "handoffChecklist",
+    "handoff"
+  ],
+  properties: {
+    id: { type: "string" },
+    jobId: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    title: { type: "string" },
+    sourceUri: { type: "string" },
+    status: { type: "string", enum: [...workflowStatusEnum] },
+    thumbnail: thumbnailSchema,
+    proxy: proxySchema,
+    annotationHook: annotationHookSchema,
+    handoffChecklist: handoffChecklistSchema,
+    handoff: handoffSchema
   }
 } as const;
 
