@@ -83,6 +83,12 @@
 - [ ] Canary gates, rollback owner, and rollback command path verified.
 - [ ] Release-day checklist completed (`docs/runbooks/release-day-checklist.md`).
 
+## Coordinator Handoff and Release Readiness
+
+- For `qc_approved` assets, coordinator completes handoff checklist (release notes, verification, comms draft, owner assignment).
+- Use `docs/runbooks/release-day-checklist.md` communication templates for promotion/rollback/post-release updates.
+- Post-release verification is mandatory at T+15m and T+60m before final sign-off.
+
 ## Troubleshooting
 
 - `400` on `/api/v1/events`: verify canonical event envelope fields (`eventId`, `eventType`, `eventVersion`, `occurredAt`, `correlationId`, `producer`, `data.assetId`, `data.jobId`).

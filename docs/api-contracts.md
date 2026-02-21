@@ -69,6 +69,9 @@
 - Review/QC Slice 1 note: canonical event types are additive with `asset.review.qc_pending`, `asset.review.in_review`, `asset.review.approved`, and `asset.review.rejected`.
 - Slice 2 note: asset/job read models add optional preview metadata fields `thumbnail` and `proxy` (nullable).
 - Slice 2 note: asset/job read models add `annotationHook` integration metadata (`enabled`, `provider`, `contextId`) with default disabled/null values.
+- Slice 4 note: asset/job read models add additive coordinator handoff metadata:
+  - `handoffChecklist` (`releaseNotesReady`, `verificationComplete`, `commsDraftReady`, `ownerAssigned`)
+  - `handoff` (`status`, `owner`, `lastUpdatedAt`)
 
 ## Outbox
 

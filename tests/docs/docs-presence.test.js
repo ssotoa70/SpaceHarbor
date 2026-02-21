@@ -33,6 +33,8 @@ test("required docs exist with key headings", () => {
   assert.match(releaseProcess, /^# Release Process/m);
   assert.match(releaseProcess, /## Canary Promotion and Rollback Gates/i);
   assert.match(releaseProcess, /## Go\/No-Go Checklist/i);
+  assert.match(releaseProcess, /## Post-Release Verification Checkpoints/i);
+  assert.match(releaseProcess, /## Communication Templates/i);
 
   assert.match(wikiOpsRunbook, /## Alert Thresholds/i);
   assert.match(wikiOpsRunbook, /## Ownership and Escalation Matrix/i);
@@ -44,6 +46,12 @@ test("required docs exist with key headings", () => {
   assert.match(faultInjectionChecklist, /## Execution Log/i);
   assert.match(releaseDayChecklist, /^# Release Day Checklist/m);
   assert.match(releaseDayChecklist, /## Go\/No-Go Decision/i);
+  assert.match(releaseDayChecklist, /## Communication Templates/i);
+  assert.match(releaseDayChecklist, /### Promotion Announcement/i);
+  assert.match(releaseDayChecklist, /### Rollback Notice/i);
+  assert.match(releaseDayChecklist, /## Post-Release Verification Checkpoints/i);
+  assert.match(releaseDayChecklist, /### T\+15m/i);
+  assert.match(releaseDayChecklist, /### T\+60m/i);
 
   assert.match(readme, /ASSETHARBOR_VAST_FALLBACK_TO_LOCAL/);
   assert.match(wikiOpsRunbook, /fallback/i);

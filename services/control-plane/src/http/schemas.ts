@@ -88,6 +88,31 @@ export const annotationHookSchema = {
   }
 } as const;
 
+export const handoffChecklistSchema = {
+  type: "object",
+  required: ["releaseNotesReady", "verificationComplete", "commsDraftReady", "ownerAssigned"],
+  properties: {
+    releaseNotesReady: { type: "boolean" },
+    verificationComplete: { type: "boolean" },
+    commsDraftReady: { type: "boolean" },
+    ownerAssigned: { type: "boolean" }
+  }
+} as const;
+
+export const handoffSchema = {
+  type: "object",
+  required: ["status", "owner", "lastUpdatedAt"],
+  properties: {
+    status: { type: "string", enum: ["not_ready", "ready_for_release"] },
+    owner: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    lastUpdatedAt: {
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }]
+    }
+  }
+} as const;
+
 export const workflowJobSchema = {
   type: "object",
   required: [
@@ -104,7 +129,9 @@ export const workflowJobSchema = {
     "leaseExpiresAt",
     "thumbnail",
     "proxy",
-    "annotationHook"
+    "annotationHook",
+    "handoffChecklist",
+    "handoff"
   ],
   properties: {
     id: { type: "string" },
@@ -128,13 +155,26 @@ export const workflowJobSchema = {
     },
     thumbnail: thumbnailSchema,
     proxy: proxySchema,
-    annotationHook: annotationHookSchema
+    annotationHook: annotationHookSchema,
+    handoffChecklist: handoffChecklistSchema,
+    handoff: handoffSchema
   }
 } as const;
 
 export const assetQueueRowSchema = {
   type: "object",
-  required: ["id", "jobId", "title", "sourceUri", "status", "thumbnail", "proxy", "annotationHook"],
+  required: [
+    "id",
+    "jobId",
+    "title",
+    "sourceUri",
+    "status",
+    "thumbnail",
+    "proxy",
+    "annotationHook",
+    "handoffChecklist",
+    "handoff"
+  ],
   properties: {
     id: { type: "string" },
     jobId: {
@@ -145,6 +185,8 @@ export const assetQueueRowSchema = {
     status: { type: "string", enum: [...workflowStatusEnum] },
     thumbnail: thumbnailSchema,
     proxy: proxySchema,
-    annotationHook: annotationHookSchema
+    annotationHook: annotationHookSchema,
+    handoffChecklist: handoffChecklistSchema,
+    handoff: handoffSchema
   }
 } as const;

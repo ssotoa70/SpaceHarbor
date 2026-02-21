@@ -37,6 +37,17 @@ export interface AssetRow {
     provider: string | null;
     contextId: string | null;
   };
+  handoffChecklist: {
+    releaseNotesReady: boolean;
+    verificationComplete: boolean;
+    commsDraftReady: boolean;
+    ownerAssigned: boolean;
+  };
+  handoff: {
+    status: "not_ready" | "ready_for_release";
+    owner: string | null;
+    lastUpdatedAt: string | null;
+  };
 }
 
 export interface AuditRow {

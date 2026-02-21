@@ -25,6 +25,17 @@ test("GET /assets returns queue rows with status", async () => {
       thumbnail: null;
       proxy: null;
       annotationHook: { enabled: boolean; provider: null; contextId: null };
+      handoffChecklist: {
+        releaseNotesReady: boolean;
+        verificationComplete: boolean;
+        commsDraftReady: boolean;
+        ownerAssigned: boolean;
+      };
+      handoff: {
+        status: "not_ready" | "ready_for_release";
+        owner: null;
+        lastUpdatedAt: null;
+      };
     }>;
   };
   assert.equal(body.assets[0].title, "Queue Asset");
@@ -32,6 +43,17 @@ test("GET /assets returns queue rows with status", async () => {
   assert.equal(body.assets[0].thumbnail, null);
   assert.equal(body.assets[0].proxy, null);
   assert.deepEqual(body.assets[0].annotationHook, { enabled: false, provider: null, contextId: null });
+  assert.deepEqual(body.assets[0].handoffChecklist, {
+    releaseNotesReady: false,
+    verificationComplete: false,
+    commsDraftReady: false,
+    ownerAssigned: false
+  });
+  assert.deepEqual(body.assets[0].handoff, {
+    status: "not_ready",
+    owner: null,
+    lastUpdatedAt: null
+  });
 
   await app.close();
 });

@@ -119,6 +119,17 @@ test("GET /api/v1/assets returns additive review/QC status values", async () => 
     provider: null,
     contextId: null
   });
+  assert.deepEqual(assets.json().assets[0].handoffChecklist, {
+    releaseNotesReady: false,
+    verificationComplete: false,
+    commsDraftReady: false,
+    ownerAssigned: false
+  });
+  assert.deepEqual(assets.json().assets[0].handoff, {
+    status: "not_ready",
+    owner: null,
+    lastUpdatedAt: null
+  });
 
   const job = await app.inject({ method: "GET", url: `/api/v1/jobs/${ingestBody.job.id}` });
   assert.equal(job.statusCode, 200);
@@ -128,6 +139,17 @@ test("GET /api/v1/assets returns additive review/QC status values", async () => 
     enabled: false,
     provider: null,
     contextId: null
+  });
+  assert.deepEqual(job.json().handoffChecklist, {
+    releaseNotesReady: false,
+    verificationComplete: false,
+    commsDraftReady: false,
+    ownerAssigned: false
+  });
+  assert.deepEqual(job.json().handoff, {
+    status: "not_ready",
+    owner: null,
+    lastUpdatedAt: null
   });
 
   await app.close();

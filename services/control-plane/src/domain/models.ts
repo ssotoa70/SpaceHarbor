@@ -36,6 +36,19 @@ export interface AnnotationHookMetadata {
   contextId: string | null;
 }
 
+export interface HandoffChecklistMetadata {
+  releaseNotesReady: boolean;
+  verificationComplete: boolean;
+  commsDraftReady: boolean;
+  ownerAssigned: boolean;
+}
+
+export interface HandoffMetadata {
+  status: "not_ready" | "ready_for_release";
+  owner: string | null;
+  lastUpdatedAt: string | null;
+}
+
 export interface WorkflowJob {
   id: string;
   assetId: string;
@@ -51,6 +64,8 @@ export interface WorkflowJob {
   thumbnail: AssetThumbnailPreview | null;
   proxy: AssetProxyPreview | null;
   annotationHook: AnnotationHookMetadata;
+  handoffChecklist: HandoffChecklistMetadata;
+  handoff: HandoffMetadata;
 }
 
 export interface IngestResult {
@@ -67,6 +82,8 @@ export interface AssetQueueRow {
   thumbnail: AssetThumbnailPreview | null;
   proxy: AssetProxyPreview | null;
   annotationHook: AnnotationHookMetadata;
+  handoffChecklist: HandoffChecklistMetadata;
+  handoff: HandoffMetadata;
 }
 
 export interface AuditEvent {

@@ -33,6 +33,19 @@ const DEFAULT_ANNOTATION_HOOK: AnnotationHookMetadata = {
   contextId: null
 };
 
+const DEFAULT_HANDOFF_CHECKLIST = {
+  releaseNotesReady: false,
+  verificationComplete: false,
+  commsDraftReady: false,
+  ownerAssigned: false
+} as const;
+
+const DEFAULT_HANDOFF = {
+  status: "not_ready",
+  owner: null,
+  lastUpdatedAt: null
+} as const;
+
 export class LocalPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "local" as const;
 
@@ -98,7 +111,9 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       leaseExpiresAt: null,
       thumbnail: null,
       proxy: null,
-      annotationHook: input.annotationHook ?? DEFAULT_ANNOTATION_HOOK
+      annotationHook: input.annotationHook ?? DEFAULT_ANNOTATION_HOOK,
+      handoffChecklist: { ...DEFAULT_HANDOFF_CHECKLIST },
+      handoff: { ...DEFAULT_HANDOFF }
     };
 
     this.assets.set(asset.id, asset);
@@ -636,7 +651,9 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
         status: latestJob?.status ?? "pending",
         thumbnail: latestJob?.thumbnail ?? null,
         proxy: latestJob?.proxy ?? null,
-        annotationHook: latestJob?.annotationHook ?? DEFAULT_ANNOTATION_HOOK
+        annotationHook: latestJob?.annotationHook ?? DEFAULT_ANNOTATION_HOOK,
+        handoffChecklist: latestJob?.handoffChecklist ?? { ...DEFAULT_HANDOFF_CHECKLIST },
+        handoff: latestJob?.handoff ?? { ...DEFAULT_HANDOFF }
       };
     });
   }

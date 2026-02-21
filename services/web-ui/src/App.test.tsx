@@ -20,6 +20,17 @@ function buildAsset(overrides: Partial<AssetRow> = {}): AssetRow {
       provider: null,
       contextId: null
     },
+    handoffChecklist: {
+      releaseNotesReady: false,
+      verificationComplete: false,
+      commsDraftReady: false,
+      ownerAssigned: false
+    },
+    handoff: {
+      status: "not_ready",
+      owner: null,
+      lastUpdatedAt: null
+    },
     ...overrides
   };
 }
@@ -310,5 +321,32 @@ describe("App", () => {
     expect(await screen.findByText("Preview not available")).toBeInTheDocument();
     expect(screen.getByText("Preview metadata available")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open annotation context" })).toBeInTheDocument();
+  });
+
+  it("gates coordinator handoff release-ready action until checklist and owner are complete", async () => {
+    mockApiResponses({
+      assets: [
+        buildAsset({
+          id: "asset-qc-approved",
+          title: "QC Approved Clip",
+          status: "qc_approved"
+        })
+      ]
+    });
+
+    render(<App />);
+
+    const markReadyButton = await screen.findByRole("button", { name: "Mark release-ready" });
+    expect(markReadyButton).toBeDisabled();
+    expect(screen.getByText("Blocked: complete checklist and assign handoff owner.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Release notes ready" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Verification complete" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Comms draft ready" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Handoff owner" }), { target: { value: "coordinator-1" } });
+
+    expect(markReadyButton).toBeEnabled();
+    fireEvent.click(markReadyButton);
+    expect(screen.getByText("Release-ready marked.")).toBeInTheDocument();
   });
 });

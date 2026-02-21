@@ -91,6 +91,17 @@ test("local persistence exposes null-safe preview and annotation metadata defaul
     provider: null,
     contextId: null
   });
+  assert.deepEqual(ingest.job.handoffChecklist, {
+    releaseNotesReady: false,
+    verificationComplete: false,
+    commsDraftReady: false,
+    ownerAssigned: false
+  });
+  assert.deepEqual(ingest.job.handoff, {
+    status: "not_ready",
+    owner: null,
+    lastUpdatedAt: null
+  });
 
   const row = persistence.listAssetQueueRows()[0];
   assert.equal(row.thumbnail, null);
@@ -99,6 +110,17 @@ test("local persistence exposes null-safe preview and annotation metadata defaul
     enabled: false,
     provider: null,
     contextId: null
+  });
+  assert.deepEqual(row.handoffChecklist, {
+    releaseNotesReady: false,
+    verificationComplete: false,
+    commsDraftReady: false,
+    ownerAssigned: false
+  });
+  assert.deepEqual(row.handoff, {
+    status: "not_ready",
+    owner: null,
+    lastUpdatedAt: null
   });
 });
 
