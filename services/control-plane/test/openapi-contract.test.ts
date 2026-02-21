@@ -251,10 +251,41 @@ test("OpenAPI exposes additive review/QC statuses and event types", async () => 
     "asset.review.qc_pending",
     "asset.review.in_review",
     "asset.review.approved",
-    "asset.review.rejected"
+    "asset.review.rejected",
+    "asset.review.annotation_created",
+    "asset.review.annotation_resolved",
+    "asset.review.task_linked",
+    "asset.review.submission_created",
+    "asset.review.decision_recorded",
+    "asset.review.decision_overridden"
   ]) {
     assert.ok(eventTypeEnum.includes(eventType), `missing event type enum in OpenAPI: ${eventType}`);
   }
+
+  const eventDataSchemaProperties =
+    body.paths?.["/api/v1/events"]?.post?.requestBody?.content?.["application/json"]?.schema?.properties?.data?.properties ?? {};
+
+  for (const fieldName of [
+    "projectId",
+    "shotId",
+    "reviewId",
+    "submissionId",
+    "versionId",
+    "actorId",
+    "actorRole",
+    "annotationId",
+    "taskId",
+    "taskSystem",
+    "decision",
+    "decisionReasonCode",
+    "priorDecisionEventId",
+    "overrideReasonCode"
+  ]) {
+    assert.ok(eventDataSchemaProperties[fieldName], `missing event data field in OpenAPI schema: ${fieldName}`);
+  }
+
+  assert.deepEqual(eventDataSchemaProperties.actorRole.enum, ["artist", "coordinator", "supervisor", "producer"]);
+  assert.deepEqual(eventDataSchemaProperties.decision.enum, ["approved", "changes_requested", "rejected"]);
 
   const assetRowSchemaProperties =
     body.paths?.["/api/v1/assets"]?.get?.responses?.["200"]?.content?.["application/json"]?.schema?.properties?.assets?.items
