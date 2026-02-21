@@ -195,3 +195,13 @@ test("local outbox publish keeps item pending when webhook delivery fails", asyn
   assert.equal(stats.outbound.success, 0);
   assert.equal(stats.outbound.failure, 1);
 });
+
+test("persistence adapters expose audit retention preview and apply methods", () => {
+  const local = createPersistenceAdapter("local");
+  const vast = createPersistenceAdapter("vast");
+
+  assert.equal(typeof local.previewAuditRetention, "function");
+  assert.equal(typeof local.applyAuditRetention, "function");
+  assert.equal(typeof vast.previewAuditRetention, "function");
+  assert.equal(typeof vast.applyAuditRetention, "function");
+});

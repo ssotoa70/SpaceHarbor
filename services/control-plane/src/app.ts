@@ -4,6 +4,7 @@ import { resolveCorrelationId } from "./http/correlation.js";
 import { registerOpenApi } from "./http/openapi.js";
 import { createPersistenceAdapter } from "./persistence/factory.js";
 import type { PersistenceAdapter } from "./persistence/types.js";
+import { createAuditRetentionRunner } from "./retention/audit-retention.js";
 import { registerAssetsRoute } from "./routes/assets.js";
 import { registerAuditRoute } from "./routes/audit.js";
 import { registerDlqRoute } from "./routes/dlq.js";
@@ -23,6 +24,7 @@ interface BuildAppOptions {
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const persistence = options.persistenceAdapter ?? createPersistenceAdapter();
   persistence.reset();
+  const auditRetention = createAuditRetentionRunner(persistence);
   const prefixes = ["", "/api/v1"];
 
   const app = Fastify({ logger: false });
@@ -83,6 +85,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerOutboxRoute(app, persistence);
     void registerDlqRoute(app, persistence);
     void registerMetricsRoute(app, persistence);
+  });
+
+  app.addHook("onReady", async () => {
+    auditRetention.start();
+  });
+
+  app.addHook("onClose", async () => {
+    auditRetention.stop();
   });
 
   return app;

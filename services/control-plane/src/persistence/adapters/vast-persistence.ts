@@ -7,6 +7,8 @@ import type { AuditSignal } from "../../domain/models.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
 import type {
+  AuditRetentionApplyResult,
+  AuditRetentionPreview,
   FailureResult,
   IncidentGuidedActionsUpdate,
   IncidentHandoffUpdate,
@@ -225,6 +227,26 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   getAuditEvents() {
     const merged = [...this.fallbackAuditEvents, ...this.localFallback.getAuditEvents()];
     return merged.sort((a, b) => b.at.localeCompare(a.at));
+  }
+
+  previewAuditRetention(cutoffIso: string): AuditRetentionPreview {
+    return this.invokeWorkflowClient(
+      "previewAuditRetention",
+      this.workflowClient?.previewAuditRetention
+        ? () => this.workflowClient!.previewAuditRetention(cutoffIso)
+        : undefined,
+      () => this.localFallback.previewAuditRetention(cutoffIso)
+    );
+  }
+
+  applyAuditRetention(cutoffIso: string, maxDeletePerRun?: number): AuditRetentionApplyResult {
+    return this.invokeWorkflowClient(
+      "applyAuditRetention",
+      this.workflowClient?.applyAuditRetention
+        ? () => this.workflowClient!.applyAuditRetention(cutoffIso, maxDeletePerRun)
+        : undefined,
+      () => this.localFallback.applyAuditRetention(cutoffIso, maxDeletePerRun)
+    );
   }
 
   getIncidentCoordination() {

@@ -1,6 +1,12 @@
 import type { IngestResult, WorkflowJob } from "../../domain/models.js";
 
-import type { FailureResult, IngestInput, WriteContext } from "../types.js";
+import type {
+  AuditRetentionApplyResult,
+  AuditRetentionPreview,
+  FailureResult,
+  IngestInput,
+  WriteContext
+} from "../types.js";
 
 export interface VastWorkflowClient {
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult;
@@ -10,6 +16,8 @@ export interface VastWorkflowClient {
   claimNextJob(workerId: string, leaseSeconds: number, context: WriteContext): WorkflowJob | null;
   heartbeatJob(jobId: string, workerId: string, leaseSeconds: number, context: WriteContext): WorkflowJob | null;
   replayJob(jobId: string, context: WriteContext): WorkflowJob | null;
+  previewAuditRetention(cutoffIso: string): AuditRetentionPreview;
+  applyAuditRetention(cutoffIso: string, maxDeletePerRun?: number): AuditRetentionApplyResult;
   hasProcessedEvent(eventId: string): boolean;
   markProcessedEvent(eventId: string): void;
 }
