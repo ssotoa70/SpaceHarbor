@@ -45,8 +45,10 @@
 
 - Strict mode: with `ASSETHARBOR_VAST_STRICT=true` and `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=false`, VAST workflow client failures fail-fast.
 - Continuity mode: with `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=true`, client failures fall back to local adapter behavior.
-- Fallback usage is surfaced in audit trail messages (`GET /api/v1/audit`) with `vast fallback` markers.
-- For incident validation, run ingest/event workflow and then confirm fallback markers in audit events.
+- Fallback usage is surfaced in `GET /api/v1/audit` as structured signal fields (`signal.type=fallback`, `signal.code=VAST_FALLBACK`, `signal.severity`).
+- Operator dashboards should classify degraded/recovering state from structured `signal` values and event recency, not from audit message text parsing.
+- Durability semantics (current): fallback counters and fallback signals are in-process and reset on control-plane restart; treat them as operational indicators, not durable compliance history.
+- For incident validation, run ingest/event workflow and then confirm fallback `signal` values in audit events.
 
 ## SLO Definitions
 
@@ -69,6 +71,24 @@
 | Warning threshold breach | On-call operator | Service owner | Engineering manager | 30 minutes |
 | Critical threshold breach | Service owner | Incident commander | Director on-call | 15 minutes |
 | Security or data integrity risk | Incident commander | Security lead | Executive on-call | Immediate |
+
+## Shared Operator Coordination and Handoff
+
+1. Read shared state with `GET /api/v1/incident/coordination` before taking ownership changes.
+2. Update guided actions via `PUT /api/v1/incident/coordination/actions` whenever acknowledgement, owner, escalation status, or next update ETA changes.
+3. Add timeline updates via `POST /api/v1/incident/coordination/notes` for each decision, mitigation, and escalation handoff checkpoint.
+4. Use `PUT /api/v1/incident/coordination/handoff` to transition handoff state:
+   - `none`: no active handoff.
+   - `handoff_requested`: outgoing owner requests transition and records summary.
+   - `handoff_accepted`: incoming owner accepts and becomes active responder.
+5. During critical threshold incidents, keep escalation targets aligned with the matrix above and reflect any owner/escalation changes in guided actions immediately.
+
+## Correlation ID Discipline for Incident Timeline Notes
+
+- Reuse the workload `x-correlation-id` when posting incident notes so runbook, audit feed, and API traces remain linkable.
+- If a note references a known fallback or workflow event, set `correlationId` to that event correlation (for example `corr-vast-fallback-123`).
+- Keep note text action-oriented and time-bound (what changed, who owns next action, and next ETA).
+- Validate timeline continuity by checking `GET /api/v1/incident/coordination` and `GET /api/v1/audit` for matching correlation markers.
 
 ## Canary Promotion and Rollback Gates
 

@@ -19,14 +19,43 @@ test("GET /openapi.json returns OpenAPI document with critical workflow paths", 
   const requiredPaths = [
     "/api/v1/assets/ingest",
     "/api/v1/events",
+    "/api/v1/audit",
     "/api/v1/queue/claim",
     "/api/v1/jobs/{id}/heartbeat",
-    "/api/v1/jobs/{id}/replay"
+    "/api/v1/jobs/{id}/replay",
+    "/api/v1/incident/coordination",
+    "/api/v1/incident/coordination/actions",
+    "/api/v1/incident/coordination/notes",
+    "/api/v1/incident/coordination/handoff"
   ];
 
   for (const path of requiredPaths) {
     assert.ok(body.paths[path], `missing path in OpenAPI doc: ${path}`);
   }
+
+  await app.close();
+});
+
+test("OpenAPI includes explicit /api/v1/audit schema metadata", async () => {
+  const app = buildApp();
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/openapi.json"
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+
+  const operation = body.paths?.["/api/v1/audit"]?.get;
+  assert.ok(operation, "missing GET /api/v1/audit operation");
+  assert.equal(operation.operationId, "v1ListAuditEvents");
+  assert.equal(operation.tags.includes("audit"), true);
+
+  const eventSchema = operation.responses?.["200"]?.content?.["application/json"]?.schema?.properties?.events?.items;
+  assert.ok(eventSchema, "missing audit event schema");
+  assert.deepEqual(eventSchema.required, ["id", "message", "at", "signal"]);
+  assert.deepEqual(eventSchema.properties?.signal?.anyOf?.[0]?.required, ["type", "code", "severity"]);
 
   await app.close();
 });
@@ -65,11 +94,15 @@ test("OpenAPI critical workflow operations expose stable operation metadata", as
   const body = response.json();
 
   const criticalOperations = [
-    { path: "/api/v1/assets/ingest", method: "post", expectedStatus: "201", requiresBody: true },
-    { path: "/api/v1/events", method: "post", expectedStatus: "202", requiresBody: true },
-    { path: "/api/v1/queue/claim", method: "post", expectedStatus: "200", requiresBody: true },
-    { path: "/api/v1/jobs/{id}/heartbeat", method: "post", expectedStatus: "200", requiresBody: true },
-    { path: "/api/v1/jobs/{id}/replay", method: "post", expectedStatus: "202", requiresBody: false }
+    { path: "/api/v1/assets/ingest", method: "post", expectedStatus: "201", requiresBody: true, requiresSecurity: true },
+    { path: "/api/v1/events", method: "post", expectedStatus: "202", requiresBody: true, requiresSecurity: true },
+    { path: "/api/v1/queue/claim", method: "post", expectedStatus: "200", requiresBody: true, requiresSecurity: true },
+    { path: "/api/v1/jobs/{id}/heartbeat", method: "post", expectedStatus: "200", requiresBody: true, requiresSecurity: true },
+    { path: "/api/v1/jobs/{id}/replay", method: "post", expectedStatus: "202", requiresBody: false, requiresSecurity: true },
+    { path: "/api/v1/incident/coordination", method: "get", expectedStatus: "200", requiresBody: false, requiresSecurity: false },
+    { path: "/api/v1/incident/coordination/actions", method: "put", expectedStatus: "200", requiresBody: true, requiresSecurity: true },
+    { path: "/api/v1/incident/coordination/notes", method: "post", expectedStatus: "201", requiresBody: true, requiresSecurity: true },
+    { path: "/api/v1/incident/coordination/handoff", method: "put", expectedStatus: "200", requiresBody: true, requiresSecurity: true }
   ] as const;
 
   for (const operationConfig of criticalOperations) {
@@ -81,8 +114,12 @@ test("OpenAPI critical workflow operations expose stable operation metadata", as
 
     assert.ok(operation.responses?.[operationConfig.expectedStatus], `missing ${operationConfig.expectedStatus} response for ${operationConfig.path}`);
 
-    assert.ok(operation.security, `missing security declaration for ${operationConfig.path}`);
-    assert.deepEqual(operation.security, [{ ApiKeyAuth: [] }], `unexpected security for ${operationConfig.path}`);
+    if (operationConfig.requiresSecurity) {
+      assert.ok(operation.security, `missing security declaration for ${operationConfig.path}`);
+      assert.deepEqual(operation.security, [{ ApiKeyAuth: [] }], `unexpected security for ${operationConfig.path}`);
+    } else {
+      assert.equal(operation.security, undefined, `unexpected security declaration for ${operationConfig.path}`);
+    }
 
     if (operationConfig.requiresBody) {
       assert.equal(operation.requestBody?.required, true, `requestBody is not required for ${operationConfig.path}`);
@@ -133,6 +170,30 @@ test("OpenAPI workflow operations keep tags, parameter docs, and error envelope 
       method: "post",
       expectedTag: "workflow",
       errorStatuses: ["401", "403", "404"]
+    },
+    {
+      path: "/api/v1/incident/coordination",
+      method: "get",
+      expectedTag: "operations",
+      errorStatuses: []
+    },
+    {
+      path: "/api/v1/incident/coordination/actions",
+      method: "put",
+      expectedTag: "operations",
+      errorStatuses: ["400", "401", "403", "409"]
+    },
+    {
+      path: "/api/v1/incident/coordination/notes",
+      method: "post",
+      expectedTag: "operations",
+      errorStatuses: ["400", "401", "403"]
+    },
+    {
+      path: "/api/v1/incident/coordination/handoff",
+      method: "put",
+      expectedTag: "operations",
+      errorStatuses: ["400", "401", "403", "409"]
     }
   ] as const;
 

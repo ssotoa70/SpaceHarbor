@@ -3,9 +3,18 @@ import { randomUUID } from "node:crypto";
 import type { AuditEvent } from "../../domain/models.js";
 import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
 import type { OutboundConfig } from "../../integrations/outbound/types.js";
+import type { AuditSignal } from "../../domain/models.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
-import type { FailureResult, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
+import type {
+  FailureResult,
+  IncidentGuidedActionsUpdate,
+  IncidentHandoffUpdate,
+  IncidentNoteInput,
+  PersistenceAdapter,
+  WorkflowStats,
+  WriteContext
+} from "../types.js";
 import type { VastWorkflowClient } from "../vast/workflow-client.js";
 
 interface VastConfig {
@@ -218,6 +227,22 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     return merged.sort((a, b) => b.at.localeCompare(a.at));
   }
 
+  getIncidentCoordination() {
+    return this.localFallback.getIncidentCoordination();
+  }
+
+  updateIncidentGuidedActions(update: IncidentGuidedActionsUpdate, context: WriteContext) {
+    return this.localFallback.updateIncidentGuidedActions(update, context);
+  }
+
+  addIncidentNote(input: IncidentNoteInput, context: WriteContext) {
+    return this.localFallback.addIncidentNote(input, context);
+  }
+
+  updateIncidentHandoff(update: IncidentHandoffUpdate, context: WriteContext) {
+    return this.localFallback.updateIncidentHandoff(update, context);
+  }
+
   hasProcessedEvent(eventId: string): boolean {
     return this.invokeWorkflowClient(
       "hasProcessedEvent",
@@ -259,10 +284,17 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   private recordFallbackAudit(operation: string, error: unknown): void {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    const signal: AuditSignal = {
+      type: "fallback",
+      code: "VAST_FALLBACK",
+      severity: "warning"
+    };
+
     this.fallbackAuditEvents.unshift({
       id: randomUUID(),
       message: `[corr:system] vast fallback (${operation}) due to client error: ${errorMessage}`,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
+      signal
     });
   }
 

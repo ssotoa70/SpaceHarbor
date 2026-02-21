@@ -3,9 +3,14 @@ import { randomUUID } from "node:crypto";
 import type {
   AnnotationHookMetadata,
   Asset,
+  AuditSignal,
   AssetQueueRow,
   AuditEvent,
   DlqItem,
+  IncidentCoordination,
+  IncidentGuidedActions,
+  IncidentHandoff,
+  IncidentNote,
   IngestResult,
   OutboxItem,
   WorkflowJob,
@@ -15,7 +20,16 @@ import { mapOutboxItemToOutboundPayload } from "../../integrations/outbound/payl
 import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
 import type { OutboundConfig, OutboundTarget } from "../../integrations/outbound/types.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
-import type { FailureResult, IngestInput, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
+import type {
+  FailureResult,
+  IncidentGuidedActionsUpdate,
+  IncidentHandoffUpdate,
+  IncidentNoteInput,
+  IngestInput,
+  PersistenceAdapter,
+  WorkflowStats,
+  WriteContext
+} from "../types.js";
 
 interface QueueEntry {
   jobId: string;
@@ -46,6 +60,22 @@ const DEFAULT_HANDOFF = {
   lastUpdatedAt: null
 } as const;
 
+const DEFAULT_INCIDENT_GUIDED_ACTIONS: IncidentGuidedActions = {
+  acknowledged: false,
+  owner: "",
+  escalated: false,
+  nextUpdateEta: null,
+  updatedAt: null
+};
+
+const DEFAULT_INCIDENT_HANDOFF: IncidentHandoff = {
+  state: "none",
+  fromOwner: "",
+  toOwner: "",
+  summary: "",
+  updatedAt: null
+};
+
 export class LocalPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "local" as const;
 
@@ -55,6 +85,9 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   private readonly dlq = new Map<string, DlqItem>();
   private readonly outbox: OutboxItem[] = [];
   private readonly auditEvents: AuditEvent[] = [];
+  private incidentGuidedActions: IncidentGuidedActions = { ...DEFAULT_INCIDENT_GUIDED_ACTIONS };
+  private incidentHandoff: IncidentHandoff = { ...DEFAULT_INCIDENT_HANDOFF };
+  private readonly incidentNotes: IncidentNote[] = [];
   private readonly processedEventIds = new Set<string>();
   private readonly outboundCounters = {
     attempts: 0,
@@ -79,6 +112,9 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.dlq.clear();
     this.outbox.length = 0;
     this.auditEvents.length = 0;
+    this.incidentGuidedActions = { ...DEFAULT_INCIDENT_GUIDED_ACTIONS };
+    this.incidentHandoff = { ...DEFAULT_INCIDENT_HANDOFF };
+    this.incidentNotes.length = 0;
     this.processedEventIds.clear();
     this.outboundCounters.attempts = 0;
     this.outboundCounters.success = 0;
@@ -662,6 +698,73 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     return [...this.auditEvents];
   }
 
+  getIncidentCoordination(): IncidentCoordination {
+    return {
+      guidedActions: { ...this.incidentGuidedActions },
+      handoff: { ...this.incidentHandoff },
+      notes: [...this.incidentNotes]
+    };
+  }
+
+  updateIncidentGuidedActions(update: IncidentGuidedActionsUpdate, context: WriteContext): IncidentGuidedActions {
+    const now = this.resolveNow(context);
+    this.incidentGuidedActions = {
+      acknowledged: update.acknowledged,
+      owner: update.owner,
+      escalated: update.escalated,
+      nextUpdateEta: update.nextUpdateEta,
+      updatedAt: now.toISOString()
+    };
+
+    this.recordAudit(
+      `incident actions updated (acknowledged=${this.incidentGuidedActions.acknowledged}, owner=${this.incidentGuidedActions.owner || "unassigned"}, escalated=${this.incidentGuidedActions.escalated})`,
+      context.correlationId,
+      now
+    );
+
+    return { ...this.incidentGuidedActions };
+  }
+
+  addIncidentNote(input: IncidentNoteInput, context: WriteContext): IncidentNote {
+    const now = this.resolveNow(context);
+    const note: IncidentNote = {
+      id: randomUUID(),
+      message: input.message,
+      correlationId: input.correlationId,
+      author: input.author,
+      at: now.toISOString()
+    };
+
+    this.incidentNotes.unshift(note);
+
+    this.recordAudit(
+      `incident note added by ${note.author} linked to ${note.correlationId}`,
+      context.correlationId,
+      now
+    );
+
+    return note;
+  }
+
+  updateIncidentHandoff(update: IncidentHandoffUpdate, context: WriteContext): IncidentHandoff {
+    const now = this.resolveNow(context);
+    this.incidentHandoff = {
+      state: update.state,
+      fromOwner: update.fromOwner,
+      toOwner: update.toOwner,
+      summary: update.summary,
+      updatedAt: now.toISOString()
+    };
+
+    this.recordAudit(
+      `incident handoff updated (${this.incidentHandoff.fromOwner || "unassigned"} -> ${this.incidentHandoff.toOwner || "unassigned"}, state=${this.incidentHandoff.state})`,
+      context.correlationId,
+      now
+    );
+
+    return { ...this.incidentHandoff };
+  }
+
   hasProcessedEvent(eventId: string): boolean {
     return this.processedEventIds.has(eventId);
   }
@@ -691,11 +794,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     });
   }
 
-  private recordAudit(message: string, correlationId: string, now: Date): AuditEvent {
+  private recordAudit(message: string, correlationId: string, now: Date, signal?: AuditSignal): AuditEvent {
     const event: AuditEvent = {
       id: randomUUID(),
       message: `[corr:${correlationId}] ${message}`,
-      at: now.toISOString()
+      at: now.toISOString(),
+      ...(signal ? { signal } : {})
     };
     this.auditEvents.unshift(event);
     return event;

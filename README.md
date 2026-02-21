@@ -26,6 +26,7 @@ docker compose up --build
 
 ## Test commands
 
+- Workspace preflight: `npm run check:workspace`
 - Root compose contract: `npm run test:compose`
 - Root docs contract: `npm run test:docs`
 - Contract suite (API + events): `npm run test:contracts`
@@ -33,6 +34,22 @@ docker compose up --build
 - Media-worker tests: `npm run test:worker`
 - Web-ui tests: `npm run test:web-ui`
 - Full suite: `npm run test:all`
+
+## Worktree safety checklist
+
+Run this before editing code to avoid writing in the wrong directory:
+
+```bash
+npm run check:workspace
+git worktree list
+git branch --show-current
+```
+
+Optional strict mode (only allow a specific parent path):
+
+```bash
+EXPECTED_WORKTREE_PREFIX="$HOME/.config/superpowers/worktrees/AssetHarbor" npm run check:workspace
+```
 
 ## Core routes
 

@@ -190,3 +190,37 @@ export const assetQueueRowSchema = {
     handoff: handoffSchema
   }
 } as const;
+
+export const auditSignalSchema = {
+  type: "object",
+  required: ["type", "code", "severity"],
+  properties: {
+    type: { type: "string", enum: ["fallback"] },
+    code: { type: "string", enum: ["VAST_FALLBACK"] },
+    severity: { type: "string", enum: ["warning", "critical"] }
+  }
+} as const;
+
+export const auditEventSchema = {
+  type: "object",
+  required: ["id", "message", "at", "signal"],
+  properties: {
+    id: { type: "string" },
+    message: { type: "string" },
+    at: { type: "string", format: "date-time" },
+    signal: {
+      anyOf: [auditSignalSchema, { type: "null" }]
+    }
+  }
+} as const;
+
+export const auditEventsResponseSchema = {
+  type: "object",
+  required: ["events"],
+  properties: {
+    events: {
+      type: "array",
+      items: auditEventSchema
+    }
+  }
+} as const;
