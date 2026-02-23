@@ -5,35 +5,6 @@ import { App } from "./App";
 import type { AssetRow } from "./api";
 import type { MetricsSnapshot } from "./operator/types";
 
-function buildAsset(overrides: Partial<AssetRow> = {}): AssetRow {
-  return {
-    id: "asset-1",
-    jobId: "job-1",
-    title: "QC Demo Asset",
-    sourceUri: "s3://bucket/qc-demo-asset.mov",
-    status: "completed",
-    thumbnail: null,
-    proxy: null,
-    annotationHook: {
-      enabled: false,
-      provider: null,
-      contextId: null
-    },
-    handoffChecklist: {
-      releaseNotesReady: false,
-      verificationComplete: false,
-      commsDraftReady: false,
-      ownerAssigned: false
-    },
-    handoff: {
-      status: "not_ready",
-      owner: null,
-      lastUpdatedAt: null
-    },
-    ...overrides
-  };
-}
-
 interface CoordinationState {
   guidedActions: {
     acknowledged: boolean;
@@ -90,6 +61,7 @@ interface AuditRowFixture {
   at: string;
   signal: AuditSignalFixture | null;
 }
+
 function buildMetricsSnapshot(fallbackEvents: number): MetricsSnapshot {
   return {
     assets: {
@@ -129,6 +101,36 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
+function buildAsset(overrides: Partial<AssetRow> = {}): AssetRow {
+  const baseAsset: AssetRow = {
+    id: "asset-1",
+    jobId: "job-1",
+    title: "Show-A SH010 Comp",
+    sourceUri: "s3://bucket/show-a/ep002/shot-010.mov",
+    status: "failed",
+    productionMetadata: {
+      show: "show-a",
+      episode: "ep002",
+      sequence: "sq020",
+      shot: "sh010",
+      version: 3,
+      vendor: "vendor-west",
+      priority: "high",
+      dueDate: "2026-02-18T11:30:00.000Z",
+      owner: "alex"
+    }
+  };
+
+  return {
+    ...baseAsset,
+    ...overrides,
+    productionMetadata: {
+      ...baseAsset.productionMetadata,
+      ...overrides.productionMetadata
+    }
+  };
+}
+
 function mockApiResponses(options?: {
   assets?: AssetRow[];
   metricsSnapshots?: MetricsSnapshot[];
@@ -138,7 +140,6 @@ function mockApiResponses(options?: {
   coordination?: CoordinationState;
 }): void {
   const metricsSnapshots = options?.metricsSnapshots ?? [buildMetricsSnapshot(0)];
-  const assets = options?.assets ?? [];
   const auditRows =
     options?.auditRows ??
     (options?.auditMessages ?? []).map((message, index) => ({
@@ -151,6 +152,7 @@ function mockApiResponses(options?: {
   let requestCount = 0;
   let metricsIndex = 0;
   let coordination = options?.coordination ?? defaultCoordinationState();
+  const assets = options?.assets ?? [];
 
   vi.stubGlobal(
     "fetch",
@@ -287,10 +289,6 @@ function mockApiResponses(options?: {
       }
 
       if (/\/api\/v1\/jobs\/.+\/replay$/.test(url)) {
-        return new Response(null, { status: 202 });
-      }
-
-      if (url.endsWith("/api/v1/events")) {
         return new Response(null, { status: 202 });
       }
 
@@ -781,5 +779,77 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Ingest" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Assets Queue" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Register Asset" })).toBeInTheDocument();
+  });
+
+  it("routes coordinator bulk replay through App callback and refreshes after replay", async () => {
+    mockApiResponses({
+      assets: [
+        buildAsset({
+          id: "asset-coordinator",
+          jobId: "job-coordinator",
+          title: "Coordinator Replay Asset",
+          productionMetadata: {
+            dueDate: "2099-02-18T11:30:00.000Z"
+          }
+        })
+      ]
+    });
+
+    render(<App />);
+
+    const roleGroup = screen.getByRole("radiogroup", { name: /role view/i });
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: "Coordinator" }));
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: /select coordinator replay asset/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run replay for eligible" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm replay" }));
+
+    await waitFor(() => {
+      const replayCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/jobs/job-coordinator/replay"));
+      expect(replayCalls).toHaveLength(1);
+    });
+
+    await waitFor(() => {
+      const assetCalls = vi.mocked(fetch).mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/assets"));
+      expect(assetCalls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("routes supervisor bulk replay through App callback and refreshes after replay", async () => {
+    mockApiResponses({
+      assets: [
+        buildAsset({
+          id: "asset-supervisor",
+          jobId: "job-supervisor",
+          title: "Supervisor Replay Asset",
+          productionMetadata: {
+            dueDate: "2099-02-18T11:30:00.000Z"
+          }
+        })
+      ]
+    });
+
+    render(<App />);
+
+    const roleGroup = screen.getByRole("radiogroup", { name: /role view/i });
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: "Supervisor" }));
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: /select supervisor replay asset/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run replay for eligible" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm replay" }));
+
+    await waitFor(() => {
+      const replayCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/jobs/job-supervisor/replay"));
+      expect(replayCalls).toHaveLength(1);
+    });
+
+    await waitFor(() => {
+      const assetCalls = vi.mocked(fetch).mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/assets"));
+      expect(assetCalls.length).toBeGreaterThanOrEqual(2);
+    });
   });
 });
