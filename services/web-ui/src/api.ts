@@ -3,6 +3,16 @@ import type { MetricsSnapshot } from "./operator/types";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const API_KEY = import.meta.env.VITE_API_KEY;
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message?: string) {
+    super(message ?? `request failed: ${status}`);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
 function withAuth(headers: Record<string, string> = {}): Record<string, string> {
   if (!API_KEY) {
     return headers;
@@ -47,17 +57,6 @@ export interface AssetRow {
     status: "not_ready" | "ready_for_release";
     owner: string | null;
     lastUpdatedAt: string | null;
-  };
-  productionMetadata: {
-    show: string | null;
-    episode: string | null;
-    sequence: string | null;
-    shot: string | null;
-    version: number | null;
-    vendor: string | null;
-    priority: "low" | "normal" | "high" | "urgent" | null;
-    dueDate: string | null;
-    owner: string | null;
   };
 }
 
@@ -144,7 +143,7 @@ export async function replayJob(jobId: string): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new Error(`replay failed: ${response.status}`);
+    throw new ApiRequestError(response.status, `replay failed: ${response.status}`);
   }
 }
 

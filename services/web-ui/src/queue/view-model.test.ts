@@ -97,6 +97,31 @@ describe("queue view model", () => {
     expect(invalidDueDate.agingBucket).toBe("fresh");
   });
 
+  it("includes dependency readiness on queue rows with deterministic reason order", () => {
+    const nowMs = Date.parse("2026-02-18T12:00:00.000Z");
+    const row = toQueueViewRow(buildAsset({
+      id: "asset-readiness-check",
+      status: "completed",
+      productionMetadata: {
+        owner: "   ",
+        priority: null,
+        dueDate: null
+      }
+    }), nowMs);
+
+    expect(row.dependencyReadiness).toEqual({
+      ready: false,
+      blocked: true,
+      severity: "warning",
+      reasons: [
+        "missing_owner",
+        "missing_priority",
+        "missing_due_date",
+        "status_not_actionable"
+      ]
+    });
+  });
+
   it("matches free-text query across title, source URI, and metadata", () => {
     const row = toQueueViewRow(buildAsset(), Date.parse("2026-02-18T12:00:00.000Z"));
 
@@ -254,6 +279,13 @@ describe("queue view model", () => {
     expect(summary.byAging.fresh).toBe(1);
     expect(summary.byAging.warning).toBe(1);
     expect(summary.byAging.critical).toBe(1);
+    expect(summary.dependencyReadiness.ready).toBe(1);
+    expect(summary.dependencyReadiness.blocked).toBe(2);
+    expect(summary.dependencyReadiness.byReason.missing_owner).toBe(0);
+    expect(summary.dependencyReadiness.byReason.missing_priority).toBe(0);
+    expect(summary.dependencyReadiness.byReason.missing_due_date).toBe(0);
+    expect(summary.dependencyReadiness.byReason.aged_critical).toBe(1);
+    expect(summary.dependencyReadiness.byReason.status_not_actionable).toBe(1);
   });
 
   it("ignores unknown status values safely in summary aggregation", () => {
