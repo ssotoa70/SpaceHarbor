@@ -7,12 +7,15 @@
 - [ ] SLO and threshold dashboards reviewed.
 - [ ] On-call and escalation assignments confirmed.
 - [ ] Shared incident coordination baseline recorded (`GET /api/v1/incident/coordination`).
+- [ ] Cohort rollout tracker created/updated (`docs/rollouts/templates/cohort-rollout-tracker.md`).
+- [ ] Project rollout signoff record created/updated (`docs/rollouts/templates/project-rollout-signoff.md`).
 
 ## Canary Promotion Gates
 
 - [ ] 10% canary passed for 30 minutes.
 - [ ] 50% canary passed for 45 minutes.
 - [ ] No critical alerts or unresolved incidents.
+- [ ] Rollout tracker status advanced for each in-scope project.
 
 ## Go/No-Go Decision
 
@@ -21,6 +24,7 @@
 - Release commander:
 - Incident commander:
 - Active operator handoff state (`none` / `handoff_requested` / `handoff_accepted`):
+- Project-by-project rollout tracker link:
 - Notes:
 
 ## Communication Templates
@@ -57,6 +61,7 @@
 - [ ] SLO/error budget remains within baseline.
 - [ ] No sustained fallback growth in metrics/audit.
 - [ ] No unresolved pager incidents.
+- [ ] Rollout tracker and project signoff records updated to reflect final state.
 
 ## Rollback Plan
 

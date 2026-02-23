@@ -30,9 +30,17 @@ Rollback owner: release commander (primary) and incident commander (backup).
 
 - [ ] `npm run test:all` passed on release candidate branch.
 - [ ] `docs/runbooks/release-day-checklist.md` completed and signed by release commander.
+- [ ] Cohort tracker and project signoff records updated for all in-scope projects.
 - [ ] Canary rollback command path tested in staging during the same release window.
 - [ ] On-call ownership/escalation matrix reviewed in `docs/wiki-2.0/Operations-Runbook.md`.
 - [ ] Communications plan prepared for promotion and rollback announcements.
+
+## Project-by-Project Rollout Tracking
+
+- Cohort tracker template: `docs/rollouts/templates/cohort-rollout-tracker.md`
+- Project signoff template: `docs/rollouts/templates/project-rollout-signoff.md`
+- Keep one project signoff record per project and link each record in the cohort tracker.
+- Status values are limited to `not_started`, `ready`, `in_pilot`, `go_live_ready`, `live`, `rolled_back`.
 
 ## Post-Release Verification Checkpoints
 

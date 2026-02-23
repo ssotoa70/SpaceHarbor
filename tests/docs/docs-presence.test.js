@@ -17,6 +17,8 @@ test("required docs exist with key headings", () => {
   const degradedModePlaybook = read("docs/runbooks/degraded-mode-playbook.md");
   const faultInjectionChecklist = read("docs/runbooks/fault-injection-checklist.md");
   const releaseDayChecklist = read("docs/runbooks/release-day-checklist.md");
+  const cohortTemplate = read("docs/rollouts/templates/cohort-rollout-tracker.md");
+  const projectTemplate = read("docs/rollouts/templates/project-rollout-signoff.md");
 
   assert.match(runbook, /^# Runbook/m);
   assert.match(apiContracts, /^# API Contracts/m);
@@ -33,6 +35,7 @@ test("required docs exist with key headings", () => {
   assert.match(releaseProcess, /^# Release Process/m);
   assert.match(releaseProcess, /## Canary Promotion and Rollback Gates/i);
   assert.match(releaseProcess, /## Go\/No-Go Checklist/i);
+  assert.match(releaseProcess, /## Project-by-Project Rollout Tracking/i);
   assert.match(releaseProcess, /## Post-Release Verification Checkpoints/i);
   assert.match(releaseProcess, /## Communication Templates/i);
 
@@ -52,6 +55,17 @@ test("required docs exist with key headings", () => {
   assert.match(releaseDayChecklist, /## Post-Release Verification Checkpoints/i);
   assert.match(releaseDayChecklist, /### T\+15m/i);
   assert.match(releaseDayChecklist, /### T\+60m/i);
+  assert.match(releaseDayChecklist, /rollout tracker/i);
+
+  assert.match(cohortTemplate, /^# Cohort Rollout Tracker Template/m);
+  assert.match(cohortTemplate, /\| project_key \|/i);
+  assert.match(cohortTemplate, /not_started \| ready \| in_pilot \| go_live_ready \| live \| rolled_back/i);
+
+  assert.match(projectTemplate, /^# Project Rollout Signoff Template/m);
+  assert.match(projectTemplate, /## Pilot Entry Checklist/i);
+  assert.match(projectTemplate, /## Cutover Go\/No-Go Decision/i);
+  assert.match(projectTemplate, /## Rollback Trigger Matrix/i);
+  assert.match(projectTemplate, /## Signoff/i);
 
   assert.match(readme, /ASSETHARBOR_VAST_FALLBACK_TO_LOCAL/);
   assert.match(wikiOpsRunbook, /fallback/i);

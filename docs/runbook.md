@@ -103,6 +103,14 @@
 - [ ] Canary gates, rollback owner, and rollback command path verified.
 - [ ] Release-day checklist completed (`docs/runbooks/release-day-checklist.md`).
 
+## Project-by-Project Rollout Tracking
+
+- Use in-repo rollout artifacts for each release cohort:
+  - `docs/rollouts/templates/cohort-rollout-tracker.md`
+  - `docs/rollouts/templates/project-rollout-signoff.md`
+- Keep one row per project in the cohort tracker and one signoff record per project.
+- Do not mark a project `live` in the tracker until service owner and ops owner signoff fields are completed in the project record.
+
 ## Coordinator Handoff and Release Readiness
 
 - For `qc_approved` assets, coordinator completes handoff checklist (release notes, verification, comms draft, owner assignment).
