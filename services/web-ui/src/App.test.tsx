@@ -511,9 +511,11 @@ describe("App", () => {
     const ownerInput = screen.getByRole("textbox", { name: /incident owner/i });
     const escalateToggle = screen.getByRole("checkbox", { name: /escalate response/i });
 
-    expect(acknowledgeToggle).toBeChecked();
-    expect(ownerInput).toHaveValue("operator-a");
-    expect(escalateToggle).toBeChecked();
+    await waitFor(() => {
+      expect(acknowledgeToggle).toBeChecked();
+      expect(ownerInput).toHaveValue("operator-a");
+      expect(escalateToggle).toBeChecked();
+    });
     expect(screen.queryByText(/local only/i)).not.toBeInTheDocument();
     expect(screen.getByText(/fallback correlated with worker saturation/i)).toBeInTheDocument();
   });
