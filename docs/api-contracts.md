@@ -110,6 +110,9 @@
 ```
 
 - Scope note: metadata write/update APIs are intentionally deferred in this slice; this change is read-model exposure only.
+- Slice 2 note: role boards are UI/read-only presentation over existing queue data.
+- Slice 2 note: client-side filters/search use the existing `GET /api/v1/assets` read model.
+- Slice 2 note: no API contract changes are introduced.
 
 ## Outbox
 
