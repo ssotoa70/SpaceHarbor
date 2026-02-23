@@ -1,10 +1,16 @@
 import type { AssetRow } from "../api";
+import {
+  deriveDependencyReadiness,
+  type DependencyReadiness,
+  type DependencyReadinessReason
+} from "./dependency-readiness";
 
 export type AgingBucket = "fresh" | "warning" | "critical";
 
 export interface QueueViewRow extends AssetRow {
   ageMinutes: number;
   agingBucket: AgingBucket;
+  dependencyReadiness: DependencyReadiness;
   searchableText: string;
 }
 
@@ -22,6 +28,11 @@ export interface SupervisorSummary {
   byStatus: Record<"pending" | "processing" | "completed" | "failed" | "needs_replay", number>;
   byPriority: Record<"low" | "normal" | "high" | "urgent", number>;
   byAging: Record<AgingBucket, number>;
+  dependencyReadiness: {
+    ready: number;
+    blocked: number;
+    byReason: Record<DependencyReadinessReason, number>;
+  };
 }
 
 interface SummaryCountItem {
@@ -46,6 +57,13 @@ const supervisorPriorityOrder: Array<keyof SupervisorSummary["byPriority"]> = [
 ];
 
 const supervisorAgingOrder: Array<keyof SupervisorSummary["byAging"]> = ["fresh", "warning", "critical"];
+const dependencyReadinessReasonOrder: DependencyReadinessReason[] = [
+  "missing_owner",
+  "missing_priority",
+  "missing_due_date",
+  "aged_critical",
+  "status_not_actionable"
+];
 
 function hasOwnStatusKey(
   byStatus: SupervisorSummary["byStatus"],
@@ -145,6 +163,10 @@ export function toStatusLabel(status: string): string {
   return toReadableToken(status);
 }
 
+export function toDependencyReadinessReasonLabel(reason: DependencyReadinessReason): string {
+  return toReadableToken(reason);
+}
+
 export function toSupervisorStatusSummaryItems(summary: SupervisorSummary): SummaryCountItem[] {
   return supervisorStatusOrder.map((status) => ({
     key: status,
@@ -169,12 +191,37 @@ export function toSupervisorAgingSummaryItems(summary: SupervisorSummary): Summa
   }));
 }
 
+export function toSupervisorDependencyReadinessSummaryItems(summary: SupervisorSummary): SummaryCountItem[] {
+  return [
+    {
+      key: "ready",
+      label: "ready",
+      count: summary.dependencyReadiness.ready
+    },
+    {
+      key: "blocked",
+      label: "blocked",
+      count: summary.dependencyReadiness.blocked
+    }
+  ];
+}
+
+export function toSupervisorBlockerReasonSummaryItems(summary: SupervisorSummary): SummaryCountItem[] {
+  return dependencyReadinessReasonOrder.map((reason) => ({
+    key: reason,
+    label: toDependencyReadinessReasonLabel(reason),
+    count: summary.dependencyReadiness.byReason[reason]
+  }));
+}
+
 export function toQueueViewRow(asset: AssetRow, nowMs: number): QueueViewRow {
   const ageMinutes = deriveAgeMinutes(asset.productionMetadata.dueDate, nowMs);
+  const agingBucket = deriveAgingBucket(ageMinutes);
   return {
     ...asset,
     ageMinutes,
-    agingBucket: deriveAgingBucket(ageMinutes),
+    agingBucket,
+    dependencyReadiness: deriveDependencyReadiness(asset, ageMinutes, agingBucket),
     searchableText: deriveSearchableText(asset)
   };
 }
@@ -243,6 +290,17 @@ export function buildSupervisorSummary(rows: QueueViewRow[]): SupervisorSummary 
       fresh: 0,
       warning: 0,
       critical: 0
+    },
+    dependencyReadiness: {
+      ready: 0,
+      blocked: 0,
+      byReason: {
+        missing_owner: 0,
+        missing_priority: 0,
+        missing_due_date: 0,
+        aged_critical: 0,
+        status_not_actionable: 0
+      }
     }
   };
 
@@ -257,6 +315,18 @@ export function buildSupervisorSummary(rows: QueueViewRow[]): SupervisorSummary 
     }
 
     summary.byAging[row.agingBucket] += 1;
+
+    if (row.dependencyReadiness.ready) {
+      summary.dependencyReadiness.ready += 1;
+    }
+
+    if (row.dependencyReadiness.blocked) {
+      summary.dependencyReadiness.blocked += 1;
+    }
+
+    for (const reason of row.dependencyReadiness.reasons) {
+      summary.dependencyReadiness.byReason[reason] += 1;
+    }
   }
 
   return summary;
