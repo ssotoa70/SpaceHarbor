@@ -83,6 +83,13 @@
 - Slice 4 note: asset/job read models add additive coordinator handoff metadata:
   - `handoffChecklist` (`releaseNotesReady`, `verificationComplete`, `commsDraftReady`, `ownerAssigned`)
   - `handoff` (`status`, `owner`, `lastUpdatedAt`)
+- Slice 3 note: dependency readiness visibility is UI-derived/read-only over the existing assets read model.
+- Slice 3 note: no API contract changes are introduced.
+- Slice 3 note: bulk actions are deferred to Slice 4.
+- Slice 4 note: bulk actions are replay-only.
+- Slice 4 note: UI orchestrates the existing single-item replay API (`POST /api/v1/jobs/:id/replay`).
+- Slice 4 note: no API contract changes are introduced.
+- Slice 4 note: bulk status mutation is deferred.
 
 ```json
 {
