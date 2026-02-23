@@ -52,6 +52,27 @@ test("POST /api/v1/assets/ingest succeeds with stable v1 response shape", async 
 
   assert.equal(response.statusCode, 201);
   const body = response.json();
+  assert.deepEqual(Object.keys(body.asset).sort(), ["createdAt", "id", "sourceUri", "title"]);
+  assert.deepEqual(Object.keys(body.job).sort(), [
+    "annotationHook",
+    "assetId",
+    "attemptCount",
+    "createdAt",
+    "handoff",
+    "handoffChecklist",
+    "id",
+    "lastError",
+    "leaseExpiresAt",
+    "leaseOwner",
+    "maxAttempts",
+    "nextAttemptAt",
+    "proxy",
+    "status",
+    "thumbnail",
+    "updatedAt"
+  ]);
+  assert.equal("productionMetadata" in body.asset, false);
+  assert.equal("productionMetadata" in body.job, false);
   assert.ok(body.asset.id);
   assert.ok(body.job.id);
   assert.equal(body.job.status, "pending");

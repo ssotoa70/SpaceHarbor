@@ -58,6 +58,8 @@
 ## Queue and Jobs
 
 - `GET /api/v1/assets` returns queue rows with current status.
+- Additive contract (Slice 1): each queue row now includes `productionMetadata` on `GET /api/v1/assets`.
+- `productionMetadata` uses stable keys with null-first defaults until metadata write paths are introduced.
 - `GET /api/v1/jobs/pending` returns pending jobs for worker polling.
 - `GET /api/v1/jobs/:id` returns full workflow job state.
 - `POST /api/v1/queue/claim` claims a pending job and sets processing lease.
