@@ -44,6 +44,41 @@ textarea:focus-visible {
   margin: 0.5rem 0 0;
 }
 
+.role-selector {
+  margin-top: 0.8rem;
+  display: inline-grid;
+  gap: 0.3rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+}
+
+.role-selector legend {
+  padding: 0;
+}
+
+.role-selector-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.role-selector-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.role-selector-option input {
+  margin: 0;
+}
+
 .panel {
   background: #ffffff;
   border: 1px solid #d2deea;
@@ -293,6 +328,176 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
+.coordinator-filter-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 0.75rem;
+  padding: 0.7rem;
+  border: 1px solid #d8e2ec;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.coordinator-filter-bar label {
+  display: grid;
+  gap: 0.25rem;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.coordinator-filter-bar input,
+.coordinator-filter-bar select {
+  border: 1px solid #bfcfdd;
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+}
+
+.coordinator-filter-bar button {
+  align-self: end;
+  width: fit-content;
+  border: 1px solid #8ea4ba;
+  background: #fff;
+  color: #1d3853;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.coordinator-filter-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0 0 0.75rem;
+}
+
+.coordinator-filter-badge {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #c9d8e6;
+  background: #eef6ff;
+  color: #24405d;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.coordinator-empty-state {
+  color: #4d5e72;
+  font-style: italic;
+}
+
+.supervisor-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 0.8rem;
+}
+
+.supervisor-filter-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem;
+  border: 1px solid #d8e2ec;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.supervisor-filter-bar label {
+  display: grid;
+  gap: 0.25rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.supervisor-filter-bar input,
+.supervisor-filter-bar select {
+  border: 1px solid #bfcfdd;
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+}
+
+.supervisor-filter-bar button {
+  align-self: end;
+  width: fit-content;
+  border: 1px solid #8ea4ba;
+  background: #fff;
+  color: #1d3853;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.supervisor-summary-card {
+  border: 1px solid #d8e2ec;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 0.6rem 0.7rem;
+}
+
+.supervisor-summary-card h3,
+.supervisor-summary-value,
+.supervisor-summary-list {
+  margin: 0;
+}
+
+.supervisor-summary-value {
+  margin-top: 0.2rem;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #183a58;
+}
+
+.supervisor-summary-list {
+  list-style: none;
+  padding: 0;
+  margin-top: 0.3rem;
+  display: grid;
+  gap: 0.16rem;
+  font-size: 0.87rem;
+  color: #203953;
+}
+
+.supervisor-compact-table th {
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #35516b;
+}
+
+.supervisor-compact-table td {
+  vertical-align: middle;
+}
+
+.supervisor-aging-chip,
+.supervisor-priority-chip {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border: 1px solid #ccdae8;
+  color: #17334f;
+  background: #edf5fd;
+}
+
+.supervisor-aging-fresh {
+  background: #def4e7;
+  border-color: #afd8c0;
+}
+
+.supervisor-aging-warning {
+  background: #ffe8bf;
+  border-color: #e4c27f;
+}
+
+.supervisor-aging-critical {
+  background: #f8d7dc;
+  border-color: #e2a0ab;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -373,6 +578,10 @@ td {
 @media (max-width: 700px) {
   .layout {
     padding: 0.75rem;
+  }
+
+  .coordinator-filter-bar {
+    grid-template-columns: 1fr;
   }
 
   th,

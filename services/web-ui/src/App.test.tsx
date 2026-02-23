@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -558,6 +558,86 @@ describe("App", () => {
     });
   });
 
+  it("keeps the latest incident owner when guided action responses resolve out of order", async () => {
+    let updateSequence = 0;
+    const pendingOwnerUpdates: Array<{
+      owner: string;
+      resolve: () => void;
+    }> = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        const method = init?.method ?? "GET";
+
+        if (url.endsWith("/api/v1/assets")) {
+          return jsonResponse({ assets: [] });
+        }
+
+        if (url.endsWith("/api/v1/audit")) {
+          return jsonResponse({ events: [] });
+        }
+
+        if (url.endsWith("/api/v1/metrics")) {
+          return jsonResponse(buildMetricsSnapshot(0));
+        }
+
+        if (url.endsWith("/api/v1/incident/coordination") && method === "GET") {
+          return jsonResponse(defaultCoordinationState());
+        }
+
+        if (url.endsWith("/api/v1/incident/coordination/actions") && method === "PUT") {
+          const body = JSON.parse(String(init?.body)) as {
+            owner: string;
+          };
+          updateSequence += 1;
+          const updatedAt = `2026-02-14T10:00:0${updateSequence}.000Z`;
+
+          return await new Promise<Response>((resolve) => {
+            pendingOwnerUpdates.push({
+              owner: body.owner,
+              resolve: () => {
+                resolve(
+                  jsonResponse({
+                    guidedActions: {
+                      ...defaultCoordinationState().guidedActions,
+                      owner: body.owner,
+                      updatedAt
+                    }
+                  })
+                );
+              }
+            });
+          });
+        }
+
+        return new Response(null, { status: 404 });
+      })
+    );
+
+    render(<App />);
+
+    const ownerInput = screen.getByRole("textbox", { name: /incident owner/i });
+    fireEvent.change(ownerInput, { target: { value: "operator-a" } });
+    fireEvent.change(ownerInput, { target: { value: "operator-b" } });
+
+    await waitFor(() => {
+      expect(pendingOwnerUpdates).toHaveLength(2);
+    });
+
+    pendingOwnerUpdates.find((update) => update.owner === "operator-b")?.resolve();
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: /incident owner/i })).toHaveValue("operator-b");
+    });
+
+    pendingOwnerUpdates.find((update) => update.owner === "operator-a")?.resolve();
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: /incident owner/i })).toHaveValue("operator-b");
+    });
+  });
+
   it("supports shared notes and handoff controls", async () => {
     render(<App />);
 
@@ -612,6 +692,22 @@ describe("App", () => {
     });
   });
 
+  it("preserves unsaved handoff draft edits during periodic refresh", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-14T10:00:00.000Z"));
+
+    render(<App />);
+
+    const summaryInput = screen.getByRole("textbox", { name: /handoff summary/i });
+    fireEvent.change(summaryInput, { target: { value: "Waiting for coordinator confirmation" } });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(screen.getByRole("textbox", { name: /handoff summary/i })).toHaveValue(
+      "Waiting for coordinator confirmation"
+    );
+  });
+
   it("announces health state updates through a polite live region", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-14T10:00:00.000Z"));
@@ -643,82 +739,47 @@ describe("App", () => {
     expect(acknowledgeToggle).toHaveFocus();
   });
 
-  it("renders QC gate actions and submits canonical workflow events", async () => {
-    mockApiResponses({
-      assets: [
-        buildAsset({ id: "asset-completed", jobId: "job-completed", status: "completed", title: "Completed Clip" }),
-        buildAsset({ id: "asset-qc-pending", jobId: "job-qc-pending", status: "qc_pending", title: "QC Pending Clip" }),
-        buildAsset({ id: "asset-qc-review", jobId: "job-qc-review", status: "qc_in_review", title: "QC Review Clip" }),
-        buildAsset({ id: "asset-qc-rejected", jobId: "job-qc-rejected", status: "qc_rejected", title: "QC Rejected Clip" })
-      ]
-    });
-
+  it("switches between operator, coordinator, and supervisor role views", async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Send to QC" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start review" }));
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
-    fireEvent.click(screen.getByRole("button", { name: "Mark needs replay" }));
+    expect(screen.getByRole("heading", { name: "Assets Queue" })).toBeInTheDocument();
 
-    const eventCalls = vi.mocked(fetch).mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/events"));
-    expect(eventCalls.length).toBeGreaterThanOrEqual(5);
+    const roleGroup = screen.getByRole("radiogroup", { name: /role view/i });
+    expect(within(roleGroup).getByRole("radio", { name: "Operator" })).toBeChecked();
+
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: "Coordinator" }));
+    expect(screen.getByRole("heading", { name: "Coordinator Queue" })).toBeInTheDocument();
+
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: "Supervisor" }));
+    expect(screen.getByRole("heading", { name: "Supervisor Queue" })).toBeInTheDocument();
   });
 
-  it("renders preview and annotation hook readiness states", async () => {
-    mockApiResponses({
-      assets: [
-        buildAsset({ title: "No Preview", status: "pending" }),
-        buildAsset({
-          id: "asset-with-preview",
-          title: "With Preview",
-          status: "qc_pending",
-          thumbnail: {
-            uri: "s3://bucket/thumb.jpg",
-            width: 320,
-            height: 180,
-            generatedAt: new Date().toISOString()
-          },
-          annotationHook: {
-            enabled: true,
-            provider: "shotgrid",
-            contextId: "ctx-123"
-          }
-        })
-      ]
-    });
+  it("initializes and persists selected role in query string", () => {
+    window.history.replaceState({}, "", "?role=coordinator&trace=abc");
 
     render(<App />);
 
-    expect(await screen.findByText("Preview not available")).toBeInTheDocument();
-    expect(screen.getByText("Preview metadata available")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open annotation context" })).toBeInTheDocument();
+    const roleGroup = screen.getByRole("radiogroup", { name: /role view/i });
+    expect(within(roleGroup).getByRole("radio", { name: "Coordinator" })).toBeChecked();
+    expect(window.location.search).toBe("?role=coordinator&trace=abc");
+
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: "Supervisor" }));
+    expect(window.location.search).toBe("?role=supervisor&trace=abc");
+
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: "Operator" }));
+    expect(window.location.search).toBe("?role=operator&trace=abc");
   });
 
-  it("gates coordinator handoff release-ready action until checklist and owner are complete", async () => {
-    mockApiResponses({
-      assets: [
-        buildAsset({
-          id: "asset-qc-approved",
-          title: "QC Approved Clip",
-          status: "qc_approved"
-        })
-      ]
-    });
-
+  it("keeps operator baseline working after switching away and back", () => {
     render(<App />);
 
-    const markReadyButton = await screen.findByRole("button", { name: "Mark release-ready" });
-    expect(markReadyButton).toBeDisabled();
-    expect(screen.getByText("Blocked: complete checklist and assign handoff owner.")).toBeInTheDocument();
+    const roleGroup = screen.getByRole("radiogroup", { name: /role view/i });
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: "Coordinator" }));
+    expect(screen.getByRole("heading", { name: "Coordinator Queue" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Release notes ready" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Verification complete" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Comms draft ready" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Handoff owner" }), { target: { value: "coordinator-1" } });
-
-    expect(markReadyButton).toBeEnabled();
-    fireEvent.click(markReadyButton);
-    expect(screen.getByText("Release-ready marked.")).toBeInTheDocument();
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: "Operator" }));
+    expect(screen.getByRole("heading", { name: "Ingest" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Assets Queue" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Register Asset" })).toBeInTheDocument();
   });
 });

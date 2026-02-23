@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import {
   createIncidentCoordinationNote,
@@ -8,7 +8,6 @@ import {
   fetchMetrics,
   ingestAsset,
   replayJob,
-  submitWorkflowEvent,
   updateIncidentGuidedActions,
   updateIncidentHandoff,
   type AssetRow,
@@ -18,38 +17,33 @@ import {
   type IncidentHandoff,
   type IncidentHandoffState
 } from "./api";
+import { CoordinatorBoard } from "./boards/CoordinatorBoard";
+import { OperatorBoard } from "./boards/OperatorBoard";
+import { SupervisorBoard } from "./boards/SupervisorBoard";
 import { deriveHealthState } from "./operator/health";
 import type { MetricsSnapshot } from "./operator/types";
-
-interface HandoffDraft {
-  owner: string;
-  releaseNotesReady: boolean;
-  verificationComplete: boolean;
-  commsDraftReady: boolean;
-}
-
-function createHandoffDraft(asset: AssetRow): HandoffDraft {
-  return {
-    owner: asset.handoff.owner ?? "",
-    releaseNotesReady: asset.handoffChecklist.releaseNotesReady,
-    verificationComplete: asset.handoffChecklist.verificationComplete,
-    commsDraftReady: asset.handoffChecklist.commsDraftReady
-  };
-}
-
-function isHandoffReady(draft: HandoffDraft): boolean {
-  return (
-    draft.owner.trim().length > 0 &&
-    draft.releaseNotesReady &&
-    draft.verificationComplete &&
-    draft.commsDraftReady
-  );
-}
 
 const HEALTH_POLL_INTERVAL_MS = 15_000;
 const HEALTH_STALE_THRESHOLD_MS = 60_000;
 const HEALTH_COOLDOWN_MS = 60_000;
 const FALLBACK_SIGNAL_RECENCY_MS = 5 * 60_000;
+const ROLE_QUERY_PARAM = "role";
+
+type AppRole = "operator" | "coordinator" | "supervisor";
+const roleOptions: Array<{ value: AppRole; label: string }> = [
+  { value: "operator", label: "Operator" },
+  { value: "coordinator", label: "Coordinator" },
+  { value: "supervisor", label: "Supervisor" }
+];
+
+function isAppRole(value: string | null): value is AppRole {
+  return value === "operator" || value === "coordinator" || value === "supervisor";
+}
+
+function roleFromSearch(search: string): AppRole {
+  const role = new URLSearchParams(search).get(ROLE_QUERY_PARAM);
+  return isAppRole(role) ? role : "operator";
+}
 
 function isCoordinationConflictError(error: unknown): boolean {
   return error instanceof Error && error.message.includes(": 409");
@@ -87,8 +81,18 @@ export function App() {
   const [noteCorrelationId, setNoteCorrelationId] = useState("");
   const [noteAuthor, setNoteAuthor] = useState("");
   const [handoffDraft, setHandoffDraft] = useState<IncidentHandoff>(DEFAULT_INCIDENT_COORDINATION.handoff);
-  const [handoffDrafts, setHandoffDrafts] = useState<Record<string, HandoffDraft>>({});
-  const [releaseReadyAssetIds, setReleaseReadyAssetIds] = useState<Record<string, boolean>>({});
+  const [selectedRole, setSelectedRole] = useState<AppRole>(() => roleFromSearch(window.location.search));
+  const handoffDraftDirtyRef = useRef(false);
+  const guidedUpdateRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    query.set(ROLE_QUERY_PARAM, selectedRole);
+
+    const search = query.toString();
+    const nextUrl = `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`;
+    window.history.replaceState(window.history.state, "", nextUrl);
+  }, [selectedRole]);
 
   async function refresh(): Promise<void> {
     try {
@@ -106,7 +110,9 @@ export function App() {
 
       if (coordinationState) {
         setCoordination(coordinationState);
-        setHandoffDraft(coordinationState.handoff);
+        if (!handoffDraftDirtyRef.current) {
+          setHandoffDraft(coordinationState.handoff);
+        }
       }
 
       const refreshedAt = Date.now();
@@ -128,18 +134,6 @@ export function App() {
       window.clearInterval(intervalId);
     };
   }, []);
-
-  useEffect(() => {
-    setHandoffDrafts((previous) => {
-      const next = { ...previous };
-      for (const asset of assets) {
-        if (!next[asset.id]) {
-          next[asset.id] = createHandoffDraft(asset);
-        }
-      }
-      return next;
-    });
-  }, [assets]);
 
   const currentMetrics = metricsHistory[metricsHistory.length - 1] ?? null;
   const previousMetrics = metricsHistory[metricsHistory.length - 2] ?? null;
@@ -188,6 +182,8 @@ export function App() {
       ...coordination.guidedActions,
       ...update
     };
+    const requestId = guidedUpdateRequestIdRef.current + 1;
+    guidedUpdateRequestIdRef.current = requestId;
 
     try {
       const guidedActions = await updateIncidentGuidedActions({
@@ -198,12 +194,20 @@ export function App() {
         expectedUpdatedAt: coordination.guidedActions.updatedAt
       });
 
+      if (requestId !== guidedUpdateRequestIdRef.current) {
+        return;
+      }
+
       setCoordination((previous) => ({
         ...previous,
         guidedActions
       }));
     } catch (error) {
       if (isCoordinationConflictError(error)) {
+        if (requestId !== guidedUpdateRequestIdRef.current) {
+          return;
+        }
+
         await refresh();
         return;
       }
@@ -213,6 +217,9 @@ export function App() {
   }
 
   async function resetGuidedActions(): Promise<void> {
+    const requestId = guidedUpdateRequestIdRef.current + 1;
+    guidedUpdateRequestIdRef.current = requestId;
+
     try {
       const guidedActions = await updateIncidentGuidedActions({
         acknowledged: false,
@@ -222,12 +229,20 @@ export function App() {
         expectedUpdatedAt: coordination.guidedActions.updatedAt
       });
 
+      if (requestId !== guidedUpdateRequestIdRef.current) {
+        return;
+      }
+
       setCoordination((previous) => ({
         ...previous,
         guidedActions
       }));
     } catch (error) {
       if (isCoordinationConflictError(error)) {
+        if (requestId !== guidedUpdateRequestIdRef.current) {
+          return;
+        }
+
         await refresh();
         return;
       }
@@ -282,6 +297,7 @@ export function App() {
         ...previous,
         handoff
       }));
+      handoffDraftDirtyRef.current = false;
       setHandoffDraft(handoff);
     } catch (error) {
       if (isCoordinationConflictError(error)) {
@@ -310,54 +326,28 @@ export function App() {
     await refresh();
   }
 
-  async function onGateTransition(asset: AssetRow, eventType: Parameters<typeof submitWorkflowEvent>[0]["eventType"]): Promise<void> {
-    if (!asset.jobId) {
-      return;
-    }
-
-    await submitWorkflowEvent({
-      assetId: asset.id,
-      jobId: asset.jobId,
-      eventType,
-      producer: "web-ui"
-    });
-    await refresh();
-  }
-
-  function onOpenAnnotationContext(_asset: AssetRow): void {
-    // Slice 2 provides metadata hook visibility only.
-  }
-
-  function updateHandoffDraft(assetId: string, patch: Partial<HandoffDraft>): void {
-    setHandoffDrafts((previous) => {
-      const current = previous[assetId] ?? {
-        owner: "",
-        releaseNotesReady: false,
-        verificationComplete: false,
-        commsDraftReady: false
-      };
-      return {
-        ...previous,
-        [assetId]: {
-          ...current,
-          ...patch
-        }
-      };
-    });
-  }
-
-  function markReleaseReady(assetId: string): void {
-    setReleaseReadyAssetIds((previous) => ({
-      ...previous,
-      [assetId]: true
-    }));
-  }
-
   return (
     <main className="layout">
       <header className="hero">
         <h1>AssetHarbor</h1>
         <p>Queue-first media operations for ingest, workflow, and audit visibility.</p>
+        <fieldset className="role-selector" role="radiogroup" aria-label="Role view">
+          <legend>Role view</legend>
+          <div className="role-selector-options">
+            {roleOptions.map((roleOption) => (
+              <label key={roleOption.value} className="role-selector-option">
+                <input
+                  type="radio"
+                  name="role-view"
+                  value={roleOption.value}
+                  checked={selectedRole === roleOption.value}
+                  onChange={() => setSelectedRole(roleOption.value)}
+                />
+                {roleOption.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
       </header>
 
       <section className="panel" aria-labelledby="health-heading">
@@ -481,12 +471,13 @@ export function App() {
                 Handoff state
                 <select
                   value={handoffDraft.state}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    handoffDraftDirtyRef.current = true;
                     setHandoffDraft((previous) => ({
                       ...previous,
                       state: event.target.value as IncidentHandoffState
-                    }))
-                  }
+                    }));
+                  }}
                 >
                   <option value="none">none</option>
                   <option value="handoff_requested">handoff_requested</option>
@@ -498,12 +489,13 @@ export function App() {
                 <input
                   type="text"
                   value={handoffDraft.fromOwner}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    handoffDraftDirtyRef.current = true;
                     setHandoffDraft((previous) => ({
                       ...previous,
                       fromOwner: event.target.value
-                    }))
-                  }
+                    }));
+                  }}
                 />
               </label>
               <label>
@@ -511,12 +503,13 @@ export function App() {
                 <input
                   type="text"
                   value={handoffDraft.toOwner}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    handoffDraftDirtyRef.current = true;
                     setHandoffDraft((previous) => ({
                       ...previous,
                       toOwner: event.target.value
-                    }))
-                  }
+                    }));
+                  }}
                 />
               </label>
               <label>
@@ -524,12 +517,13 @@ export function App() {
                 <input
                   type="text"
                   value={handoffDraft.summary}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    handoffDraftDirtyRef.current = true;
                     setHandoffDraft((previous) => ({
                       ...previous,
                       summary: event.target.value
-                    }))
-                  }
+                    }));
+                  }}
                 />
               </label>
               <button type="submit">Save handoff</button>
@@ -538,155 +532,23 @@ export function App() {
         </div>
       </section>
 
-      <section className="panel" aria-labelledby="ingest-heading">
-        <h2 id="ingest-heading">Ingest</h2>
-        <form onSubmit={onSubmit} className="ingest-form">
-          <label>
-            Title
-            <input value={title} onChange={(e) => setTitle(e.target.value)} name="title" />
-          </label>
-          <label>
-            Source URI
-            <input value={sourceUri} onChange={(e) => setSourceUri(e.target.value)} name="sourceUri" />
-          </label>
-          <button type="submit">Register Asset</button>
-        </form>
-      </section>
+      {selectedRole === "operator" ? (
+        <OperatorBoard
+          title={title}
+          sourceUri={sourceUri}
+          assets={assets}
+          onTitleChange={setTitle}
+          onSourceUriChange={setSourceUri}
+          onSubmit={onSubmit}
+          onReplay={(jobId) => {
+            void onReplay(jobId);
+          }}
+        />
+      ) : null}
 
-      <section className="panel" aria-labelledby="queue-heading">
-        <h2 id="queue-heading">Assets Queue</h2>
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Title</th>
-              <th scope="col">Source</th>
-              <th scope="col">Status</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {assets.length === 0 ? (
-              <tr>
-                <td colSpan={4}>No assets yet.</td>
-              </tr>
-            ) : (
-              assets.map((asset) => (
-                <tr key={asset.id}>
-                  <td>{asset.title}</td>
-                  <td>{asset.sourceUri}</td>
-                  <td>
-                      <span className={`status status-${asset.status}`}>{asset.status}</span>
-                      <p>{asset.thumbnail || asset.proxy ? "Preview metadata available" : "Preview not available"}</p>
-                  </td>
-                  <td>
-                    {asset.annotationHook.enabled ? (
-                      <button type="button" onClick={() => onOpenAnnotationContext(asset)}>
-                        Open annotation context
-                      </button>
-                    ) : null}
-                    {asset.status === "qc_approved" ? (
-                      <div>
-                        <p>Coordinator handoff checklist</p>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={(handoffDrafts[asset.id] ?? createHandoffDraft(asset)).releaseNotesReady}
-                            onChange={(event) =>
-                              updateHandoffDraft(asset.id, { releaseNotesReady: event.target.checked })
-                            }
-                          />
-                          Release notes ready
-                        </label>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={(handoffDrafts[asset.id] ?? createHandoffDraft(asset)).verificationComplete}
-                            onChange={(event) =>
-                              updateHandoffDraft(asset.id, { verificationComplete: event.target.checked })
-                            }
-                          />
-                          Verification complete
-                        </label>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={(handoffDrafts[asset.id] ?? createHandoffDraft(asset)).commsDraftReady}
-                            onChange={(event) =>
-                              updateHandoffDraft(asset.id, { commsDraftReady: event.target.checked })
-                            }
-                          />
-                          Comms draft ready
-                        </label>
-                        <label>
-                          Handoff owner
-                          <input
-                            type="text"
-                            value={(handoffDrafts[asset.id] ?? createHandoffDraft(asset)).owner}
-                            onChange={(event) => updateHandoffDraft(asset.id, { owner: event.target.value })}
-                          />
-                        </label>
-                        {isHandoffReady(handoffDrafts[asset.id] ?? createHandoffDraft(asset)) ? (
-                          <p>Handoff ready for release.</p>
-                        ) : (
-                          <p>Blocked: complete checklist and assign handoff owner.</p>
-                        )}
-                        <button
-                          type="button"
-                          disabled={!isHandoffReady(handoffDrafts[asset.id] ?? createHandoffDraft(asset))}
-                          onClick={() => markReleaseReady(asset.id)}
-                        >
-                          Mark release-ready
-                        </button>
-                        {releaseReadyAssetIds[asset.id] ? <p>Release-ready marked.</p> : null}
-                      </div>
-                    ) : null}
-                    {asset.status === "failed" && asset.jobId ? (
-                      <button type="button" onClick={() => void onReplay(asset.jobId)}>
-                        Replay
-                      </button>
-                    ) : null}
-                    {asset.status === "completed" && asset.jobId ? (
-                      <button type="button" onClick={() => void onGateTransition(asset, "asset.review.qc_pending")}>
-                        Send to QC
-                      </button>
-                    ) : null}
-                    {asset.status === "qc_pending" && asset.jobId ? (
-                      <button type="button" onClick={() => void onGateTransition(asset, "asset.review.in_review")}>
-                        Start review
-                      </button>
-                    ) : null}
-                    {asset.status === "qc_in_review" && asset.jobId ? (
-                      <>
-                        <button type="button" onClick={() => void onGateTransition(asset, "asset.review.approved")}>
-                          Approve
-                        </button>
-                        <button type="button" onClick={() => void onGateTransition(asset, "asset.review.rejected")}>
-                          Reject
-                        </button>
-                      </>
-                    ) : null}
-                    {asset.status === "qc_rejected" && asset.jobId ? (
-                      <button type="button" onClick={() => void onGateTransition(asset, "asset.processing.replay_requested")}>
-                        Mark needs replay
-                      </button>
-                    ) : null}
-                    {!asset.annotationHook.enabled &&
-                    asset.status !== "qc_approved" &&
-                    (!asset.jobId ||
-                      (asset.status !== "failed" &&
-                        asset.status !== "completed" &&
-                        asset.status !== "qc_pending" &&
-                        asset.status !== "qc_in_review" &&
-                        asset.status !== "qc_rejected")) ? (
-                      <span>-</span>
-                    ) : null}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </section>
+      {selectedRole === "coordinator" ? <CoordinatorBoard assets={assets} /> : null}
+
+      {selectedRole === "supervisor" ? <SupervisorBoard assets={assets} /> : null}
 
       <section className="panel" aria-labelledby="audit-heading">
         <h2 id="audit-heading">Recent Audit</h2>
