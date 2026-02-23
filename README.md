@@ -100,6 +100,7 @@ Legacy-compatible aliases (for existing internal clients):
 ## CI/CD
 
 - `ci.yml` validates compose config, docs checks, API/event contract checks, and all service tests.
+- `ci.yml` also enforces PR guardrails to block stale/conflicted (`dirty`/`behind`) and oversized PRs before full verification.
 - `cd.yml` builds and publishes container images to GHCR for each service on `main` and semantic version tags.
 - Actions dashboard: `https://github.com/ssotoa70/assetharbor/actions`
 
