@@ -546,9 +546,23 @@ export function App() {
         />
       ) : null}
 
-      {selectedRole === "coordinator" ? <CoordinatorBoard assets={assets} /> : null}
+      {selectedRole === "coordinator" ? (
+        <CoordinatorBoard
+          assets={assets}
+          onReplayJob={async (jobId) => {
+            await onReplay(jobId);
+          }}
+        />
+      ) : null}
 
-      {selectedRole === "supervisor" ? <SupervisorBoard assets={assets} /> : null}
+      {selectedRole === "supervisor" ? (
+        <SupervisorBoard
+          assets={assets}
+          onReplayJob={async (jobId) => {
+            await onReplay(jobId);
+          }}
+        />
+      ) : null}
 
       <section className="panel" aria-labelledby="audit-heading">
         <h2 id="audit-heading">Recent Audit</h2>
