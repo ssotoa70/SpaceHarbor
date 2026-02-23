@@ -93,6 +93,11 @@ export interface AssetQueueRow {
   title: string;
   sourceUri: string;
   status: WorkflowStatus;
+  thumbnail: AssetThumbnailPreview | null;
+  proxy: AssetProxyPreview | null;
+  annotationHook: AnnotationHookMetadata;
+  handoffChecklist: HandoffChecklistMetadata;
+  handoff: HandoffMetadata;
   productionMetadata: ProductionMetadata;
 }
 

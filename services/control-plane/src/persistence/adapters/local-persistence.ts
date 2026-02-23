@@ -714,13 +714,19 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     }
 
     return [...this.assets.values()].map((asset) => {
+      const latestJob = latestJobByAssetId.get(asset.id);
       const storedProductionMetadata = this.assetProductionMetadata.get(asset.id);
       return {
         id: asset.id,
-        jobId: latestJobByAssetId.get(asset.id)?.id ?? null,
+        jobId: latestJob?.id ?? null,
         title: asset.title,
         sourceUri: asset.sourceUri,
-        status: latestJobByAssetId.get(asset.id)?.status ?? "pending",
+        status: latestJob?.status ?? "pending",
+        thumbnail: latestJob?.thumbnail ?? null,
+        proxy: latestJob?.proxy ?? null,
+        annotationHook: latestJob?.annotationHook ?? DEFAULT_ANNOTATION_HOOK,
+        handoffChecklist: latestJob?.handoffChecklist ?? { ...DEFAULT_HANDOFF_CHECKLIST },
+        handoff: latestJob?.handoff ?? { ...DEFAULT_HANDOFF },
         productionMetadata: coalesceProductionMetadata(storedProductionMetadata)
       };
     });

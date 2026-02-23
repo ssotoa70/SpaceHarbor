@@ -79,7 +79,19 @@ test("OpenAPI includes explicit /api/v1/assets schema metadata with production m
 
   const itemSchema = operation.responses?.["200"]?.content?.["application/json"]?.schema?.properties?.assets?.items;
   assert.ok(itemSchema, "missing assets item schema");
-  assert.deepEqual(itemSchema.required, ["id", "jobId", "title", "sourceUri", "status", "productionMetadata"]);
+  assert.deepEqual(itemSchema.required, [
+    "id",
+    "jobId",
+    "title",
+    "sourceUri",
+    "status",
+    "thumbnail",
+    "proxy",
+    "annotationHook",
+    "handoffChecklist",
+    "handoff",
+    "productionMetadata"
+  ]);
 
   const productionMetadataSchema = itemSchema.properties?.productionMetadata;
   assert.ok(productionMetadataSchema, "missing productionMetadata schema");
