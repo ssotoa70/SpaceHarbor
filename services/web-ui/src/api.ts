@@ -48,6 +48,17 @@ export interface AssetRow {
     owner: string | null;
     lastUpdatedAt: string | null;
   };
+  productionMetadata: {
+    show: string | null;
+    episode: string | null;
+    sequence: string | null;
+    shot: string | null;
+    version: number | null;
+    vendor: string | null;
+    priority: "low" | "normal" | "high" | "urgent" | null;
+    dueDate: string | null;
+    owner: string | null;
+  };
 }
 
 export interface AuditSignal {
