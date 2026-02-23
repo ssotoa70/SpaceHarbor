@@ -82,6 +82,36 @@
   - `handoffChecklist` (`releaseNotesReady`, `verificationComplete`, `commsDraftReady`, `ownerAssigned`)
   - `handoff` (`status`, `owner`, `lastUpdatedAt`)
 
+```json
+{
+  "assets": [
+    {
+      "id": "uuid",
+      "jobId": "uuid",
+      "title": "Queue Asset",
+      "sourceUri": "s3://bucket/queue-asset.mov",
+      "status": "pending",
+      "productionMetadata": {
+        "show": null,
+        "episode": null,
+        "sequence": null,
+        "shot": null,
+        "version": null,
+        "vendor": null,
+        "priority": null,
+        "dueDate": null,
+        "owner": null
+      }
+    }
+  ]
+}
+```
+
+- Scope note: metadata write/update APIs are intentionally deferred in this slice; this change is read-model exposure only.
+- Slice 2 note: role boards are UI/read-only presentation over existing queue data.
+- Slice 2 note: client-side filters/search use the existing `GET /api/v1/assets` read model.
+- Slice 2 note: no API contract changes are introduced.
+
 ## Outbox
 
 - `GET /api/v1/outbox` lists outbox events.
