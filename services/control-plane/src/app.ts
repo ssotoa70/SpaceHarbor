@@ -61,7 +61,7 @@ export function buildApp(): FastifyInstance {
 
   // Keep route registration after OpenAPI plugin initialization so generated docs include all routes.
   app.after(() => {
-    void registerHealthRoute(app);
+    void registerHealthRoute(app, persistence);
     void registerAssetsRoute(app, persistence, prefixes);
     void registerAuditRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);

@@ -36,6 +36,16 @@ services:
       control-plane:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ps aux | grep '[p]ython.*main.py' > /dev/null || exit 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   web-ui:
     build:
