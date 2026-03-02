@@ -1362,6 +1362,8 @@ git commit -m "feat: implement MockVastAdapter for Team C development
 - Create: `services/control-plane/src/event-broker/mock-client.ts`
 - Reference: Design doc §4.3
 
+**CRITICAL NOTE (Specialist Feedback):** Kafka producer pooling is essential for performance under high ingest throughput. This implementation plan correctly pools producer (single instance, reused across publish calls). Ensure `connect()` / `disconnect()` manage lifecycle; `publish()` reuses connected producer.
+
 **Step 1: Define event broker interface**
 
 ```typescript
@@ -1558,7 +1560,72 @@ git commit -m "feat: implement Kafka event broker + mock for testing
 
 ### Task 12: Implement exrinspector Function (End-to-End Sample)
 
+**CLARIFICATION (Specialist Feedback):** Task 12 must output ALL VFX metadata fields:
+- `frame_range: { first: number; last: number }`
+- `frame_rate: number` (e.g., 24.0, 29.97)
+- `pixel_aspect_ratio: number` (typically 1.0)
+- `display_window: { x_min, y_min, x_max, y_max }` (crop bounds)
+- `data_window: { x_min, y_min, x_max, y_max }` (separate from display_window)
+- `compression_type: string` (e.g., PIZ, ZIP, ZIPS, DWAA)
+- `file_size_bytes: number` (for quota tracking)
+- `checksum: string` (MD5 or xxHash for integrity verification)
+
+Reference: Design doc §5.2 updated outputSchema includes all fields above.
+
 ### Task 13: Extend Asset Model with Metadata
+
+**CLARIFICATION (Specialist Feedback):** Asset.metadata must include VFX fields + versioning + integrity:
+
+```typescript
+metadata: {
+  // Technical (from exrinspector)
+  codec, resolution, duration_ms, channels, color_space, bit_depth, frame_count,
+
+  // VFX-CRITICAL (from exrinspector)
+  frame_range, frame_rate, pixel_aspect_ratio, display_window, data_window, compression_type,
+
+  // Versioning (for project/shot/version organization)
+  version_label: string;       // e.g., 'v001', 'v002'
+  parent_version_id: string;   // Reference to prior version
+
+  // Integrity
+  file_size_bytes: number;
+  checksum: string;            // MD5 or xxHash
+
+  // Custom
+  tags, labels, custom_fields
+}
+```
+
+Reference: Design doc §5.3 updated Asset interface includes all fields above.
+
+### Task 13.1 (NEW): Implement Background Heartbeat Task in Worker
+
+**Added due to specialist feedback (Media Pipeline Specialist):**
+
+Requirement: Long-running jobs (EXR analysis >30s) must emit heartbeats to prevent lease expiration → duplicate processing.
+
+Implementation:
+- Add `_heartbeat_loop()` async task
+- Start heartbeat concurrently with `process_job()`
+- Heartbeat every 15s (lease duration = 30s)
+- Cancel heartbeat when job completes
+
+Reference: Design doc §3.3 includes full implementation + test strategy.
+
+### Task 13.2 (NEW): Implement DLQ Automation + Retry Counter
+
+**Added due to specialist feedback (Media Pipeline Specialist):**
+
+Requirement: Failed jobs must automatically promote to DLQ after max attempts (prevents infinite requeue).
+
+Implementation:
+- Add `attempt_count` + `max_attempts` + `last_error` to Job model
+- Worker increments attempt_count on failure
+- Automatic DLQ promotion when attempt_count >= max_attempts
+- Requeue for retry if below max
+
+Reference: Design doc §5.3.1 includes full implementation.
 
 ### Task 14: Implement Approval Workflow Endpoints
 

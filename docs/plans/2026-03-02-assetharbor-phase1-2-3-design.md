@@ -267,14 +267,14 @@ async def claim_and_process():
 
 ### 3.3 Worker Exception Handling & Backoff
 
-**Current behavior:** `run_forever()` has no try-catch → network blip = permanent crash.
+**Current behavior:** `run_forever()` has no try-catch → network blip = permanent crash. Also, long-running jobs (>30s EXR analysis) expire lease without heartbeat → duplicate processing.
 
-**Fix:**
+**Fix: Exception Handling + Exponential Backoff**
 ```python
 # media-worker/worker/main.py
 async def run_forever():
   backoff_ms = 1000
-  max_backoff_ms = 60000
+  max_backoff_ms = 300000  # 5 minutes (specialist recommendation)
 
   while True:
     try:
@@ -295,9 +295,46 @@ async def run_forever():
       backoff_ms = min(backoff_ms * 1.5, max_backoff_ms)
 ```
 
-**Test:** Mock control-plane to throw network error; verify worker retries with backoff.
+**Fix: Background Heartbeat Task (CRITICAL for long-running jobs)**
 
-**Impact:** Worker recovers from transient failures ✓
+Lease expiration risk: Long EXR analysis (>30s) without heartbeat → another worker reclaims job → duplicate processing.
+
+```python
+async def run_forever(self):
+    """Main worker loop with concurrent heartbeat background task."""
+    backoff_ms = 1000
+    max_backoff_ms = 300000
+
+    while True:
+        try:
+            job = await self.claim_next_job()
+            if job:
+                # Start background heartbeat task (concurrent with processing)
+                heartbeat_task = asyncio.create_task(
+                    self._heartbeat_loop(job.id, job.lease_holder)
+                )
+                try:
+                    await self.process_job(job)
+                finally:
+                    heartbeat_task.cancel()  # Stop heartbeat when job completes
+                backoff_ms = 1000
+            else:
+                await asyncio.sleep(1)
+        except Exception as e:
+            logger.error(f"Error: {e}", exc_info=True)
+            await asyncio.sleep(backoff_ms / 1000)
+            backoff_ms = min(int(backoff_ms * 1.5), max_backoff_ms)
+
+async def _heartbeat_loop(self, job_id: str, lease_holder: str):
+    """Emit heartbeat every 15s to keep lease alive (lease duration = 30s)."""
+    while True:
+        await asyncio.sleep(15)
+        await self.control_plane.heartbeat(job_id, lease_holder)
+```
+
+**Test:** Mock `process_job()` to sleep >30s; verify heartbeat keeps lease alive (no duplicate claim).
+
+**Impact:** Worker recovers from transient failures ✓ + Long jobs don't timeout ✓
 
 ---
 
@@ -415,14 +452,15 @@ describe('OpenAPI contract', () => {
 ### 3.7 Phase 1 Success Criteria
 
 - ✅ `persistence.reset()` guarded (test-only)
-- ✅ CAS job claiming implemented + concurrent test passing (5 workers)
-- ✅ Worker error handling + exponential backoff
+- ✅ CAS job claiming implemented + concurrent test passing (5+ workers)
+- ✅ Worker error handling + exponential backoff + background heartbeat task
 - ✅ Docker Compose healthchecks + restart: unless-stopped
 - ✅ Outbox insertion changed unshift → push
 - ✅ Status enum reconciled across domain/schema/OpenAPI
 - ✅ All Phase 1 tests pass
 - ✅ No data loss on restart (verified test)
-- ✅ Zero race conditions under load (verified test)
+- ✅ Zero race conditions under concurrent load (5+ workers, verified test)
+- ✅ Concurrent load testing (ingest high-frequency assets, verify no duplicates)
 
 ---
 
@@ -842,6 +880,12 @@ Implement modular Data Engine pipeline architecture; deliver exrinspector sample
 
 **Design principle:** Data Engine functions are pluggable modules, each with input/output schemas.
 
+**Priority order for implementation (specialist recommendation):**
+1. **exrinspector** (Phase 3, Task 12) — VFX metadata extraction
+2. **Proxy generation** (Phase 4) — H.264/DNxHD transcoding for review workflows
+3. **Checksum/integrity** (Phase 4) — Post-ingest validation before metadata database
+4. **media-search** (Phase 4+) — Similarity indexing (deferred, requires populated library)
+
 ```typescript
 // src/data-engine/types.ts
 export interface DataEngineFunction {
@@ -943,7 +987,7 @@ app.get('/api/v1/data-engine/functions', (req, res) => {
 
 ### 5.2 exrinspector Function (End-to-End Sample)
 
-**Purpose:** Extract technical metadata from EXR sequences.
+**Purpose:** Extract technical metadata from EXR sequences for VFX workflows.
 
 ```typescript
 // src/data-engine/functions/exr-inspector.ts
@@ -978,6 +1022,39 @@ export class ExrInspectorFunction implements DataEngineFunction {
       bit_depth: { type: 'number', enum: [16, 32] },
       duration_ms: { type: 'number' },
       thumbnail_url: { type: 'string', description: 'Proxy image URL for preview' },
+      frame_range: {
+        type: 'object',
+        properties: {
+          first: { type: 'number' },
+          last: { type: 'number' },
+        },
+        description: 'First and last frame numbers in sequence'
+      },
+      frame_rate: { type: 'number', description: 'Frames per second (e.g., 24.0, 29.97)' },
+      pixel_aspect_ratio: { type: 'number', description: 'Pixel aspect ratio (typically 1.0)' },
+      display_window: {
+        type: 'object',
+        properties: {
+          x_min: { type: 'number' },
+          y_min: { type: 'number' },
+          x_max: { type: 'number' },
+          y_max: { type: 'number' },
+        },
+        description: 'Display window bounds for cropped images'
+      },
+      data_window: {
+        type: 'object',
+        properties: {
+          x_min: { type: 'number' },
+          y_min: { type: 'number' },
+          x_max: { type: 'number' },
+          y_max: { type: 'number' },
+        },
+        description: 'Data window bounds (may differ from display window)'
+      },
+      compression_type: { type: 'string', description: 'Compression codec (e.g., PIZ, ZIP, ZIPS, DWAA)' },
+      file_size_bytes: { type: 'number', description: 'File size in bytes' },
+      checksum: { type: 'string', description: 'MD5 or xxHash for integrity verification' },
     },
   };
 
@@ -1108,6 +1185,22 @@ export interface Asset {
     bit_depth?: number;                       // 8, 16, 32
     frame_count?: number;
 
+    // VFX-critical metadata (from exrinspector)
+    frame_range?: { first: number; last: number };
+    frame_rate?: number;                      // e.g., 24.0, 29.97
+    pixel_aspect_ratio?: number;              // typically 1.0
+    display_window?: { x_min: number; y_min: number; x_max: number; y_max: number };
+    data_window?: { x_min: number; y_min: number; x_max: number; y_max: number };
+    compression_type?: string;                // 'PIZ', 'ZIP', 'ZIPS', 'DWAA'
+
+    // Versioning (for project/shot/version organization)
+    version_label?: string;                   // e.g., 'v001', 'v002'
+    parent_version_id?: string;               // Reference to prior version
+
+    // Integrity
+    file_size_bytes?: number;
+    checksum?: string;                        // MD5 or xxHash
+
     // Custom metadata (project-specific)
     tags?: string[];                          // ['hero', 'vfx', 'matte']
     labels?: string[];                        // ['approved', 'needs-revision']
@@ -1138,6 +1231,76 @@ export interface Asset {
   created_by: string;
 }
 ```
+
+---
+
+### 5.3.1 DLQ Automation & Retry Counter
+
+**Current gap:** Failed jobs stay in `claimed`/`failed` status; no automatic Dead Letter Queue promotion.
+
+**Fix: Add attempt tracking to Job model**
+
+```typescript
+// src/domain/models.ts
+export interface Job {
+  id: string;
+  asset_id: string;
+  status: JobStatus;
+  type: string;
+
+  // NEW: Retry tracking
+  attempt_count: number;     // starts at 0, incremented on failure
+  max_attempts: number;      // default 3, configurable per job type
+  last_error?: string;       // error message from most recent attempt
+
+  lease_holder?: string;
+  lease_acquired_at?: ISO8601;
+  created_at: ISO8601;
+  updated_at: ISO8601;
+}
+```
+
+**Worker DLQ promotion logic**
+
+```python
+# media-worker/worker/main.py
+async def process_job(self, job: Job):
+  try:
+    # ... processing logic ...
+  except Exception as e:
+    job.attempt_count += 1
+    job.last_error = str(e)
+
+    # Automatic DLQ promotion after max attempts
+    if job.attempt_count >= job.max_attempts:
+      logger.error(f"Job {job.id} exceeded max attempts ({job.max_attempts}), moving to DLQ")
+      await self.control_plane.move_job_to_dlq(
+        job.id,
+        reason=f"Max attempts exceeded: {job.last_error}"
+      )
+    else:
+      logger.warn(f"Job {job.id} failed (attempt {job.attempt_count}/{job.max_attempts}): {e}")
+      # Requeue for retry (worker loop will claim it again after backoff)
+      await self.control_plane.update_job_status(job.id, 'claimed', 'pending')
+```
+
+**Database schema (VAST)**
+
+```sql
+ALTER TABLE jobs ADD COLUMN attempt_count INTEGER DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN max_attempts INTEGER DEFAULT 3;
+ALTER TABLE jobs ADD COLUMN last_error VARCHAR;
+
+-- DLQ table (for tracking failed jobs)
+CREATE TABLE dlq (
+  dlq_id VARCHAR PRIMARY KEY,
+  job_id VARCHAR REFERENCES jobs(id),
+  reason VARCHAR,
+  created_at TIMESTAMP
+);
+```
+
+**Impact:** Failed jobs automatically promote to DLQ after N retries, preventing infinite requeue loops ✓
 
 ---
 
