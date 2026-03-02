@@ -193,3 +193,41 @@ test("concurrent updates resolve to single winner (race condition test)", () => 
   const job = adapter.getJobById(jobId);
   assert.equal(job?.status, "processing", "Job should be claimed");
 });
+
+test("outbox publishes events in creation order (FIFO)", () => {
+  const adapter = createPersistenceAdapter("local");
+
+  // Create an asset to generate outbox events
+  const result1 = adapter.createIngestAsset(
+    { title: "asset-1", sourceUri: "file:///test1" },
+    { correlationId: "corr-1" }
+  );
+
+  // Verify first event was created
+  let outbox = adapter.getOutboxItems();
+  assert.equal(outbox.length, 1, "Should have 1 outbox event after first asset");
+  assert.equal(outbox[0].eventType, "media.process.requested.v1");
+
+  // Create another asset
+  const result2 = adapter.createIngestAsset(
+    { title: "asset-2", sourceUri: "file:///test2" },
+    { correlationId: "corr-2" }
+  );
+
+  // Verify both events are in FIFO order
+  outbox = adapter.getOutboxItems();
+  assert.equal(outbox.length, 2, "Should have 2 outbox events");
+
+  // First event should be from first asset
+  assert.equal(outbox[0].eventType, "media.process.requested.v1");
+  assert.equal(outbox[0].payload.assetId, result1.asset.id);
+
+  // Second event should be from second asset
+  assert.equal(outbox[1].eventType, "media.process.requested.v1");
+  assert.equal(outbox[1].payload.assetId, result2.asset.id);
+
+  // Timestamps should be ascending
+  const timestamp1 = new Date(outbox[0].createdAt).getTime();
+  const timestamp2 = new Date(outbox[1].createdAt).getTime();
+  assert.ok(timestamp1 <= timestamp2, "Events should be in creation order (oldest first)");
+});
