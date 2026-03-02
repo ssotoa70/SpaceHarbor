@@ -57,3 +57,53 @@ def test_worker_returns_false_when_no_claim_available():
 
     assert processed is False
     assert client.events == []
+
+
+def test_worker_implements_exponential_backoff_on_failures():
+    """Verify worker implements exponential backoff on network errors."""
+    from unittest.mock import patch
+
+    class FailingClient:
+        def __init__(self, fail_count: int):
+            self.fail_count = fail_count
+            self.call_count = 0
+
+        def claim_next_job(self, worker_id: str, lease_seconds: int):
+            self.call_count += 1
+            if self.call_count <= self.fail_count:
+                raise ConnectionError("Network timeout")
+            return None
+
+        def set_api_key(self, api_key):
+            pass
+
+    # Test exponential backoff with mocked time.sleep
+    with patch("worker.main.time.sleep") as mock_sleep:
+        client = FailingClient(fail_count=3)
+        worker = MediaWorker(client, worker_id="worker-a", lease_seconds=30)
+
+        # Simulate 3 errors by calling handle_error() which sleeps
+        # This verifies the backoff sequence
+        worker.handle_error()  # 2s backoff
+        assert mock_sleep.call_args_list[-1][0][0] == 2
+
+        worker.handle_error()  # 4s backoff
+        assert mock_sleep.call_args_list[-1][0][0] == 4
+
+        worker.handle_error()  # 8s backoff
+        assert mock_sleep.call_args_list[-1][0][0] == 8
+
+        worker.handle_error()  # 16s backoff
+        assert mock_sleep.call_args_list[-1][0][0] == 16
+
+        worker.handle_error()  # 30s backoff (max)
+        assert mock_sleep.call_args_list[-1][0][0] == 30
+
+        # Verify backoff doesn't exceed max
+        worker.handle_error()  # Still 30s
+        assert mock_sleep.call_args_list[-1][0][0] == 30
+
+        # Reset backoff should go back to 2s
+        worker.reset_backoff()
+        worker.handle_error()  # 2s again
+        assert mock_sleep.call_args_list[-1][0][0] == 2
