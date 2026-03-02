@@ -63,6 +63,12 @@ export interface PersistenceAdapter {
     lastError: string | null | undefined,
     context: WriteContext
   ): WorkflowJob | null;
+  updateJobStatus(
+    jobId: string,
+    expectedStatus: WorkflowStatus,
+    newStatus: WorkflowStatus,
+    context: WriteContext
+  ): boolean;
   getJobById(jobId: string): WorkflowJob | null;
   getPendingJobs(): WorkflowJob[];
   claimNextJob(workerId: string, leaseSeconds: number, context: WriteContext): WorkflowJob | null;

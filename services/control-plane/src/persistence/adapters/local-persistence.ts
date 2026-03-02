@@ -145,6 +145,24 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     return updated;
   }
 
+  updateJobStatus(
+    jobId: string,
+    expectedStatus: WorkflowStatus,
+    newStatus: WorkflowStatus,
+    context: WriteContext
+  ): boolean {
+    const job = this.jobs.get(jobId);
+
+    // CAS check: only update if status matches expected
+    if (!job || job.status !== expectedStatus) {
+      return false;  // CAS failed
+    }
+
+    // CAS succeeded: update job status using existing setJobStatus logic
+    this.setJobStatus(jobId, newStatus, null, context);
+    return true;  // CAS succeeded
+  }
+
   getJobById(jobId: string): WorkflowJob | null {
     return this.jobs.get(jobId) ?? null;
   }

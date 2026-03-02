@@ -57,6 +57,15 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     return this.localFallback.setJobStatus(jobId, status, lastError, context);
   }
 
+  updateJobStatus(
+    jobId: Parameters<PersistenceAdapter["updateJobStatus"]>[0],
+    expectedStatus: Parameters<PersistenceAdapter["updateJobStatus"]>[1],
+    newStatus: Parameters<PersistenceAdapter["updateJobStatus"]>[2],
+    context: Parameters<PersistenceAdapter["updateJobStatus"]>[3]
+  ): boolean {
+    return this.localFallback.updateJobStatus(jobId, expectedStatus, newStatus, context);
+  }
+
   getJobById(jobId: Parameters<PersistenceAdapter["getJobById"]>[0]) {
     return this.localFallback.getJobById(jobId);
   }

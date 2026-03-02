@@ -119,3 +119,77 @@ test("persistence.reset() is called in test environments", () => {
   queue = adapter.listAssetQueueRows();
   assert.equal(queue.length, 0, "Queue should be empty after reset");
 });
+
+test("updateJobStatus returns true only if CAS succeeds (status matches)", () => {
+  const adapter = createPersistenceAdapter("local");
+
+  // Create a job with pending status
+  const ingestResult = adapter.createIngestAsset(
+    { title: "test-asset", sourceUri: "file:///test" },
+    { correlationId: "test-123" }
+  );
+  const jobId = ingestResult.job.id;
+
+  // Try to update with WRONG expected status (should fail)
+  const resultWrong = adapter.updateJobStatus(
+    jobId,
+    "processing",  // Wrong expected status - job is "pending"
+    "completed",
+    { correlationId: "test-456" }
+  );
+  assert.equal(resultWrong, false, "Should return false when CAS fails (status mismatch)");
+
+  // Verify job status hasn't changed
+  const job1 = adapter.getJobById(jobId);
+  assert.equal(job1?.status, "pending", "Job status should not change on failed CAS");
+
+  // Try to update with CORRECT expected status (should succeed)
+  const resultRight = adapter.updateJobStatus(
+    jobId,
+    "pending",  // Correct expected status
+    "processing",
+    { correlationId: "test-789" }
+  );
+  assert.equal(resultRight, true, "Should return true when CAS succeeds");
+
+  // Verify job was updated
+  const job2 = adapter.getJobById(jobId);
+  assert.equal(job2?.status, "processing", "Job status should be updated to processing");
+});
+
+test("concurrent updates resolve to single winner (race condition test)", () => {
+  const adapter = createPersistenceAdapter("local");
+
+  // Create a job
+  const ingestResult = adapter.createIngestAsset(
+    { title: "test-asset", sourceUri: "file:///test" },
+    { correlationId: "test-123" }
+  );
+  const jobId = ingestResult.job.id;
+
+  // Simulate 5 workers trying to claim the same job simultaneously
+  // In a real concurrent scenario, only one should succeed
+  // For synchronous code, we simulate this by trying multiple CAS attempts
+  let successCount = 0;
+
+  for (let i = 0; i < 5; i++) {
+    const result = adapter.updateJobStatus(
+      jobId,
+      "pending",  // All expect "pending"
+      "processing",
+      {
+        correlationId: `test-${i}`
+      }
+    );
+    if (result) {
+      successCount++;
+    }
+  }
+
+  // Only the first should have succeeded (after that, status is "processing")
+  assert.equal(successCount, 1, "Only one worker should successfully claim the job");
+
+  // Job should be in processing state
+  const job = adapter.getJobById(jobId);
+  assert.equal(job?.status, "processing", "Job should be claimed");
+});
