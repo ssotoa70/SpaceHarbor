@@ -53,6 +53,16 @@ export interface WorkflowStats {
   };
 }
 
+// Export async adapter interfaces for future async implementation
+export {
+  AsyncPersistenceAdapter,
+  AssetFilter,
+  JobFilter,
+  AuditFilter,
+  Lease,
+  Metrics,
+} from './async-adapter';
+
 export interface PersistenceAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
