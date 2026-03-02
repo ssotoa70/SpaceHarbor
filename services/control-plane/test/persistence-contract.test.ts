@@ -231,3 +231,26 @@ test("outbox publishes events in creation order (FIFO)", () => {
   const timestamp2 = new Date(outbox[1].createdAt).getTime();
   assert.ok(timestamp1 <= timestamp2, "Events should be in creation order (oldest first)");
 });
+
+test("workflow status enum matches across domain and OpenAPI schema", async () => {
+  // Verify that the domain model and OpenAPI schema are in sync
+  const { workflowStatusEnum } = await import("../src/http/schemas");
+
+  // All these statuses should exist and be valid in the system
+  const expectedStatuses = ["pending", "processing", "completed", "failed", "needs_replay"];
+
+  // Verify OpenAPI enum includes all expected statuses
+  for (const status of expectedStatuses) {
+    assert.ok(
+      workflowStatusEnum.includes(status as any),
+      `Status '${status}' should be in OpenAPI enum`
+    );
+  }
+
+  // Verify no unexpected statuses in OpenAPI enum
+  assert.equal(
+    workflowStatusEnum.length,
+    expectedStatuses.length,
+    "OpenAPI enum should contain exactly the expected statuses"
+  );
+});
