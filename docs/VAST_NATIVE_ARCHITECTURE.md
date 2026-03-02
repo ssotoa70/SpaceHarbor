@@ -469,14 +469,14 @@ npm install --save
 
 ---
 
-## Questions for Clarification
+## Confirmed Requirements
 
-1. **Element Store Type** - S3, NFS, or other for file storage?
-2. **DCC Integrations** - Maya/Nuke/Houdini plugins needed in Phase 2?
-3. **Approval Workflow** - Single approver or multi-level approval chain?
-4. **QC Rules** - What constitutes "passed" QC? Automated or manual?
-5. **Retention Policy** - 90 days mentioned; is this for archived or all assets?
-6. **Scaling Targets** - Expected concurrent users? Assets per day?
+✅ **Element Store Type:** NFS, SMB, or S3 via VAST Element Store (consistent protocol handling)
+✅ **DCC Integrations:** YES - Maya, Nuke, Houdini plugins required
+✅ **Approval Workflow:** Single approval for now, extensible for multi-level in future
+✅ **QC Validation:** Auto-checks enabled + optional manual review capability
+✅ **Retention Policy:** 90 days after project finalization (adjustable), then archive
+✅ **Scalability:** Support 10-200 concurrent users with linear performance degradation
 
 ---
 
