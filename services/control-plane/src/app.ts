@@ -16,7 +16,10 @@ import { registerQueueRoute } from "./routes/queue.js";
 
 export function buildApp(): FastifyInstance {
   const persistence = createPersistenceAdapter();
-  persistence.reset();
+  // Only reset persistence in test mode to prevent data loss on production restarts
+  if (process.env.NODE_ENV === "test") {
+    persistence.reset();
+  }
   const prefixes = ["", "/api/v1"];
 
   const app = Fastify({ logger: false });
@@ -56,6 +59,7 @@ export function buildApp(): FastifyInstance {
     }
   });
 
+  // Keep route registration after OpenAPI plugin initialization so generated docs include all routes.
   app.after(() => {
     void registerHealthRoute(app);
     void registerAssetsRoute(app, persistence, prefixes);

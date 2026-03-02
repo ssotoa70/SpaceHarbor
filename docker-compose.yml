@@ -15,6 +15,13 @@ services:
       VAST_API_TOKEN: ${VAST_API_TOKEN:-}
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
 
   media-worker:
     build:
@@ -26,7 +33,9 @@ services:
       VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL:-}
       VAST_API_TOKEN: ${VAST_API_TOKEN:-}
     depends_on:
-      - control-plane
+      control-plane:
+        condition: service_healthy
+    restart: unless-stopped
 
   web-ui:
     build:
@@ -37,5 +46,13 @@ services:
       VITE_API_KEY: ${VITE_API_KEY:-}
     ports:
       - "4173:4173"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4173"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
-      - control-plane
+      control-plane:
+        condition: service_healthy
+    restart: unless-stopped

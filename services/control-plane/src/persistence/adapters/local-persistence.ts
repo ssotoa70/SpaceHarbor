@@ -198,6 +198,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       return null;
     }
 
+    // CAS (Compare-And-Swap) safety check: verify job state hasn't changed since selection
+    // This catches race conditions where another worker claimed the job between find and update
+    if (job.status !== "pending" || job.leaseOwner) {
+      return null;
+    }
+
     const updated: WorkflowJob = {
       ...job,
       status: "processing",
@@ -579,7 +585,7 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     payload: Record<string, unknown>,
     now: Date
   ): void {
-    this.outbox.unshift({
+    this.outbox.push({
       id: randomUUID(),
       eventType,
       correlationId,

@@ -58,10 +58,19 @@ def run_forever() -> None:
         lease_seconds=lease_seconds,
     )
 
+    error_backoff_seconds = 2
     while True:
-        processed = worker.process_next_job()
-        if not processed:
-            time.sleep(poll_seconds)
+        try:
+            processed = worker.process_next_job()
+            if not processed:
+                time.sleep(poll_seconds)
+            # Reset backoff on successful processing
+            error_backoff_seconds = 2
+        except Exception as e:
+            # Exponential backoff on error: 2s, 4s, 8s, 16s, 30s max
+            print(f"[{worker_id}] Error processing job: {e}", flush=True)
+            time.sleep(error_backoff_seconds)
+            error_backoff_seconds = min(error_backoff_seconds * 2, 30)
 
 
 if __name__ == "__main__":
