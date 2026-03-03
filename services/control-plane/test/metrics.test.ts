@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApp } from "../src/app";
+import { buildApp } from "../src/app.js";
 
 test("GET /api/v1/metrics returns workflow and queue statistics", async () => {
   const app = buildApp();

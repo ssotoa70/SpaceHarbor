@@ -14,6 +14,13 @@ export interface Asset {
   title: string;
   sourceUri: string;
   createdAt: string;
+  updatedAt?: string;
+  metadata?: Record<string, unknown>;
+  version?: string;
+  integrity?: {
+    checksum?: string;
+    fileSize?: number;
+  };
 }
 
 export interface AssetThumbnailPreview {
@@ -147,4 +154,13 @@ export interface DlqItem {
   error: string;
   attemptCount: number;
   failedAt: string;
+}
+
+export interface ApprovalAuditEntry {
+  id: string;
+  assetId: string;
+  action: "approved" | "rejected" | "pending";
+  actor: string;
+  timestamp: string;
+  comment?: string;
 }

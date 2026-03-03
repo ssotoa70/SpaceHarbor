@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence";
+import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence.js";
 
 test("VAST adapter delegates ingest writes through workflow client boundary", () => {
   const calls: string[] = [];

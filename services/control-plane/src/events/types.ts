@@ -216,7 +216,7 @@ export function isCanonicalAssetEventEnvelope(input: unknown): input is Canonica
     return false;
   }
 
-  return hasReviewContractData(value.eventType, value.data);
+  return value.data ? hasReviewContractData(value.eventType as AssetEventType, value.data) : false;
 }
 
 export function normalizeLegacyEvent(event: LegacyAssetEventEnvelope): NormalizedAssetEvent {

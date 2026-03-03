@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildOutboundSignature } from "../src/integrations/outbound/signing";
+import { buildOutboundSignature } from "../src/integrations/outbound/signing.js";
 
 test("buildOutboundSignature returns deterministic sha256 format", () => {
   const signatureA = buildOutboundSignature({

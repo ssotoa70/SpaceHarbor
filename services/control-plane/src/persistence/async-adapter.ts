@@ -15,13 +15,15 @@ import type {
   AuditEvent,
   DlqItem,
   IngestResult,
-  FailureResult,
-  WorkflowStats,
   AssetQueueRow,
-  IngestInput,
+} from "../domain/models.js";
+import type {
+  FailureResult,
   WriteContext,
   PersistenceBackend,
-} from "../domain/models";
+  WorkflowStats,
+  IngestInput,
+} from "./types.js";
 
 export interface AssetFilter {
   project_id?: string;

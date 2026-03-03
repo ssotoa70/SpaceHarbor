@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { OutboxItem } from "../src/domain/models.js";
-import { mapOutboxItemToOutboundPayload } from "../src/integrations/outbound/payload-mapper";
+import { mapOutboxItemToOutboundPayload } from "../src/integrations/outbound/payload-mapper.js";
 
 function makeOutboxItem(eventType: string): OutboxItem {
   return {

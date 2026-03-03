@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createPersistenceAdapter } from "../src/persistence/factory";
+import { createPersistenceAdapter } from "../src/persistence/factory.js";
 
 test("extended asset model: VFX metadata fields are preserved through create and update", () => {
   const adapter = createPersistenceAdapter("local");

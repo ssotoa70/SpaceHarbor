@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApp } from "../src/app";
-import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence";
+import { buildApp } from "../src/app.js";
+import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence.js";
 
 test("POST /api/v1/assets/ingest validates payload with unified error envelope", async () => {
   const app = buildApp();

@@ -77,7 +77,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   ) {
     return this.invokeWorkflowClient(
       "createIngestAsset",
-      this.workflowClient?.createIngestAsset
+      this.workflowClient
         ? () => this.workflowClient!.createIngestAsset(input, context)
         : undefined,
       () => this.localFallback.createIngestAsset(input, context)
@@ -109,7 +109,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
     return this.invokeWorkflowClient(
       "setJobStatus",
-      this.workflowClient?.setJobStatus
+      this.workflowClient
         ? () => this.workflowClient!.setJobStatus(jobId, status, lastError, context)
         : undefined,
       () => this.localFallback.setJobStatus(jobId, status, lastError, context)
@@ -152,7 +152,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   heartbeatJob(jobId: string, workerId: string, leaseSeconds: number, context: WriteContext) {
     return this.invokeWorkflowClient(
       "heartbeatJob",
-      this.workflowClient?.heartbeatJob
+      this.workflowClient
         ? () => this.workflowClient!.heartbeatJob(jobId, workerId, leaseSeconds, context)
         : undefined,
       () => this.localFallback.heartbeatJob(jobId, workerId, leaseSeconds, context)
@@ -166,7 +166,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   handleJobFailure(jobId: string, error: string, context: WriteContext): FailureResult {
     return this.invokeWorkflowClient(
       "handleJobFailure",
-      this.workflowClient?.handleJobFailure
+      this.workflowClient
         ? () => this.workflowClient!.handleJobFailure(jobId, error, context)
         : undefined,
       () => this.localFallback.handleJobFailure(jobId, error, context)
@@ -176,7 +176,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   replayJob(jobId: string, context: WriteContext) {
     return this.invokeWorkflowClient(
       "replayJob",
-      this.workflowClient?.replayJob
+      this.workflowClient
         ? () => this.workflowClient!.replayJob(jobId, context)
         : undefined,
       () => this.localFallback.replayJob(jobId, context)

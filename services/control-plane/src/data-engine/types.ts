@@ -11,6 +11,8 @@ export interface JsonSchema {
   properties?: Record<string, JsonSchema & { description?: string; enum?: unknown[]; items?: JsonSchema; example?: unknown[] }>;
   required?: string[];
   description?: string;
+  enum?: unknown[];
+  items?: JsonSchema;
 }
 
 export interface DataEngineFunction {
