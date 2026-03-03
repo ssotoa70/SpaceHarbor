@@ -12,7 +12,7 @@ class MediaWorker:
         self.worker_id = worker_id
         self.lease_seconds = lease_seconds
         self.error_backoff_seconds = 2
-        self.max_backoff_seconds = 30
+        self.max_backoff_seconds = 300  # 5 minutes for long-running jobs
 
     def process_next_job(self) -> bool:
         """Process next job with error handling and automatic backoff.
@@ -51,7 +51,7 @@ class MediaWorker:
     def handle_error(self) -> None:
         """Apply exponential backoff on errors.
 
-        Backs off: 2s, 4s, 8s, 16s, 30s max
+        Backs off: 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 300s max
         """
         time.sleep(self.error_backoff_seconds)
         self.error_backoff_seconds = min(
@@ -67,7 +67,7 @@ def run_forever() -> None:
     """Run the worker forever, claiming and processing jobs with error handling.
 
     - Polls for jobs every WORKER_POLL_SECONDS
-    - Implements exponential backoff on errors: 2s, 4s, 8s, 16s, 30s max
+    - Implements exponential backoff on errors: 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 300s max
     - Resets backoff on successful job processing
     """
     base_url = os.environ.get("CONTROL_PLANE_URL", "http://localhost:8080")
