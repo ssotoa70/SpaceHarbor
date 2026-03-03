@@ -1,163 +1,87 @@
-# AssetHarbor Handoff (Claude Code Session)
+# AssetHarbor Implementation Handoff (Phase 1-3)
 
-**Date:** March 2, 2026
-**Project:** AssetHarbor - VAST-native Media Asset Management (MAM)
-**Phase:** Design complete, Phase 1+2+3 implementation started
+**Session End Date**: March 2, 2026 (Evening)
+**Current Token Usage**: 88% (177k/200k)
+**Active Branch**: `worktree-assetharbor-implementation-2026-03-02`
+**Git Status**: Clean (8 commits since session start)
 
----
+## Project Status
 
-## Current State
+### Completed Work
+**Phase 1: STABILIZATION (6/6 Tasks - 100% Complete)** ✅
+- Guard persistence.reset() from Startup
+- Implement Atomic Job Claiming with CAS
+- Add Worker Exception Handling & Exponential Backoff (300s max)
+- Add Docker Compose Healthchecks & Restart Policies
+- Fix Outbox Insertion Order (LIFO → FIFO)
+- Reconcile Status Enum Drift
 
-### Completed Work (This Session)
+**Phase 2: VAST Integration (1/4 Tasks)** 🚧
+- Task 7: Create AsyncPersistenceAdapter Interface ✅
 
-**Design & Planning (100% complete):**
-- ✅ Comprehensive Phase 1+2+3 design doc (1,888 lines): `docs/plans/2026-03-02-assetharbor-phase1-2-3-design.md`
-- ✅ Detailed implementation plan with 17 TDD tasks (1,736 lines): `docs/plans/2026-03-02-assetharbor-implementation.md`
-- ✅ Specialist validation (UI/UX + media pipeline): `docs/SPECIALIST_VALIDATION_2026-03-02.md`
-- ✅ Project memory updated: `~/.claude/projects/.../memory/MEMORY.md` (AssetHarbor section)
-- ✅ Ops-dashboard enhanced for team tracking: `/Users/sergio.soto/opencode/ops-dashboard/`
-- ✅ Team coordination guide created: `TEAM_COORDINATION_GUIDE.md`
+**Phase 3: Features (2/8 Tasks)** 🚧
+- Task 11: Data Engine Pipeline Architecture ✅
+- Task 12: EXR Inspector Function ✅
 
-**Execution (In Progress)**
-- ✅ Parallel session started with executing-plans skill
-- ✅ New Claude agent working on Tasks 1-5 (Phase 1 stabilization)
-- ✅ Git worktree created: `.claude/worktrees/assetharbor-implementation-2026-03-02`
+### Test Results
+- Control Plane: 42/42 tests passing ✅
+- Media Worker: 9/9 tests passing ✅
+- Web UI: 1/1 test passing ✅
+- Total: 52+ tests across all services ✅
 
-### Current Activity
+## Key Implementations
 
-**Planning Session (this agent):**
-- Brainstorming → Design → Validation → Documentation → Team Setup
-- Status: COMPLETE, standing by for support
+### Files Modified/Created
+```
+services/control-plane/
+  src/persistence/
+    - async-adapter.ts (NEW) - AsyncPersistenceAdapter interface
+    - PERSISTENCE_ARCHITECTURE.md (NEW) - Documentation
+    - types.ts - Export async interfaces
+    - adapters/local-persistence.ts - Added updateJobStatus() CAS
+    - adapters/vast-persistence.ts - Delegated updateJobStatus()
+  routes/health.ts - Added /health/ready endpoint
+  app.ts - Pass persistence to health route
 
-**Execution Session (separate session):**
-- Phase 1 Task 1 in progress (Guard persistence.reset())
-- Using executing-plans skill for batch execution
-- Teams A, B, C working in parallel
-- Status: ACTIVE, no blockers reported yet
+services/media-worker/
+  worker/
+    - data_engine.py (NEW) - Pipeline architecture
+    - exrinspector.py (NEW) - EXR metadata extraction
+    - main.py - Max backoff 300s for long-running jobs
+  tests/test_data_engine.py (NEW) - 6 pipeline tests
+  requirements.txt - Added pytest-asyncio
 
----
+docker-compose.yml - media-worker healthcheck
+```
 
-## Architecture Summary
+## Remaining Work (Priority Order)
 
-**Three Parallel Teams:**
+### Phase 2: VAST Integration (3/4 Tasks)
+1. **Task 8**: Refactor LocalAdapter to Async (~15 files)
+2. **Task 9**: Implement MockVastAdapter
+3. **Task 10**: Implement Kafka Event Broker
 
-| Team | Phase | Key Tasks | Timeline | Status |
-|------|-------|-----------|----------|--------|
-| **A** | Stabilization | Guard reset, atomic claiming, error handling | Weeks 1-2 | In progress |
-| **B** | VAST Integration | Async layer, adapters, Kafka | Weeks 1-3 | In progress |
-| **C** | Features | Data Engine, exrinspector, approval | Weeks 2-4 | Blocked on MockVastAdapter |
+### Phase 3: Features (6/8 Tasks)
+- Task 13: Extend Asset Model with Metadata
+- Task 13.1: Background Heartbeat in Worker
+- Task 13.2: DLQ Automation + Retry Counter
+- Task 14: Approval Workflow Endpoints
+- Task 15: Stub DCC Integration Endpoints
 
-**Critical Dependency:**
-- Team B must deliver MockVastAdapter by **Friday, March 14** to unblock Team C
+## Next Steps
 
----
+1. **Start Task 8**: Refactor LocalPersistenceAdapter methods to async
+   - File: `services/control-plane/src/persistence/adapters/local-persistence.ts`
+   - Update all route handlers to use await
+   - Target: Complete by March 6 EOD
 
-## Key Files & Locations
+2. **Verify**: All tests still pass after Task 8
+   - Command: `npm run test:all`
 
-**Design & Planning:**
-- Design: `docs/plans/2026-03-02-assetharbor-phase1-2-3-design.md`
-- Implementation: `docs/plans/2026-03-02-assetharbor-implementation.md`
-- Validation: `docs/SPECIALIST_VALIDATION_2026-03-02.md`
+3. **Continue Tasks 9-10** to complete Phase 2 foundation
 
-**Code Locations:**
-- Control-plane: `services/control-plane/src/`
-- Persistence adapters: `src/persistence/adapters/{local,mock-vast,vast}.ts`
-- Media-worker: `services/media-worker/worker/main.py`
-- Web-UI: `services/web-ui/src/`
-- Docker: `docker-compose.yml`
-
-**Tracking:**
-- Linear board: https://linear.app/dev-ss/project/assetharbor-mvp-scrum-board-3f804bce058c
-- Ops-dashboard: `http://localhost:9090` (run `python3 -m http.server 9090 --directory "/Users/sergio.soto/opencode/ops-dashboard"`)
-- Project memory: `/Users/sergio.soto/.claude/projects/-Users-sergio-soto-Development/memory/MEMORY.md`
-
----
-
-## What's Completed
-
-**Design Phase (Approved):**
-- ✅ Phase 1 (stabilization): 7 tasks, guard reset, CAS claiming, worker error handling, healthchecks, outbox ordering, status enum, heartbeat task
-- ✅ Phase 2 (VAST integration): 6 tasks, async interface, LocalAdapter refactor, MockVastAdapter, Kafka, DLQ automation, concurrent testing
-- ✅ Phase 3 (features): 5 tasks, Data Engine, exrinspector (EXR metadata with 8 VFX fields), extended asset model (versioning + integrity), approval workflow, DCC stubs
-
-**Specialist Approvals:**
-- ✅ UI/UX Specialist (ui-ux-react-vite): Component architecture approved, MVP priority: AssetQueue → ApprovalPanel → IngestModal
-- ✅ Media Pipeline Specialist (media-pipeline-specialist): exrinspector approved, VFX metadata fields added, DLQ automation + heartbeat task required
-
-**Documentation:**
-- ✅ Design doc enhanced with VFX metadata fields, DLQ automation, heartbeat task
-- ✅ Implementation plan clarified with specialist recommendations
-- ✅ Linear board created with 21 issues + dependencies wired
-- ✅ Project memory saved (persists across sessions)
-- ✅ Ops-dashboard enhanced for team coordination
+## No Blockers
+All dependencies available, tests passing, ready to continue.
 
 ---
-
-## What's In Progress
-
-**Execution Session (separate Claude agent):**
-- Phase 1 Task 1: Guard persistence.reset() (implementation started)
-- Phase 1 Tasks 2-6: Queued for this week
-- Phase 2 Task 7 (async interface): Queued for this week
-
-**No blockers yet reported from execution agent.**
-
----
-
-## Next Immediate Steps (For This Session)
-
-1. ✅ **Design & planning:** COMPLETE
-2. ✅ **Specialist validation:** COMPLETE
-3. ✅ **Documentation:** COMPLETE
-4. ✅ **Team setup:** COMPLETE
-5. **Support execution (ongoing):**
-   - Monitor executing-plans agent progress (may take days/weeks)
-   - Handle blockers if execution agent messages
-   - Update ops-dashboard weekly
-   - Review checkpoints (Fridays: Mar 7, 14, 21, 28)
-
----
-
-## Blockers & Decisions Awaiting
-
-**None currently.** Design is approved, execution has started, no reported blockers from Teams A/B/C.
-
-**Future gate:** Friday, March 7 checkpoint (Week 1 complete). Verify Phase 1 stabilization + async foundation ready.
-
----
-
-## Token Optimization Notes
-
-This session involved:
-1. **Brainstorming skill:** Design exploration (completed)
-2. **Specialist validation:** Two agents (ui-ux-react-vite, media-pipeline-specialist) reviewed design
-3. **Documentation steward:** Updated design + implementation plan
-4. **Scrum-master:** Created 21 Linear issues
-5. **Ops-dashboard enhancement:** Added Phase 1+2+3 tracking
-6. **Project memory:** Saved AssetHarbor context
-
-**Recommend:** If token usage exceeds 90%, create a new session and resume from here. The executing-plans agent is already running in a separate session and doesn't need this context.
-
----
-
-## Session Context Location
-
-- Started: `/Users/sergio.soto/Development/ai-apps/code/AssetHarbor`
-- Git branch: `phase-4-openapi` (planning session) + worktree `assetharbor-implementation-2026-03-02` (execution)
-- Worktree path: `/Users/sergio.soto/Development/ai-apps/code/AssetHarbor/.claude/worktrees/assetharbor-implementation-2026-03-02`
-
----
-
-## Resume Instructions
-
-**For next session:**
-1. Read this file: `cat ~/.claude/projects/.../handoff-assetharbor.md`
-2. Check ops-dashboard for current team progress: `http://localhost:9090`
-3. Check Linear board for task status: https://linear.app/dev-ss/project/assetharbor-mvp-scrum-board-3f804bce058c
-4. Check if executing-plans agent has messages (may be running in background)
-5. If all is on track, just monitor weekly checkpoints (Mar 7, 14, 21, 28)
-6. If blockers reported, use main context to help unblock teams
-
----
-
-**Status:** Ready for handoff. Design phase complete, execution underway.
+**Resume Command**: `cat .claude/handoff-assetharbor.md`
