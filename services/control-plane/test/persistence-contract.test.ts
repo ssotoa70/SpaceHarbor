@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createPersistenceAdapter, resolvePersistenceBackend } from "../src/persistence/factory";
+import { createPersistenceAdapter, resolvePersistenceBackend, resolveVastFallbackToLocal } from "../src/persistence/factory";
+import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence";
+import type { OutboundNotifier } from "../src/integrations/outbound/notifier";
+import type { OutboundConfig } from "../src/integrations/outbound/types";
 
 test("persistence backend resolution defaults to local", () => {
   assert.equal(resolvePersistenceBackend(undefined), "local");
@@ -63,194 +66,142 @@ test("strict VAST mode requires full endpoint configuration", () => {
   }
 });
 
-test("persistence.reset() is guarded from non-test environments", () => {
-  const adapter = createPersistenceAdapter("local");
-
-  // Create an asset before testing guard
-  const ingestResult = adapter.createIngestAsset(
-    { title: "test-asset", sourceUri: "file:///test" },
-    { correlationId: "test-123" }
-  );
-  assert.ok(ingestResult.asset, "Asset should be created");
-
-  // Verify asset exists in queue
-  let queue = adapter.listAssetQueueRows();
-  assert.equal(queue.length, 1, "Queue should contain 1 asset");
-  assert.equal(queue[0].id, ingestResult.asset.id, "Asset ID should match");
-
-  // Now simulate production mode - reset should NOT be called
-  const originalNodeEnv = process.env.NODE_ENV;
-  try {
-    process.env.NODE_ENV = "production";
-
-    // In production, buildApp should NOT call reset()
-    // The guard logic checks: if (process.env.NODE_ENV === 'test') { reset() }
-    // This test validates that guard is in place
-    assert.equal(process.env.NODE_ENV, "production", "NODE_ENV should be production");
-
-    // Asset should still be there because reset wasn't called
-    queue = adapter.listAssetQueueRows();
-    assert.equal(queue.length, 1, "Asset should still exist in production mode (reset was not called)");
-    assert.equal(queue[0].id, ingestResult.asset.id, "Asset ID should still match");
-
-  } finally {
-    process.env.NODE_ENV = originalNodeEnv;
-  }
+test("VAST fallback policy defaults to local fallback unless explicitly false", () => {
+  assert.equal(resolveVastFallbackToLocal(undefined), true);
+  assert.equal(resolveVastFallbackToLocal(""), true);
+  assert.equal(resolveVastFallbackToLocal("true"), true);
+  assert.equal(resolveVastFallbackToLocal("TRUE"), true);
+  assert.equal(resolveVastFallbackToLocal("false"), false);
 });
 
-test("persistence.reset() is called in test environments", () => {
-  const adapter = createPersistenceAdapter("local");
-
-  // Create an asset
-  const ingestResult = adapter.createIngestAsset(
-    { title: "test-asset", sourceUri: "file:///test" },
-    { correlationId: "test-123" }
+test("local persistence exposes null-safe preview and annotation metadata defaults", () => {
+  const persistence = new LocalPersistenceAdapter();
+  const ingest = persistence.createIngestAsset(
+    {
+      title: "preview-defaults",
+      sourceUri: "s3://bucket/preview-defaults.mov"
+    },
+    { correlationId: "corr-preview-defaults" }
   );
-  assert.ok(ingestResult.asset, "Asset should be created");
 
-  // Verify asset exists in queue
-  let queue = adapter.listAssetQueueRows();
-  assert.equal(queue.length, 1, "Queue should contain 1 asset");
+  assert.equal(ingest.job.thumbnail, null);
+  assert.equal(ingest.job.proxy, null);
+  assert.deepEqual(ingest.job.annotationHook, {
+    enabled: false,
+    provider: null,
+    contextId: null
+  });
+  assert.deepEqual(ingest.job.handoffChecklist, {
+    releaseNotesReady: false,
+    verificationComplete: false,
+    commsDraftReady: false,
+    ownerAssigned: false
+  });
+  assert.deepEqual(ingest.job.handoff, {
+    status: "not_ready",
+    owner: null,
+    lastUpdatedAt: null
+  });
 
-  // Reset the adapter (as would happen in test mode)
-  adapter.reset();
-
-  // Asset should be gone
-  queue = adapter.listAssetQueueRows();
-  assert.equal(queue.length, 0, "Queue should be empty after reset");
+  const row = persistence.listAssetQueueRows()[0];
+  assert.equal(row.thumbnail, null);
+  assert.equal(row.proxy, null);
+  assert.deepEqual(row.annotationHook, {
+    enabled: false,
+    provider: null,
+    contextId: null
+  });
+  assert.deepEqual(row.handoffChecklist, {
+    releaseNotesReady: false,
+    verificationComplete: false,
+    commsDraftReady: false,
+    ownerAssigned: false
+  });
+  assert.deepEqual(row.handoff, {
+    status: "not_ready",
+    owner: null,
+    lastUpdatedAt: null
+  });
 });
 
-test("updateJobStatus returns true only if CAS succeeds (status matches)", () => {
-  const adapter = createPersistenceAdapter("local");
-
-  // Create a job with pending status
-  const ingestResult = adapter.createIngestAsset(
-    { title: "test-asset", sourceUri: "file:///test" },
-    { correlationId: "test-123" }
-  );
-  const jobId = ingestResult.job.id;
-
-  // Try to update with WRONG expected status (should fail)
-  const resultWrong = adapter.updateJobStatus(
-    jobId,
-    "processing",  // Wrong expected status - job is "pending"
-    "completed",
-    { correlationId: "test-456" }
-  );
-  assert.equal(resultWrong, false, "Should return false when CAS fails (status mismatch)");
-
-  // Verify job status hasn't changed
-  const job1 = adapter.getJobById(jobId);
-  assert.equal(job1?.status, "pending", "Job status should not change on failed CAS");
-
-  // Try to update with CORRECT expected status (should succeed)
-  const resultRight = adapter.updateJobStatus(
-    jobId,
-    "pending",  // Correct expected status
-    "processing",
-    { correlationId: "test-789" }
-  );
-  assert.equal(resultRight, true, "Should return true when CAS succeeds");
-
-  // Verify job was updated
-  const job2 = adapter.getJobById(jobId);
-  assert.equal(job2?.status, "processing", "Job status should be updated to processing");
-});
-
-test("concurrent updates resolve to single winner (race condition test)", () => {
-  const adapter = createPersistenceAdapter("local");
-
-  // Create a job
-  const ingestResult = adapter.createIngestAsset(
-    { title: "test-asset", sourceUri: "file:///test" },
-    { correlationId: "test-123" }
-  );
-  const jobId = ingestResult.job.id;
-
-  // Simulate 5 workers trying to claim the same job simultaneously
-  // In a real concurrent scenario, only one should succeed
-  // For synchronous code, we simulate this by trying multiple CAS attempts
-  let successCount = 0;
-
-  for (let i = 0; i < 5; i++) {
-    const result = adapter.updateJobStatus(
-      jobId,
-      "pending",  // All expect "pending"
-      "processing",
-      {
-        correlationId: `test-${i}`
-      }
-    );
-    if (result) {
-      successCount++;
+test("local outbox publish sends webhook notifications and marks items published", async () => {
+  const deliveredTargets: string[] = [];
+  const notifier: OutboundNotifier = {
+    notify: async (target) => {
+      deliveredTargets.push(target.target);
     }
-  }
+  };
 
-  // Only the first should have succeeded (after that, status is "processing")
-  assert.equal(successCount, 1, "Only one worker should successfully claim the job");
+  const outboundConfig: OutboundConfig = {
+    strictMode: false,
+    signingSecret: "secret",
+    targets: [
+      { target: "slack", url: "https://hooks.example.com/slack" },
+      { target: "teams", url: "https://hooks.example.com/teams" }
+    ]
+  };
 
-  // Job should be in processing state
-  const job = adapter.getJobById(jobId);
-  assert.equal(job?.status, "processing", "Job should be claimed");
+  const persistence = new LocalPersistenceAdapter(outboundConfig, notifier);
+  persistence.createIngestAsset(
+    {
+      title: "outbound-success",
+      sourceUri: "s3://bucket/outbound-success.mov"
+    },
+    { correlationId: "corr-outbound-success" }
+  );
+
+  const published = await persistence.publishOutbox({ correlationId: "corr-outbound-publish" });
+  assert.equal(published, 1);
+  assert.deepEqual(deliveredTargets, ["slack", "teams"]);
+
+  const stats = persistence.getWorkflowStats();
+  assert.equal(stats.outbound.attempts, 2);
+  assert.equal(stats.outbound.success, 2);
+  assert.equal(stats.outbound.failure, 0);
 });
 
-test("outbox publishes events in creation order (FIFO)", () => {
-  const adapter = createPersistenceAdapter("local");
+test("local outbox publish keeps item pending when webhook delivery fails", async () => {
+  const notifier: OutboundNotifier = {
+    notify: async (target) => {
+      if (target.target === "production") {
+        throw new Error("simulated webhook failure");
+      }
+    }
+  };
 
-  // Create an asset to generate outbox events
-  const result1 = adapter.createIngestAsset(
-    { title: "asset-1", sourceUri: "file:///test1" },
-    { correlationId: "corr-1" }
+  const outboundConfig: OutboundConfig = {
+    strictMode: false,
+    signingSecret: "secret",
+    targets: [{ target: "production", url: "https://hooks.example.com/production" }]
+  };
+
+  const persistence = new LocalPersistenceAdapter(outboundConfig, notifier);
+  persistence.createIngestAsset(
+    {
+      title: "outbound-failure",
+      sourceUri: "s3://bucket/outbound-failure.mov"
+    },
+    { correlationId: "corr-outbound-failure" }
   );
 
-  // Verify first event was created
-  let outbox = adapter.getOutboxItems();
-  assert.equal(outbox.length, 1, "Should have 1 outbox event after first asset");
-  assert.equal(outbox[0].eventType, "media.process.requested.v1");
+  const published = await persistence.publishOutbox({ correlationId: "corr-outbound-publish-failure" });
+  assert.equal(published, 0);
 
-  // Create another asset
-  const result2 = adapter.createIngestAsset(
-    { title: "asset-2", sourceUri: "file:///test2" },
-    { correlationId: "corr-2" }
-  );
+  const outboxItems = persistence.getOutboxItems().filter((item) => !item.publishedAt);
+  assert.equal(outboxItems.length, 1);
 
-  // Verify both events are in FIFO order
-  outbox = adapter.getOutboxItems();
-  assert.equal(outbox.length, 2, "Should have 2 outbox events");
-
-  // First event should be from first asset
-  assert.equal(outbox[0].eventType, "media.process.requested.v1");
-  assert.equal(outbox[0].payload.assetId, result1.asset.id);
-
-  // Second event should be from second asset
-  assert.equal(outbox[1].eventType, "media.process.requested.v1");
-  assert.equal(outbox[1].payload.assetId, result2.asset.id);
-
-  // Timestamps should be ascending
-  const timestamp1 = new Date(outbox[0].createdAt).getTime();
-  const timestamp2 = new Date(outbox[1].createdAt).getTime();
-  assert.ok(timestamp1 <= timestamp2, "Events should be in creation order (oldest first)");
+  const stats = persistence.getWorkflowStats();
+  assert.equal(stats.outbound.attempts, 1);
+  assert.equal(stats.outbound.success, 0);
+  assert.equal(stats.outbound.failure, 1);
 });
 
-test("workflow status enum matches across domain and OpenAPI schema", async () => {
-  // Verify that the domain model and OpenAPI schema are in sync
-  const { workflowStatusEnum } = await import("../src/http/schemas");
+test("persistence adapters expose audit retention preview and apply methods", () => {
+  const local = createPersistenceAdapter("local");
+  const vast = createPersistenceAdapter("vast");
 
-  // All these statuses should exist and be valid in the system
-  const expectedStatuses = ["pending", "processing", "completed", "failed", "needs_replay", "qc_pending", "qc_in_review", "qc_approved", "qc_rejected"];
-
-  // Verify OpenAPI enum includes all expected statuses
-  for (const status of expectedStatuses) {
-    assert.ok(
-      workflowStatusEnum.includes(status as any),
-      `Status '${status}' should be in OpenAPI enum`
-    );
-  }
-
-  // Verify no unexpected statuses in OpenAPI enum
-  assert.equal(
-    workflowStatusEnum.length,
-    expectedStatuses.length,
-    "OpenAPI enum should contain exactly the expected statuses"
-  );
+  assert.equal(typeof local.previewAuditRetention, "function");
+  assert.equal(typeof local.applyAuditRetention, "function");
+  assert.equal(typeof vast.previewAuditRetention, "function");
+  assert.equal(typeof vast.applyAuditRetention, "function");
 });

@@ -1,8 +1,14 @@
+import { resolveOutboundConfig } from "../integrations/outbound/config.js";
+import { WebhookOutboundNotifier } from "../integrations/outbound/webhook-notifier.js";
 import { LocalPersistenceAdapter } from "./adapters/local-persistence.js";
 import { VastPersistenceAdapter } from "./adapters/vast-persistence.js";
 import type { PersistenceAdapter, PersistenceBackend } from "./types.js";
 
 const SUPPORTED_BACKENDS: PersistenceBackend[] = ["local", "vast"];
+
+export function resolveVastFallbackToLocal(rawValue: string | undefined): boolean {
+  return rawValue?.trim().toLowerCase() !== "false";
+}
 
 export function resolvePersistenceBackend(rawBackend: string | undefined): PersistenceBackend {
   const normalized = rawBackend?.trim().toLowerCase();
@@ -19,17 +25,22 @@ export function resolvePersistenceBackend(rawBackend: string | undefined): Persi
 
 export function createPersistenceAdapter(rawBackend = process.env.ASSETHARBOR_PERSISTENCE_BACKEND): PersistenceAdapter {
   const backend = resolvePersistenceBackend(rawBackend);
+  const outboundConfig = resolveOutboundConfig(process.env);
+  const outboundNotifier =
+    outboundConfig.targets.length > 0 ? new WebhookOutboundNotifier(outboundConfig.signingSecret) : null;
 
   if (backend === "vast") {
     const strict = process.env.ASSETHARBOR_VAST_STRICT?.toLowerCase() === "true";
+    const fallbackToLocal = resolveVastFallbackToLocal(process.env.ASSETHARBOR_VAST_FALLBACK_TO_LOCAL);
 
     return new VastPersistenceAdapter({
       databaseUrl: process.env.VAST_DATABASE_URL,
       eventBrokerUrl: process.env.VAST_EVENT_BROKER_URL,
       dataEngineUrl: process.env.VAST_DATAENGINE_URL,
-      strict
-    });
+      strict,
+      fallbackToLocal
+    }, undefined, undefined, outboundConfig, outboundNotifier ?? undefined);
   }
 
-  return new LocalPersistenceAdapter();
+  return new LocalPersistenceAdapter(outboundConfig, outboundNotifier);
 }

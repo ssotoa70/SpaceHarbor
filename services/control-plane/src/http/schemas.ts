@@ -1,4 +1,14 @@
-export const workflowStatusEnum = ["pending", "processing", "completed", "failed", "needs_replay", "qc_pending", "qc_in_review", "qc_approved", "qc_rejected"] as const;
+export const workflowStatusEnum = [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "needs_replay",
+  "qc_pending",
+  "qc_in_review",
+  "qc_approved",
+  "qc_rejected"
+] as const;
 
 export const errorEnvelopeSchema = {
   type: "object",
@@ -28,58 +38,77 @@ export const assetSchema = {
     id: { type: "string" },
     title: { type: "string" },
     sourceUri: { type: "string" },
-    createdAt: { type: "string", format: "date-time" },
-    updatedAt: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
-    metadata: {
+    createdAt: { type: "string", format: "date-time" }
+  }
+} as const;
+
+export const thumbnailSchema = {
+  anyOf: [
+    {
       type: "object",
+      required: ["uri", "width", "height", "generatedAt"],
       properties: {
+        uri: { type: "string" },
+        width: { type: "number" },
+        height: { type: "number" },
+        generatedAt: { type: "string", format: "date-time" }
+      }
+    },
+    { type: "null" }
+  ]
+} as const;
+
+export const proxySchema = {
+  anyOf: [
+    {
+      type: "object",
+      required: ["uri", "durationSeconds", "codec", "generatedAt"],
+      properties: {
+        uri: { type: "string" },
+        durationSeconds: { type: "number" },
         codec: { type: "string" },
-        resolution: {
-          type: "object",
-          properties: { width: { type: "number" }, height: { type: "number" } }
-        },
-        frame_range: {
-          type: "object",
-          properties: { start: { type: "number" }, end: { type: "number" } }
-        },
-        frame_rate: { type: "number" },
-        pixel_aspect_ratio: { type: "number" },
-        display_window: {
-          type: "object",
-          properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } }
-        },
-        data_window: {
-          type: "object",
-          properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } }
-        },
-        compression_type: { type: "string" },
-        channels: { type: "array", items: { type: "string" } },
-        color_space: { type: "string" },
-        bit_depth: { type: "number" },
-        file_size_bytes: { type: "number" },
-        md5_checksum: { type: "string" }
+        generatedAt: { type: "string", format: "date-time" }
       }
     },
-    version: {
-      type: "object",
-      properties: {
-        version_label: { type: "string" },
-        parent_version_id: { type: "string" }
-      }
+    { type: "null" }
+  ]
+} as const;
+
+export const annotationHookSchema = {
+  type: "object",
+  required: ["enabled", "provider", "contextId"],
+  properties: {
+    enabled: { type: "boolean" },
+    provider: {
+      anyOf: [{ type: "string" }, { type: "null" }]
     },
-    integrity: {
-      type: "object",
-      properties: {
-        file_size_bytes: { type: "number" },
-        checksum: {
-          type: "object",
-          properties: {
-            type: { type: "string", enum: ["md5", "xxhash"] },
-            value: { type: "string" }
-          }
-        },
-        verified_at: { type: "string", format: "date-time" }
-      }
+    contextId: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    }
+  }
+} as const;
+
+export const handoffChecklistSchema = {
+  type: "object",
+  required: ["releaseNotesReady", "verificationComplete", "commsDraftReady", "ownerAssigned"],
+  properties: {
+    releaseNotesReady: { type: "boolean" },
+    verificationComplete: { type: "boolean" },
+    commsDraftReady: { type: "boolean" },
+    ownerAssigned: { type: "boolean" }
+  }
+} as const;
+
+export const handoffSchema = {
+  type: "object",
+  required: ["status", "owner", "lastUpdatedAt"],
+  properties: {
+    status: { type: "string", enum: ["not_ready", "ready_for_release"] },
+    owner: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    lastUpdatedAt: {
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }]
     }
   }
 } as const;
@@ -97,7 +126,12 @@ export const workflowJobSchema = {
     "maxAttempts",
     "nextAttemptAt",
     "leaseOwner",
-    "leaseExpiresAt"
+    "leaseExpiresAt",
+    "thumbnail",
+    "proxy",
+    "annotationHook",
+    "handoffChecklist",
+    "handoff"
   ],
   properties: {
     id: { type: "string" },
@@ -118,6 +152,75 @@ export const workflowJobSchema = {
     },
     leaseExpiresAt: {
       anyOf: [{ type: "string", format: "date-time" }, { type: "null" }]
+    },
+    thumbnail: thumbnailSchema,
+    proxy: proxySchema,
+    annotationHook: annotationHookSchema,
+    handoffChecklist: handoffChecklistSchema,
+    handoff: handoffSchema
+  }
+} as const;
+
+export const assetQueueRowSchema = {
+  type: "object",
+  required: [
+    "id",
+    "jobId",
+    "title",
+    "sourceUri",
+    "status",
+    "thumbnail",
+    "proxy",
+    "annotationHook",
+    "handoffChecklist",
+    "handoff"
+  ],
+  properties: {
+    id: { type: "string" },
+    jobId: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    title: { type: "string" },
+    sourceUri: { type: "string" },
+    status: { type: "string", enum: [...workflowStatusEnum] },
+    thumbnail: thumbnailSchema,
+    proxy: proxySchema,
+    annotationHook: annotationHookSchema,
+    handoffChecklist: handoffChecklistSchema,
+    handoff: handoffSchema
+  }
+} as const;
+
+export const auditSignalSchema = {
+  type: "object",
+  required: ["type", "code", "severity"],
+  properties: {
+    type: { type: "string", enum: ["fallback"] },
+    code: { type: "string", enum: ["VAST_FALLBACK"] },
+    severity: { type: "string", enum: ["warning", "critical"] }
+  }
+} as const;
+
+export const auditEventSchema = {
+  type: "object",
+  required: ["id", "message", "at", "signal"],
+  properties: {
+    id: { type: "string" },
+    message: { type: "string" },
+    at: { type: "string", format: "date-time" },
+    signal: {
+      anyOf: [auditSignalSchema, { type: "null" }]
+    }
+  }
+} as const;
+
+export const auditEventsResponseSchema = {
+  type: "object",
+  required: ["events"],
+  properties: {
+    events: {
+      type: "array",
+      items: auditEventSchema
     }
   }
 } as const;

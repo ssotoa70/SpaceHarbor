@@ -1,7 +1,7 @@
-export type OutboundTargetKind = "slack" | "teams" | "production";
+export type OutboundTarget = "slack" | "teams" | "production";
 
 export interface OutboundWebhookTarget {
-  kind: OutboundTargetKind;
+  target: OutboundTarget;
   url: string;
 }
 
@@ -9,4 +9,15 @@ export interface OutboundConfig {
   strictMode: boolean;
   signingSecret: string;
   targets: OutboundWebhookTarget[];
+}
+
+export interface OutboundPayloadEnvelope {
+  eventType: string;
+  occurredAt: string;
+  correlationId: string;
+  assetId: string;
+  jobId: string;
+  status: string;
+  summary: string;
+  schemaVersion: string;
 }

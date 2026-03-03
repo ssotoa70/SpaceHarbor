@@ -1,6 +1,18 @@
 import type { WorkflowStatus } from "../domain/models.js";
 import type { PersistenceAdapter, WriteContext } from "../persistence/types.js";
+import { canTransitionWorkflowStatus } from "../workflow/transitions.js";
 import type { NormalizedAssetEvent } from "./types.js";
+
+function isReviewContractEvent(eventType: NormalizedAssetEvent["eventType"]): boolean {
+  return (
+    eventType === "asset.review.annotation_created" ||
+    eventType === "asset.review.annotation_resolved" ||
+    eventType === "asset.review.task_linked" ||
+    eventType === "asset.review.submission_created" ||
+    eventType === "asset.review.decision_recorded" ||
+    eventType === "asset.review.decision_overridden"
+  );
+}
 
 function mapEventToStatus(eventType: NormalizedAssetEvent["eventType"]): WorkflowStatus {
   switch (eventType) {
@@ -12,6 +24,14 @@ function mapEventToStatus(eventType: NormalizedAssetEvent["eventType"]): Workflo
       return "failed";
     case "asset.processing.replay_requested":
       return "needs_replay";
+    case "asset.review.qc_pending":
+      return "qc_pending";
+    case "asset.review.in_review":
+      return "qc_in_review";
+    case "asset.review.approved":
+      return "qc_approved";
+    case "asset.review.rejected":
+      return "qc_rejected";
     default:
       return "pending";
   }
@@ -27,6 +47,7 @@ export function processAssetEvent(
 ): {
   accepted: boolean;
   duplicate: boolean;
+  reason?: "NOT_FOUND" | "WORKFLOW_TRANSITION_NOT_ALLOWED";
   status?: WorkflowStatus;
   movedToDlq?: boolean;
   retryScheduled?: boolean;
@@ -40,13 +61,33 @@ export function processAssetEvent(
   }
 
   if (event.eventType === "asset.processing.failed") {
+    const existing = persistence.getJobById(event.jobId);
+    if (!existing) {
+      return {
+        accepted: false,
+        duplicate: false,
+        reason: "NOT_FOUND",
+        message: `job not found: ${event.jobId}`
+      };
+    }
+
+    if (!canTransitionWorkflowStatus(existing.status, "failed")) {
+      return {
+        accepted: false,
+        duplicate: false,
+        reason: "WORKFLOW_TRANSITION_NOT_ALLOWED",
+        message: `transition not allowed: ${existing.status} -> failed`
+      };
+    }
+
     if (!options?.enableRetryOnFailure) {
       const updated = persistence.setJobStatus(event.jobId, "failed", event.error ?? null, context);
       if (!updated) {
         return {
           accepted: false,
           duplicate: false,
-          message: `job not found: ${event.jobId}`
+          reason: "WORKFLOW_TRANSITION_NOT_ALLOWED",
+          message: `transition not allowed: ${existing.status} -> failed`
         };
       }
 
@@ -63,6 +104,7 @@ export function processAssetEvent(
       return {
         accepted: false,
         duplicate: false,
+        reason: "NOT_FOUND",
         message: failedResult.message ?? `job not found: ${event.jobId}`
       };
     }
@@ -77,14 +119,53 @@ export function processAssetEvent(
     };
   }
 
+  if (isReviewContractEvent(event.eventType)) {
+    const existing = persistence.getJobById(event.jobId);
+    if (!existing) {
+      return {
+        accepted: false,
+        duplicate: false,
+        reason: "NOT_FOUND",
+        message: `job not found: ${event.jobId}`
+      };
+    }
+
+    persistence.markProcessedEvent(event.eventId);
+    return {
+      accepted: true,
+      duplicate: false,
+      status: existing.status
+    };
+  }
+
   const status = mapEventToStatus(event.eventType);
+
+  const existing = persistence.getJobById(event.jobId);
+  if (!existing) {
+    return {
+      accepted: false,
+      duplicate: false,
+      reason: "NOT_FOUND",
+      message: `job not found: ${event.jobId}`
+    };
+  }
+
+  if (!canTransitionWorkflowStatus(existing.status, status)) {
+    return {
+      accepted: false,
+      duplicate: false,
+      reason: "WORKFLOW_TRANSITION_NOT_ALLOWED",
+      message: `transition not allowed: ${existing.status} -> ${status}`
+    };
+  }
 
   const updated = persistence.setJobStatus(event.jobId, status, event.error ?? null, context);
   if (!updated) {
     return {
       accepted: false,
       duplicate: false,
-      message: `job not found: ${event.jobId}`
+      reason: "WORKFLOW_TRANSITION_NOT_ALLOWED",
+      message: `transition not allowed: ${existing.status} -> ${status}`
     };
   }
 

@@ -26,6 +26,7 @@ docker compose up --build
 
 ## Test commands
 
+- Workspace preflight: `npm run check:workspace`
 - Root compose contract: `npm run test:compose`
 - Root docs contract: `npm run test:docs`
 - Contract suite (API + events): `npm run test:contracts`
@@ -33,6 +34,22 @@ docker compose up --build
 - Media-worker tests: `npm run test:worker`
 - Web-ui tests: `npm run test:web-ui`
 - Full suite: `npm run test:all`
+
+## Worktree safety checklist
+
+Run this before editing code to avoid writing in the wrong directory:
+
+```bash
+npm run check:workspace
+git worktree list
+git branch --show-current
+```
+
+Optional strict mode (only allow a specific parent path):
+
+```bash
+EXPECTED_WORKTREE_PREFIX="$HOME/.config/superpowers/worktrees/AssetHarbor" npm run check:workspace
+```
 
 ## Core routes
 
@@ -65,6 +82,8 @@ Legacy-compatible aliases (for existing internal clients):
 - `ASSETHARBOR_PERSISTENCE_BACKEND=local` uses local in-memory adapter.
 - `ASSETHARBOR_PERSISTENCE_BACKEND=vast` uses VAST adapter mode.
 - `ASSETHARBOR_VAST_STRICT=true` enforces required VAST endpoint configuration at startup.
+- `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=true` enables continuity fallback when VAST workflow client operations fail.
+- `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=false` enables fail-fast behavior for VAST workflow client failures.
 
 ## Security baseline
 
@@ -76,10 +95,12 @@ Legacy-compatible aliases (for existing internal clients):
 
 - `x-correlation-id` is echoed on API responses and propagated through workflow/audit traces.
 - `GET /api/v1/metrics` returns queue, job, DLQ, and outbox counters.
+- `GET /api/v1/audit` includes `vast fallback` markers when continuity fallback is used.
 
 ## CI/CD
 
 - `ci.yml` validates compose config, docs checks, API/event contract checks, and all service tests.
+- `ci.yml` also enforces PR guardrails to block stale/conflicted (`dirty`/`behind`) and oversized PRs before full verification.
 - `cd.yml` builds and publishes container images to GHCR for each service on `main` and semantic version tags.
 - Actions dashboard: `https://github.com/ssotoa70/assetharbor/actions`
 

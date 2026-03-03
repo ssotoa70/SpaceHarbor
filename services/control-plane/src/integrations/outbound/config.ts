@@ -1,15 +1,14 @@
-import type { OutboundConfig, OutboundTargetKind, OutboundWebhookTarget } from "./types";
+import type { OutboundConfig, OutboundTarget, OutboundWebhookTarget } from "./types.js";
 
-const TARGETS: Array<{ kind: OutboundTargetKind; envKey: keyof NodeJS.ProcessEnv }> = [
-  { kind: "slack", envKey: "ASSETHARBOR_WEBHOOK_SLACK_URL" },
-  { kind: "teams", envKey: "ASSETHARBOR_WEBHOOK_TEAMS_URL" },
-  { kind: "production", envKey: "ASSETHARBOR_WEBHOOK_PRODUCTION_URL" }
+const TARGET_CONFIG: Array<{ target: OutboundTarget; envKey: string }> = [
+  { target: "slack", envKey: "ASSETHARBOR_WEBHOOK_SLACK_URL" },
+  { target: "teams", envKey: "ASSETHARBOR_WEBHOOK_TEAMS_URL" },
+  { target: "production", envKey: "ASSETHARBOR_WEBHOOK_PRODUCTION_URL" }
 ];
 
-const STRICT_MODE_ENV_KEY = "ASSETHARBOR_WEBHOOK_STRICT_MODE" as const;
-const SIGNING_SECRET_ENV_KEY = "ASSETHARBOR_WEBHOOK_SIGNING_SECRET" as const;
-
 export class OutboundConfigError extends Error {
+  readonly code = "OUTBOUND_CONFIG_ERROR";
+
   constructor(message: string) {
     super(message);
     this.name = "OutboundConfigError";
@@ -17,29 +16,29 @@ export class OutboundConfigError extends Error {
 }
 
 export function resolveOutboundConfig(env: NodeJS.ProcessEnv = process.env): OutboundConfig {
-  const strictMode = parseBooleanFlag(env[STRICT_MODE_ENV_KEY]);
+  const strictMode = parseStrictBoolean(env.ASSETHARBOR_WEBHOOK_STRICT_MODE);
+  const signingSecret = (env.ASSETHARBOR_WEBHOOK_SIGNING_SECRET ?? "").trim();
+
   const targets: OutboundWebhookTarget[] = [];
-
-  for (const target of TARGETS) {
-    const url = normalizeValue(env[target.envKey]);
-
-    if (url.length > 0) {
-      targets.push({ kind: target.kind, url });
+  for (const targetConfig of TARGET_CONFIG) {
+    const url = (env[targetConfig.envKey] ?? "").trim();
+    if (!url) {
       continue;
     }
+    validateWebhookUrl(url, targetConfig.target);
+    targets.push({ target: targetConfig.target, url });
+  }
 
-    if (strictMode) {
-      throw new OutboundConfigError(
-        `Outbound config validation failed: missing ${target.envKey} for target ${target.kind}`
-      );
+  if (strictMode) {
+    for (const targetConfig of TARGET_CONFIG) {
+      if (!(env[targetConfig.envKey] ?? "").trim()) {
+        throw new OutboundConfigError(`missing required config: ${targetConfig.envKey}`);
+      }
     }
   }
 
-  const signingSecret = normalizeValue(env[SIGNING_SECRET_ENV_KEY]);
-  if ((strictMode || targets.length > 0) && signingSecret.length === 0) {
-    throw new OutboundConfigError(
-      `Outbound config validation failed: missing ${SIGNING_SECRET_ENV_KEY}`
-    );
+  if ((strictMode || targets.length > 0) && !signingSecret) {
+    throw new OutboundConfigError("missing required config: ASSETHARBOR_WEBHOOK_SIGNING_SECRET");
   }
 
   return {
@@ -49,11 +48,29 @@ export function resolveOutboundConfig(env: NodeJS.ProcessEnv = process.env): Out
   };
 }
 
-function parseBooleanFlag(value: string | undefined): boolean {
-  const normalized = normalizeValue(value).toLowerCase();
-  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+function parseStrictBoolean(input: string | undefined): boolean {
+  const value = (input ?? "").trim().toLowerCase();
+  if (!value) {
+    return false;
+  }
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  throw new OutboundConfigError("invalid ASSETHARBOR_WEBHOOK_STRICT_MODE value (expected true/false)");
 }
 
-function normalizeValue(value: string | undefined): string {
-  return (value ?? "").trim();
+function validateWebhookUrl(url: string, target: OutboundTarget): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new OutboundConfigError(`invalid ${target} webhook url`);
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new OutboundConfigError(`invalid ${target} webhook url protocol`);
+  }
 }

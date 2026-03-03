@@ -10,7 +10,7 @@ export async function registerMetricsRoute(app: FastifyInstance, persistence: Pe
       response: {
         200: {
           type: "object",
-          required: ["assets", "jobs", "queue", "outbox", "dlq"],
+          required: ["assets", "jobs", "queue", "outbox", "dlq", "degradedMode", "outbound"],
           properties: {
             assets: {
               type: "object",
@@ -52,6 +52,55 @@ export async function registerMetricsRoute(app: FastifyInstance, persistence: Pe
               required: ["total"],
               properties: {
                 total: { type: "number" }
+              }
+            },
+            degradedMode: {
+              type: "object",
+              required: ["fallbackEvents"],
+              properties: {
+                fallbackEvents: { type: "number" }
+              }
+            },
+            outbound: {
+              type: "object",
+              required: ["attempts", "success", "failure", "byTarget"],
+              properties: {
+                attempts: { type: "number" },
+                success: { type: "number" },
+                failure: { type: "number" },
+                byTarget: {
+                  type: "object",
+                  required: ["slack", "teams", "production"],
+                  properties: {
+                    slack: {
+                      type: "object",
+                      required: ["attempts", "success", "failure"],
+                      properties: {
+                        attempts: { type: "number" },
+                        success: { type: "number" },
+                        failure: { type: "number" }
+                      }
+                    },
+                    teams: {
+                      type: "object",
+                      required: ["attempts", "success", "failure"],
+                      properties: {
+                        attempts: { type: "number" },
+                        success: { type: "number" },
+                        failure: { type: "number" }
+                      }
+                    },
+                    production: {
+                      type: "object",
+                      required: ["attempts", "success", "failure"],
+                      properties: {
+                        attempts: { type: "number" },
+                        success: { type: "number" },
+                        failure: { type: "number" }
+                      }
+                    }
+                  }
+                }
               }
             }
           }

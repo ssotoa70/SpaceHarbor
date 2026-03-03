@@ -47,12 +47,21 @@ test("GET /api/v1/metrics returns workflow and queue statistics", async () => {
   assert.equal(typeof body.queue.pending, "number");
   assert.equal(typeof body.outbox.pending, "number");
   assert.equal(typeof body.dlq.total, "number");
+  assert.equal(typeof body.degradedMode.fallbackEvents, "number");
+  assert.equal(typeof body.outbound.attempts, "number");
+  assert.equal(typeof body.outbound.success, "number");
+  assert.equal(typeof body.outbound.failure, "number");
+  assert.equal(typeof body.outbound.byTarget.slack.attempts, "number");
 
   assert.ok(body.assets.total >= 1);
   assert.ok(body.jobs.total >= 1);
   assert.ok(body.jobs.processing >= 1);
   assert.ok(body.outbox.pending >= 1);
   assert.equal(body.dlq.total, 0);
+  assert.equal(body.degradedMode.fallbackEvents, 0);
+  assert.equal(body.outbound.attempts, 0);
+  assert.equal(body.outbound.success, 0);
+  assert.equal(body.outbound.failure, 0);
 
   await app.close();
 });

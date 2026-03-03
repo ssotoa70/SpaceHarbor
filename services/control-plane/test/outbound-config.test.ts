@@ -1,69 +1,88 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 
-import {
-  OutboundConfigError,
-  resolveOutboundConfig
-} from "../src/integrations/outbound/config";
+import { OutboundConfigError, resolveOutboundConfig } from "../src/integrations/outbound/config";
 
-const BASE_ENV = {
-  ASSETHARBOR_WEBHOOK_SLACK_URL: "",
-  ASSETHARBOR_WEBHOOK_TEAMS_URL: "",
-  ASSETHARBOR_WEBHOOK_PRODUCTION_URL: "",
-  ASSETHARBOR_WEBHOOK_SIGNING_SECRET: "",
-  ASSETHARBOR_WEBHOOK_STRICT_MODE: ""
-};
-
-test("resolveOutboundConfig omits targets without webhook URLs in non-strict mode", () => {
+test("resolve outbound config includes enabled webhook targets in non-strict mode", () => {
   const config = resolveOutboundConfig({
-    ...BASE_ENV,
-    ASSETHARBOR_WEBHOOK_SLACK_URL: "https://hooks.slack.test/asset",
+    ASSETHARBOR_WEBHOOK_SLACK_URL: "https://hooks.example.com/slack",
+    ASSETHARBOR_WEBHOOK_PRODUCTION_URL: "https://hooks.example.com/production",
     ASSETHARBOR_WEBHOOK_SIGNING_SECRET: "secret-value"
   });
 
   assert.equal(config.strictMode, false);
-  assert.deepEqual(config.targets, [
-    {
-      kind: "slack",
-      url: "https://hooks.slack.test/asset"
-    }
-  ]);
+  assert.equal(config.targets.length, 2);
+  assert.deepEqual(
+    config.targets.map((item) => item.target),
+    ["slack", "production"]
+  );
+  assert.equal(config.signingSecret, "secret-value");
 });
 
-test("resolveOutboundConfig throws deterministic error in strict mode when a target URL is missing", () => {
+test("strict mode requires all target urls and signing secret", () => {
   assert.throws(
     () =>
       resolveOutboundConfig({
-        ...BASE_ENV,
         ASSETHARBOR_WEBHOOK_STRICT_MODE: "true",
-        ASSETHARBOR_WEBHOOK_SIGNING_SECRET: "secret-value",
-        ASSETHARBOR_WEBHOOK_SLACK_URL: "https://hooks.slack.test/asset",
-        ASSETHARBOR_WEBHOOK_TEAMS_URL: "https://hooks.teams.test/asset"
+        ASSETHARBOR_WEBHOOK_SLACK_URL: "https://hooks.example.com/slack",
+        ASSETHARBOR_WEBHOOK_TEAMS_URL: "https://hooks.example.com/teams",
+        ASSETHARBOR_WEBHOOK_SIGNING_SECRET: "secret-value"
       }),
-    (error: unknown) => {
+    (error) => {
       assert.ok(error instanceof OutboundConfigError);
-      assert.equal(
-        error.message,
-        "Outbound config validation failed: missing ASSETHARBOR_WEBHOOK_PRODUCTION_URL for target production"
-      );
+      assert.equal(error.message, "missing required config: ASSETHARBOR_WEBHOOK_PRODUCTION_URL");
+      return true;
+    }
+  );
+
+  assert.throws(
+    () =>
+      resolveOutboundConfig({
+        ASSETHARBOR_WEBHOOK_STRICT_MODE: "true",
+        ASSETHARBOR_WEBHOOK_SLACK_URL: "https://hooks.example.com/slack",
+        ASSETHARBOR_WEBHOOK_TEAMS_URL: "https://hooks.example.com/teams",
+        ASSETHARBOR_WEBHOOK_PRODUCTION_URL: "https://hooks.example.com/production"
+      }),
+    (error) => {
+      assert.ok(error instanceof OutboundConfigError);
+      assert.equal(error.message, "missing required config: ASSETHARBOR_WEBHOOK_SIGNING_SECRET");
       return true;
     }
   );
 });
 
-test("resolveOutboundConfig throws deterministic error when signing secret is missing for enabled targets", () => {
+test("outbound config validates strict flag and target url format", () => {
+  assert.throws(
+    () => resolveOutboundConfig({ ASSETHARBOR_WEBHOOK_STRICT_MODE: "enabled" }),
+    (error) => {
+      assert.ok(error instanceof OutboundConfigError);
+      assert.equal(error.message, "invalid ASSETHARBOR_WEBHOOK_STRICT_MODE value (expected true/false)");
+      return true;
+    }
+  );
+
   assert.throws(
     () =>
       resolveOutboundConfig({
-        ...BASE_ENV,
-        ASSETHARBOR_WEBHOOK_TEAMS_URL: "https://hooks.teams.test/asset"
+        ASSETHARBOR_WEBHOOK_SLACK_URL: "http://hooks.example.com/slack",
+        ASSETHARBOR_WEBHOOK_SIGNING_SECRET: "secret-value"
       }),
-    (error: unknown) => {
+    (error) => {
       assert.ok(error instanceof OutboundConfigError);
-      assert.equal(
-        error.message,
-        "Outbound config validation failed: missing ASSETHARBOR_WEBHOOK_SIGNING_SECRET"
-      );
+      assert.equal(error.message, "invalid slack webhook url protocol");
+      return true;
+    }
+  );
+
+  assert.throws(
+    () =>
+      resolveOutboundConfig({
+        ASSETHARBOR_WEBHOOK_SLACK_URL: "not-a-url",
+        ASSETHARBOR_WEBHOOK_SIGNING_SECRET: "secret-value"
+      }),
+    (error) => {
+      assert.ok(error instanceof OutboundConfigError);
+      assert.equal(error.message, "invalid slack webhook url");
       return true;
     }
   );

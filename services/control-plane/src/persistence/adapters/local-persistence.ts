@@ -1,16 +1,37 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AnnotationHookMetadata,
   Asset,
+  AuditSignal,
   AssetQueueRow,
   AuditEvent,
   DlqItem,
+  IncidentCoordination,
+  IncidentGuidedActions,
+  IncidentHandoff,
+  IncidentNote,
   IngestResult,
   OutboxItem,
   WorkflowJob,
   WorkflowStatus
 } from "../../domain/models.js";
-import type { FailureResult, IngestInput, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
+import { mapOutboxItemToOutboundPayload } from "../../integrations/outbound/payload-mapper.js";
+import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
+import type { OutboundConfig, OutboundTarget } from "../../integrations/outbound/types.js";
+import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
+import type {
+  AuditRetentionApplyResult,
+  AuditRetentionPreview,
+  FailureResult,
+  IncidentGuidedActionsUpdate,
+  IncidentHandoffUpdate,
+  IncidentNoteInput,
+  IngestInput,
+  PersistenceAdapter,
+  WorkflowStats,
+  WriteContext
+} from "../types.js";
 
 interface QueueEntry {
   jobId: string;
@@ -22,6 +43,41 @@ interface QueueEntry {
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 
+const DEFAULT_ANNOTATION_HOOK: AnnotationHookMetadata = {
+  enabled: false,
+  provider: null,
+  contextId: null
+};
+
+const DEFAULT_HANDOFF_CHECKLIST = {
+  releaseNotesReady: false,
+  verificationComplete: false,
+  commsDraftReady: false,
+  ownerAssigned: false
+} as const;
+
+const DEFAULT_HANDOFF = {
+  status: "not_ready",
+  owner: null,
+  lastUpdatedAt: null
+} as const;
+
+const DEFAULT_INCIDENT_GUIDED_ACTIONS: IncidentGuidedActions = {
+  acknowledged: false,
+  owner: "",
+  escalated: false,
+  nextUpdateEta: null,
+  updatedAt: null
+};
+
+const DEFAULT_INCIDENT_HANDOFF: IncidentHandoff = {
+  state: "none",
+  fromOwner: "",
+  toOwner: "",
+  summary: "",
+  updatedAt: null
+};
+
 export class LocalPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "local" as const;
 
@@ -31,7 +87,25 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   private readonly dlq = new Map<string, DlqItem>();
   private readonly outbox: OutboxItem[] = [];
   private readonly auditEvents: AuditEvent[] = [];
+  private incidentGuidedActions: IncidentGuidedActions = { ...DEFAULT_INCIDENT_GUIDED_ACTIONS };
+  private incidentHandoff: IncidentHandoff = { ...DEFAULT_INCIDENT_HANDOFF };
+  private readonly incidentNotes: IncidentNote[] = [];
   private readonly processedEventIds = new Set<string>();
+  private readonly outboundCounters = {
+    attempts: 0,
+    success: 0,
+    failure: 0,
+    byTarget: {
+      slack: { attempts: 0, success: 0, failure: 0 },
+      teams: { attempts: 0, success: 0, failure: 0 },
+      production: { attempts: 0, success: 0, failure: 0 }
+    }
+  };
+
+  constructor(
+    private readonly outboundConfig: OutboundConfig | null = null,
+    private readonly outboundNotifier: OutboundNotifier | null = null
+  ) {}
 
   reset(): void {
     this.assets.clear();
@@ -40,7 +114,16 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.dlq.clear();
     this.outbox.length = 0;
     this.auditEvents.length = 0;
+    this.incidentGuidedActions = { ...DEFAULT_INCIDENT_GUIDED_ACTIONS };
+    this.incidentHandoff = { ...DEFAULT_INCIDENT_HANDOFF };
+    this.incidentNotes.length = 0;
     this.processedEventIds.clear();
+    this.outboundCounters.attempts = 0;
+    this.outboundCounters.success = 0;
+    this.outboundCounters.failure = 0;
+    this.outboundCounters.byTarget.slack = { attempts: 0, success: 0, failure: 0 };
+    this.outboundCounters.byTarget.teams = { attempts: 0, success: 0, failure: 0 };
+    this.outboundCounters.byTarget.production = { attempts: 0, success: 0, failure: 0 };
   }
 
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult {
@@ -63,7 +146,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       maxAttempts: DEFAULT_MAX_ATTEMPTS,
       nextAttemptAt: now.toISOString(),
       leaseOwner: null,
-      leaseExpiresAt: null
+      leaseExpiresAt: null,
+      thumbnail: null,
+      proxy: null,
+      annotationHook: input.annotationHook ?? DEFAULT_ANNOTATION_HOOK,
+      handoffChecklist: { ...DEFAULT_HANDOFF_CHECKLIST },
+      handoff: { ...DEFAULT_HANDOFF }
     };
 
     this.assets.set(asset.id, asset);
@@ -134,6 +222,10 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   ): WorkflowJob | null {
     const existing = this.jobs.get(jobId);
     if (!existing) {
+      return null;
+    }
+
+    if (!canTransitionWorkflowStatus(existing.status, status)) {
       return null;
     }
 
@@ -516,6 +608,33 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       if (item.publishedAt) {
         continue;
       }
+
+      const targets = this.outboundConfig?.targets ?? [];
+      let deliveryFailed = false;
+      if (targets.length > 0 && this.outboundNotifier) {
+        for (const target of targets) {
+          const payload = mapOutboxItemToOutboundPayload(item, target.target);
+          this.incrementOutboundCounter(target.target, "attempts");
+          try {
+            await this.outboundNotifier.notify(target, payload);
+            this.incrementOutboundCounter(target.target, "success");
+          } catch (error) {
+            this.incrementOutboundCounter(target.target, "failure");
+            this.recordAudit(
+              `outbound ${target.target} delivery failed for ${item.eventType}: ${error instanceof Error ? error.message : String(error)}`,
+              context.correlationId,
+              new Date(now)
+            );
+            deliveryFailed = true;
+            break;
+          }
+        }
+      }
+
+      if (deliveryFailed) {
+        continue;
+      }
+
       item.publishedAt = now;
       publishedCount += 1;
     }
@@ -595,6 +714,19 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       },
       dlq: {
         total: this.dlq.size
+      },
+      degradedMode: {
+        fallbackEvents: 0
+      },
+      outbound: {
+        attempts: this.outboundCounters.attempts,
+        success: this.outboundCounters.success,
+        failure: this.outboundCounters.failure,
+        byTarget: {
+          slack: { ...this.outboundCounters.byTarget.slack },
+          teams: { ...this.outboundCounters.byTarget.teams },
+          production: { ...this.outboundCounters.byTarget.production }
+        }
       }
     };
   }
@@ -605,17 +737,163 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       latestJobByAssetId.set(job.assetId, job);
     }
 
-    return [...this.assets.values()].map((asset) => ({
-      id: asset.id,
-      jobId: latestJobByAssetId.get(asset.id)?.id ?? null,
-      title: asset.title,
-      sourceUri: asset.sourceUri,
-      status: latestJobByAssetId.get(asset.id)?.status ?? "pending"
-    }));
+    return [...this.assets.values()].map((asset) => {
+      const latestJob = latestJobByAssetId.get(asset.id);
+      return {
+        id: asset.id,
+        jobId: latestJob?.id ?? null,
+        title: asset.title,
+        sourceUri: asset.sourceUri,
+        status: latestJob?.status ?? "pending",
+        thumbnail: latestJob?.thumbnail ?? null,
+        proxy: latestJob?.proxy ?? null,
+        annotationHook: latestJob?.annotationHook ?? DEFAULT_ANNOTATION_HOOK,
+        handoffChecklist: latestJob?.handoffChecklist ?? { ...DEFAULT_HANDOFF_CHECKLIST },
+        handoff: latestJob?.handoff ?? { ...DEFAULT_HANDOFF }
+      };
+    });
   }
 
   getAuditEvents(): AuditEvent[] {
     return [...this.auditEvents];
+  }
+
+  previewAuditRetention(cutoffIso: string): AuditRetentionPreview {
+    const cutoff = Date.parse(cutoffIso);
+    if (Number.isNaN(cutoff)) {
+      return {
+        eligibleCount: 0,
+        oldestEligibleAt: null,
+        newestEligibleAt: null
+      };
+    }
+
+    const eligible = this.auditEvents
+      .map((event) => ({ event, atMs: Date.parse(event.at) }))
+      .filter((entry) => !Number.isNaN(entry.atMs) && entry.atMs < cutoff)
+      .sort((a, b) => a.atMs - b.atMs);
+
+    if (eligible.length === 0) {
+      return {
+        eligibleCount: 0,
+        oldestEligibleAt: null,
+        newestEligibleAt: null
+      };
+    }
+
+    return {
+      eligibleCount: eligible.length,
+      oldestEligibleAt: eligible[0].event.at,
+      newestEligibleAt: eligible[eligible.length - 1].event.at
+    };
+  }
+
+  applyAuditRetention(cutoffIso: string, maxDeletePerRun?: number): AuditRetentionApplyResult {
+    const cutoff = Date.parse(cutoffIso);
+    if (Number.isNaN(cutoff)) {
+      return {
+        deletedCount: 0,
+        remainingCount: this.auditEvents.length
+      };
+    }
+
+    const eligible = this.auditEvents
+      .map((event) => ({ event, atMs: Date.parse(event.at) }))
+      .filter((entry) => !Number.isNaN(entry.atMs) && entry.atMs < cutoff)
+      .sort((a, b) => a.atMs - b.atMs);
+
+    if (eligible.length === 0) {
+      return {
+        deletedCount: 0,
+        remainingCount: this.auditEvents.length
+      };
+    }
+
+    const deleteLimit =
+      maxDeletePerRun === undefined ? eligible.length : Math.max(0, Math.min(maxDeletePerRun, eligible.length));
+    if (deleteLimit === 0) {
+      return {
+        deletedCount: 0,
+        remainingCount: this.auditEvents.length
+      };
+    }
+
+    const deleteIds = new Set(eligible.slice(0, deleteLimit).map((entry) => entry.event.id));
+    const retained = this.auditEvents.filter((event) => !deleteIds.has(event.id));
+    this.auditEvents.length = 0;
+    this.auditEvents.push(...retained);
+
+    return {
+      deletedCount: deleteLimit,
+      remainingCount: this.auditEvents.length
+    };
+  }
+
+  getIncidentCoordination(): IncidentCoordination {
+    return {
+      guidedActions: { ...this.incidentGuidedActions },
+      handoff: { ...this.incidentHandoff },
+      notes: [...this.incidentNotes]
+    };
+  }
+
+  updateIncidentGuidedActions(update: IncidentGuidedActionsUpdate, context: WriteContext): IncidentGuidedActions {
+    const now = this.resolveNow(context);
+    this.incidentGuidedActions = {
+      acknowledged: update.acknowledged,
+      owner: update.owner,
+      escalated: update.escalated,
+      nextUpdateEta: update.nextUpdateEta,
+      updatedAt: now.toISOString()
+    };
+
+    this.recordAudit(
+      `incident actions updated (acknowledged=${this.incidentGuidedActions.acknowledged}, owner=${this.incidentGuidedActions.owner || "unassigned"}, escalated=${this.incidentGuidedActions.escalated})`,
+      context.correlationId,
+      now
+    );
+
+    return { ...this.incidentGuidedActions };
+  }
+
+  addIncidentNote(input: IncidentNoteInput, context: WriteContext): IncidentNote {
+    const now = this.resolveNow(context);
+    const note: IncidentNote = {
+      id: randomUUID(),
+      message: input.message,
+      correlationId: input.correlationId,
+      author: input.author,
+      at: now.toISOString()
+    };
+
+    this.incidentNotes.unshift(note);
+
+    this.recordAudit(
+      `incident note added by ${note.author} linked to ${note.correlationId}`,
+      context.correlationId,
+      now
+    );
+
+    return note;
+  }
+
+  updateIncidentHandoff(update: IncidentHandoffUpdate, context: WriteContext): IncidentHandoff {
+    const now = this.resolveNow(context);
+    this.incidentHandoff = {
+      state: update.state,
+      fromOwner: update.fromOwner,
+      toOwner: update.toOwner,
+      summary: update.summary,
+      updatedAt: now.toISOString()
+    };
+
+    this.recordAudit(
+      `incident handoff updated (${this.incidentHandoff.fromOwner || "unassigned"} -> ${this.incidentHandoff.toOwner || "unassigned"}, state=${this.incidentHandoff.state})`,
+      context.correlationId,
+      now
+    );
+
+    return { ...this.incidentHandoff };
   }
 
   hasProcessedEvent(eventId: string): boolean {
@@ -647,11 +925,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     });
   }
 
-  private recordAudit(message: string, correlationId: string, now: Date): AuditEvent {
+  private recordAudit(message: string, correlationId: string, now: Date, signal?: AuditSignal): AuditEvent {
     const event: AuditEvent = {
       id: randomUUID(),
       message: `[corr:${correlationId}] ${message}`,
-      at: now.toISOString()
+      at: now.toISOString(),
+      ...(signal ? { signal } : {})
     };
     this.auditEvents.unshift(event);
     return event;
@@ -662,5 +941,10 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       return new Date(context.now);
     }
     return new Date();
+  }
+
+  private incrementOutboundCounter(target: OutboundTarget, key: "attempts" | "success" | "failure"): void {
+    this.outboundCounters[key] += 1;
+    this.outboundCounters.byTarget[target][key] += 1;
   }
 }

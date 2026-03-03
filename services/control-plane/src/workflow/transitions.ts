@@ -1,17 +1,17 @@
-import type { WorkflowStatus } from "../domain/models";
+import type { WorkflowStatus } from "../domain/models.js";
 
-export const WORKFLOW_TRANSITIONS: Record<WorkflowStatus, readonly WorkflowStatus[]> = {
-  pending: ["processing"],
-  processing: ["completed", "failed"],
-  completed: ["qc_pending"],
-  failed: ["needs_replay"],
-  needs_replay: ["pending"],
-  qc_pending: ["qc_in_review"],
-  qc_in_review: ["qc_approved", "qc_rejected"],
-  qc_approved: [],
-  qc_rejected: ["needs_replay"]
+const ALLOWED_TRANSITIONS: Record<WorkflowStatus, Set<WorkflowStatus>> = {
+  pending: new Set(["pending", "processing", "completed", "failed", "needs_replay"]),
+  processing: new Set(["processing", "pending", "failed", "completed", "needs_replay"]),
+  failed: new Set(["failed", "pending", "needs_replay"]),
+  needs_replay: new Set(["needs_replay", "pending", "processing", "completed", "failed"]),
+  completed: new Set(["completed", "qc_pending"]),
+  qc_pending: new Set(["qc_pending", "qc_in_review"]),
+  qc_in_review: new Set(["qc_in_review", "qc_approved", "qc_rejected"]),
+  qc_approved: new Set(["qc_approved"]),
+  qc_rejected: new Set(["qc_rejected", "needs_replay"])
 };
 
-export function canTransition(from: WorkflowStatus, to: WorkflowStatus): boolean {
-  return WORKFLOW_TRANSITIONS[from].includes(to);
+export function canTransitionWorkflowStatus(from: WorkflowStatus, to: WorkflowStatus): boolean {
+  return ALLOWED_TRANSITIONS[from].has(to);
 }

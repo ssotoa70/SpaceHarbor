@@ -1,11 +1,30 @@
+import { randomUUID } from "node:crypto";
+
+import type { AuditEvent } from "../../domain/models.js";
+import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
+import type { OutboundConfig } from "../../integrations/outbound/types.js";
+import type { AuditSignal } from "../../domain/models.js";
+import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
-import type { FailureResult, PersistenceAdapter, WorkflowStats, WriteContext } from "../types.js";
+import type {
+  AuditRetentionApplyResult,
+  AuditRetentionPreview,
+  FailureResult,
+  IncidentGuidedActionsUpdate,
+  IncidentHandoffUpdate,
+  IncidentNoteInput,
+  PersistenceAdapter,
+  WorkflowStats,
+  WriteContext
+} from "../types.js";
+import type { VastWorkflowClient } from "../vast/workflow-client.js";
 
 interface VastConfig {
   databaseUrl: string | undefined;
   eventBrokerUrl: string | undefined;
   dataEngineUrl: string | undefined;
   strict: boolean;
+  fallbackToLocal: boolean;
 }
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -13,11 +32,21 @@ type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 export class VastPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "vast" as const;
 
-  private readonly localFallback = new LocalPersistenceAdapter();
+  private readonly localFallback: LocalPersistenceAdapter;
+  private readonly fallbackAuditEvents: AuditEvent[] = [];
   private readonly fetchFn: FetchLike;
+  private readonly workflowClient?: Partial<VastWorkflowClient>;
 
-  constructor(private readonly config: VastConfig, fetchFn?: FetchLike) {
+  constructor(
+    private readonly config: VastConfig,
+    fetchFn?: FetchLike,
+    workflowClient?: Partial<VastWorkflowClient>,
+    outboundConfig?: OutboundConfig,
+    outboundNotifier?: OutboundNotifier
+  ) {
     this.fetchFn = fetchFn ?? globalThis.fetch;
+    this.workflowClient = workflowClient;
+    this.localFallback = new LocalPersistenceAdapter(outboundConfig, outboundNotifier);
 
     if (this.config.strict) {
       const missing: string[] = [];
@@ -39,13 +68,20 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   reset(): void {
     this.localFallback.reset();
+    this.fallbackAuditEvents.length = 0;
   }
 
   createIngestAsset(
     input: Parameters<PersistenceAdapter["createIngestAsset"]>[0],
     context: Parameters<PersistenceAdapter["createIngestAsset"]>[1]
   ) {
-    return this.localFallback.createIngestAsset(input, context);
+    return this.invokeWorkflowClient(
+      "createIngestAsset",
+      this.workflowClient?.createIngestAsset
+        ? () => this.workflowClient!.createIngestAsset(input, context)
+        : undefined,
+      () => this.localFallback.createIngestAsset(input, context)
+    );
   }
 
   getAssetById(assetId: Parameters<PersistenceAdapter["getAssetById"]>[0]) {
@@ -66,7 +102,18 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     lastError: Parameters<PersistenceAdapter["setJobStatus"]>[2],
     context: Parameters<PersistenceAdapter["setJobStatus"]>[3]
   ) {
-    return this.localFallback.setJobStatus(jobId, status, lastError, context);
+    const existing = this.getJobById(jobId);
+    if (existing && !canTransitionWorkflowStatus(existing.status, status)) {
+      return null;
+    }
+
+    return this.invokeWorkflowClient(
+      "setJobStatus",
+      this.workflowClient?.setJobStatus
+        ? () => this.workflowClient!.setJobStatus(jobId, status, lastError, context)
+        : undefined,
+      () => this.localFallback.setJobStatus(jobId, status, lastError, context)
+    );
   }
 
   updateJobStatus(
@@ -79,7 +126,13 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   getJobById(jobId: Parameters<PersistenceAdapter["getJobById"]>[0]) {
-    return this.localFallback.getJobById(jobId);
+    return this.invokeWorkflowClient(
+      "getJobById",
+      this.workflowClient?.getJobById
+        ? () => this.workflowClient!.getJobById(jobId)
+        : undefined,
+      () => this.localFallback.getJobById(jobId)
+    );
   }
 
   getPendingJobs() {
@@ -87,11 +140,23 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   claimNextJob(workerId: string, leaseSeconds: number, context: WriteContext) {
-    return this.localFallback.claimNextJob(workerId, leaseSeconds, context);
+    return this.invokeWorkflowClient(
+      "claimNextJob",
+      this.workflowClient?.claimNextJob
+        ? () => this.workflowClient!.claimNextJob(workerId, leaseSeconds, context)
+        : undefined,
+      () => this.localFallback.claimNextJob(workerId, leaseSeconds, context)
+    );
   }
 
   heartbeatJob(jobId: string, workerId: string, leaseSeconds: number, context: WriteContext) {
-    return this.localFallback.heartbeatJob(jobId, workerId, leaseSeconds, context);
+    return this.invokeWorkflowClient(
+      "heartbeatJob",
+      this.workflowClient?.heartbeatJob
+        ? () => this.workflowClient!.heartbeatJob(jobId, workerId, leaseSeconds, context)
+        : undefined,
+      () => this.localFallback.heartbeatJob(jobId, workerId, leaseSeconds, context)
+    );
   }
 
   reapStaleLeases(nowIso: string): number {
@@ -99,11 +164,23 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   handleJobFailure(jobId: string, error: string, context: WriteContext): FailureResult {
-    return this.localFallback.handleJobFailure(jobId, error, context);
+    return this.invokeWorkflowClient(
+      "handleJobFailure",
+      this.workflowClient?.handleJobFailure
+        ? () => this.workflowClient!.handleJobFailure(jobId, error, context)
+        : undefined,
+      () => this.localFallback.handleJobFailure(jobId, error, context)
+    );
   }
 
   replayJob(jobId: string, context: WriteContext) {
-    return this.localFallback.replayJob(jobId, context);
+    return this.invokeWorkflowClient(
+      "replayJob",
+      this.workflowClient?.replayJob
+        ? () => this.workflowClient!.replayJob(jobId, context)
+        : undefined,
+      () => this.localFallback.replayJob(jobId, context)
+    );
   }
 
   getDlqItems() {
@@ -154,7 +231,14 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   getWorkflowStats(nowIso?: string): WorkflowStats {
-    return this.localFallback.getWorkflowStats(nowIso);
+    const stats = this.localFallback.getWorkflowStats(nowIso);
+
+    return {
+      ...stats,
+      degradedMode: {
+        fallbackEvents: stats.degradedMode.fallbackEvents + this.fallbackAuditEvents.length
+      }
+    };
   }
 
   listAssetQueueRows() {
@@ -162,14 +246,106 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   getAuditEvents() {
-    return this.localFallback.getAuditEvents();
+    const merged = [...this.fallbackAuditEvents, ...this.localFallback.getAuditEvents()];
+    return merged.sort((a, b) => b.at.localeCompare(a.at));
+  }
+
+  previewAuditRetention(cutoffIso: string): AuditRetentionPreview {
+    return this.invokeWorkflowClient(
+      "previewAuditRetention",
+      this.workflowClient?.previewAuditRetention
+        ? () => this.workflowClient!.previewAuditRetention(cutoffIso)
+        : undefined,
+      () => this.localFallback.previewAuditRetention(cutoffIso)
+    );
+  }
+
+  applyAuditRetention(cutoffIso: string, maxDeletePerRun?: number): AuditRetentionApplyResult {
+    return this.invokeWorkflowClient(
+      "applyAuditRetention",
+      this.workflowClient?.applyAuditRetention
+        ? () => this.workflowClient!.applyAuditRetention(cutoffIso, maxDeletePerRun)
+        : undefined,
+      () => this.localFallback.applyAuditRetention(cutoffIso, maxDeletePerRun)
+    );
+  }
+
+  getIncidentCoordination() {
+    return this.localFallback.getIncidentCoordination();
+  }
+
+  updateIncidentGuidedActions(update: IncidentGuidedActionsUpdate, context: WriteContext) {
+    return this.localFallback.updateIncidentGuidedActions(update, context);
+  }
+
+  addIncidentNote(input: IncidentNoteInput, context: WriteContext) {
+    return this.localFallback.addIncidentNote(input, context);
+  }
+
+  updateIncidentHandoff(update: IncidentHandoffUpdate, context: WriteContext) {
+    return this.localFallback.updateIncidentHandoff(update, context);
   }
 
   hasProcessedEvent(eventId: string): boolean {
-    return this.localFallback.hasProcessedEvent(eventId);
+    return this.invokeWorkflowClient(
+      "hasProcessedEvent",
+      this.workflowClient?.hasProcessedEvent
+        ? () => this.workflowClient!.hasProcessedEvent(eventId)
+        : undefined,
+      () => this.localFallback.hasProcessedEvent(eventId)
+    );
   }
 
   markProcessedEvent(eventId: string): void {
-    this.localFallback.markProcessedEvent(eventId);
+    this.invokeWorkflowClient(
+      "markProcessedEvent",
+      this.workflowClient?.markProcessedEvent
+        ? () => this.workflowClient!.markProcessedEvent(eventId)
+        : undefined,
+      () => this.localFallback.markProcessedEvent(eventId)
+    );
+  }
+
+  private invokeWorkflowClient<T>(operation: string, clientCall: (() => T) | undefined, fallbackCall: () => T): T {
+    if (!clientCall) {
+      return fallbackCall();
+    }
+
+    try {
+      return clientCall();
+    } catch (error) {
+      if (!this.shouldFallback(error)) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`vast workflow client failure (${operation}): ${errorMessage}`);
+      }
+
+      this.recordFallbackAudit(operation, error);
+
+      return fallbackCall();
+    }
+  }
+
+  private recordFallbackAudit(operation: string, error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const signal: AuditSignal = {
+      type: "fallback",
+      code: "VAST_FALLBACK",
+      severity: "warning"
+    };
+
+    this.fallbackAuditEvents.unshift({
+      id: randomUUID(),
+      message: `[corr:system] vast fallback (${operation}) due to client error: ${errorMessage}`,
+      at: new Date().toISOString(),
+      signal
+    });
+  }
+
+  private shouldFallback(_error: unknown): boolean {
+    if (this.config.strict) {
+      return false;
+    }
+
+    return this.config.fallbackToLocal;
   }
 }

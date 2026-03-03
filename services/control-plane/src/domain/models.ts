@@ -1,50 +1,52 @@
-export type WorkflowStatus = "pending" | "processing" | "completed" | "failed" | "needs_replay" | "qc_pending" | "qc_in_review" | "qc_approved" | "qc_rejected";
-
-export interface ApprovalAuditEntry {
-  id: string;
-  assetId: string;
-  action: "request_review" | "approve" | "reject";
-  performedBy: string;
-  note: string | null;
-  at: string;
-}
-
-export interface AssetMetadata {
-  codec?: string;
-  resolution?: { width: number; height: number };
-  frame_range?: { start: number; end: number };
-  frame_rate?: number;
-  pixel_aspect_ratio?: number;
-  display_window?: { x: number; y: number; width: number; height: number };
-  data_window?: { x: number; y: number; width: number; height: number };
-  compression_type?: string;
-  channels?: string[];
-  color_space?: string;
-  bit_depth?: number;
-  file_size_bytes?: number;
-  md5_checksum?: string;
-}
-
-export interface AssetVersion {
-  version_label: string;
-  parent_version_id?: string;
-}
-
-export interface AssetIntegrity {
-  file_size_bytes: number;
-  checksum: { type: "md5" | "xxhash"; value: string };
-  verified_at: string;
-}
+export type WorkflowStatus =
+  | "pending"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "needs_replay"
+  | "qc_pending"
+  | "qc_in_review"
+  | "qc_approved"
+  | "qc_rejected";
 
 export interface Asset {
   id: string;
   title: string;
   sourceUri: string;
   createdAt: string;
-  updatedAt?: string;
-  metadata?: AssetMetadata;
-  version?: AssetVersion;
-  integrity?: AssetIntegrity;
+}
+
+export interface AssetThumbnailPreview {
+  uri: string;
+  width: number;
+  height: number;
+  generatedAt: string;
+}
+
+export interface AssetProxyPreview {
+  uri: string;
+  durationSeconds: number;
+  codec: string;
+  generatedAt: string;
+}
+
+export interface AnnotationHookMetadata {
+  enabled: boolean;
+  provider: string | null;
+  contextId: string | null;
+}
+
+export interface HandoffChecklistMetadata {
+  releaseNotesReady: boolean;
+  verificationComplete: boolean;
+  commsDraftReady: boolean;
+  ownerAssigned: boolean;
+}
+
+export interface HandoffMetadata {
+  status: "not_ready" | "ready_for_release";
+  owner: string | null;
+  lastUpdatedAt: string | null;
 }
 
 export interface WorkflowJob {
@@ -59,6 +61,11 @@ export interface WorkflowJob {
   nextAttemptAt: string | null;
   leaseOwner: string | null;
   leaseExpiresAt: string | null;
+  thumbnail: AssetThumbnailPreview | null;
+  proxy: AssetProxyPreview | null;
+  annotationHook: AnnotationHookMetadata;
+  handoffChecklist: HandoffChecklistMetadata;
+  handoff: HandoffMetadata;
 }
 
 export interface IngestResult {
@@ -72,12 +79,56 @@ export interface AssetQueueRow {
   title: string;
   sourceUri: string;
   status: WorkflowStatus;
+  thumbnail: AssetThumbnailPreview | null;
+  proxy: AssetProxyPreview | null;
+  annotationHook: AnnotationHookMetadata;
+  handoffChecklist: HandoffChecklistMetadata;
+  handoff: HandoffMetadata;
 }
 
 export interface AuditEvent {
   id: string;
   message: string;
   at: string;
+  signal?: AuditSignal;
+}
+
+export interface AuditSignal {
+  type: "fallback";
+  code: "VAST_FALLBACK";
+  severity: "warning" | "critical";
+}
+
+export interface IncidentGuidedActions {
+  acknowledged: boolean;
+  owner: string;
+  escalated: boolean;
+  nextUpdateEta: string | null;
+  updatedAt: string | null;
+}
+
+export type IncidentHandoffState = "none" | "handoff_requested" | "handoff_accepted";
+
+export interface IncidentHandoff {
+  state: IncidentHandoffState;
+  fromOwner: string;
+  toOwner: string;
+  summary: string;
+  updatedAt: string | null;
+}
+
+export interface IncidentNote {
+  id: string;
+  message: string;
+  correlationId: string;
+  author: string;
+  at: string;
+}
+
+export interface IncidentCoordination {
+  guidedActions: IncidentGuidedActions;
+  handoff: IncidentHandoff;
+  notes: IncidentNote[];
 }
 
 export interface OutboxItem {
