@@ -92,6 +92,40 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     return { asset, job };
   }
 
+  getAssetById(assetId: string): Asset | null {
+    return this.assets.get(assetId) ?? null;
+  }
+
+  updateAsset(
+    assetId: string,
+    updates: Partial<Pick<Asset, "metadata" | "version" | "integrity">>,
+    context: WriteContext
+  ): Asset | null {
+    const existing = this.assets.get(assetId);
+    if (!existing) {
+      return null;
+    }
+
+    const now = this.resolveNow(context);
+    const updated: Asset = {
+      ...existing,
+      updatedAt: now.toISOString(),
+      metadata: updates.metadata !== undefined
+        ? { ...existing.metadata, ...updates.metadata }
+        : existing.metadata,
+      version: updates.version !== undefined
+        ? updates.version
+        : existing.version,
+      integrity: updates.integrity !== undefined
+        ? updates.integrity
+        : existing.integrity,
+    };
+
+    this.assets.set(assetId, updated);
+    this.recordAudit(`asset ${assetId} metadata updated`, context.correlationId, now);
+    return updated;
+  }
+
   setJobStatus(
     jobId: string,
     status: WorkflowStatus,

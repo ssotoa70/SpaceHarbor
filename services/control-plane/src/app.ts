@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { resolveCorrelationId } from "./http/correlation.js";
 import { registerOpenApi } from "./http/openapi.js";
 import { createPersistenceAdapter } from "./persistence/factory.js";
+import type { PersistenceAdapter } from "./persistence/types.js";
 import { registerAssetsRoute } from "./routes/assets.js";
 import { registerAuditRoute } from "./routes/audit.js";
 import { registerDlqRoute } from "./routes/dlq.js";
@@ -12,13 +13,16 @@ import { registerIngestRoute } from "./routes/ingest.js";
 import { registerJobsRoute } from "./routes/jobs.js";
 import { registerMetricsRoute } from "./routes/metrics.js";
 import { registerOutboxRoute } from "./routes/outbox.js";
+import { registerDccRoute } from "./routes/dcc.js";
+import { registerApprovalRoutes, resetApprovalAuditLog } from "./routes/approval.js";
 import { registerQueueRoute } from "./routes/queue.js";
 
-export function buildApp(): FastifyInstance {
-  const persistence = createPersistenceAdapter();
+export function buildApp(externalPersistence?: PersistenceAdapter): FastifyInstance {
+  const persistence = externalPersistence ?? createPersistenceAdapter();
   // Only reset persistence in test mode to prevent data loss on production restarts
   if (process.env.NODE_ENV === "test") {
     persistence.reset();
+    resetApprovalAuditLog();
   }
   const prefixes = ["", "/api/v1"];
 
@@ -67,6 +71,8 @@ export function buildApp(): FastifyInstance {
     void registerIngestRoute(app, persistence, prefixes);
     void registerEventsRoute(app, persistence, prefixes);
     void registerJobsRoute(app, persistence, prefixes);
+    void registerDccRoute(app, persistence, prefixes);
+    void registerApprovalRoutes(app, persistence, prefixes);
     void registerQueueRoute(app, persistence);
     void registerOutboxRoute(app, persistence);
     void registerDlqRoute(app, persistence);

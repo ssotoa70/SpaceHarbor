@@ -48,6 +48,18 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     return this.localFallback.createIngestAsset(input, context);
   }
 
+  getAssetById(assetId: Parameters<PersistenceAdapter["getAssetById"]>[0]) {
+    return this.localFallback.getAssetById(assetId);
+  }
+
+  updateAsset(
+    assetId: Parameters<PersistenceAdapter["updateAsset"]>[0],
+    updates: Parameters<PersistenceAdapter["updateAsset"]>[1],
+    context: Parameters<PersistenceAdapter["updateAsset"]>[2]
+  ) {
+    return this.localFallback.updateAsset(assetId, updates, context);
+  }
+
   setJobStatus(
     jobId: Parameters<PersistenceAdapter["setJobStatus"]>[0],
     status: Parameters<PersistenceAdapter["setJobStatus"]>[1],

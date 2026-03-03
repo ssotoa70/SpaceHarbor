@@ -237,7 +237,7 @@ test("workflow status enum matches across domain and OpenAPI schema", async () =
   const { workflowStatusEnum } = await import("../src/http/schemas");
 
   // All these statuses should exist and be valid in the system
-  const expectedStatuses = ["pending", "processing", "completed", "failed", "needs_replay"];
+  const expectedStatuses = ["pending", "processing", "completed", "failed", "needs_replay", "qc_pending", "qc_in_review", "qc_approved", "qc_rejected"];
 
   // Verify OpenAPI enum includes all expected statuses
   for (const status of expectedStatuses) {

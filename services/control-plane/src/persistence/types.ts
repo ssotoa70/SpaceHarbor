@@ -1,4 +1,5 @@
 import type {
+  Asset,
   AssetQueueRow,
   AuditEvent,
   DlqItem,
@@ -67,6 +68,8 @@ export interface PersistenceAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult;
+  getAssetById(assetId: string): Asset | null;
+  updateAsset(assetId: string, updates: Partial<Pick<Asset, "metadata" | "version" | "integrity">>, context: WriteContext): Asset | null;
   setJobStatus(
     jobId: string,
     status: WorkflowStatus,
