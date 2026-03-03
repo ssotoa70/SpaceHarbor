@@ -82,8 +82,8 @@ def test_worker_implements_exponential_backoff_on_failures():
         client = FailingClient(fail_count=3)
         worker = MediaWorker(client, worker_id="worker-a", lease_seconds=30)
 
-        # Simulate 3 errors by calling handle_error() which sleeps
-        # This verifies the backoff sequence
+        # Simulate errors with exponential backoff: 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 300s (max)
+        # This verifies the backoff sequence (max_backoff_seconds = 300 for long-running jobs)
         worker.handle_error()  # 2s backoff
         assert mock_sleep.call_args_list[-1][0][0] == 2
 
@@ -96,12 +96,24 @@ def test_worker_implements_exponential_backoff_on_failures():
         worker.handle_error()  # 16s backoff
         assert mock_sleep.call_args_list[-1][0][0] == 16
 
-        worker.handle_error()  # 30s backoff (max)
-        assert mock_sleep.call_args_list[-1][0][0] == 30
+        worker.handle_error()  # 32s backoff
+        assert mock_sleep.call_args_list[-1][0][0] == 32
+
+        worker.handle_error()  # 64s backoff
+        assert mock_sleep.call_args_list[-1][0][0] == 64
+
+        worker.handle_error()  # 128s backoff
+        assert mock_sleep.call_args_list[-1][0][0] == 128
+
+        worker.handle_error()  # 256s backoff
+        assert mock_sleep.call_args_list[-1][0][0] == 256
+
+        worker.handle_error()  # 300s backoff (max, 512 > 300)
+        assert mock_sleep.call_args_list[-1][0][0] == 300
 
         # Verify backoff doesn't exceed max
-        worker.handle_error()  # Still 30s
-        assert mock_sleep.call_args_list[-1][0][0] == 30
+        worker.handle_error()  # Still 300s
+        assert mock_sleep.call_args_list[-1][0][0] == 300
 
         # Reset backoff should go back to 2s
         worker.reset_backoff()
