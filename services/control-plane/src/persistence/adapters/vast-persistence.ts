@@ -84,6 +84,18 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     );
   }
 
+  getAssetById(assetId: Parameters<PersistenceAdapter["getAssetById"]>[0]) {
+    return this.localFallback.getAssetById(assetId);
+  }
+
+  updateAsset(
+    assetId: Parameters<PersistenceAdapter["updateAsset"]>[0],
+    updates: Parameters<PersistenceAdapter["updateAsset"]>[1],
+    context: Parameters<PersistenceAdapter["updateAsset"]>[2]
+  ) {
+    return this.localFallback.updateAsset(assetId, updates, context);
+  }
+
   setJobStatus(
     jobId: Parameters<PersistenceAdapter["setJobStatus"]>[0],
     status: Parameters<PersistenceAdapter["setJobStatus"]>[1],
@@ -102,6 +114,15 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
         : undefined,
       () => this.localFallback.setJobStatus(jobId, status, lastError, context)
     );
+  }
+
+  updateJobStatus(
+    jobId: Parameters<PersistenceAdapter["updateJobStatus"]>[0],
+    expectedStatus: Parameters<PersistenceAdapter["updateJobStatus"]>[1],
+    newStatus: Parameters<PersistenceAdapter["updateJobStatus"]>[2],
+    context: Parameters<PersistenceAdapter["updateJobStatus"]>[3]
+  ): boolean {
+    return this.localFallback.updateJobStatus(jobId, expectedStatus, newStatus, context);
   }
 
   getJobById(jobId: Parameters<PersistenceAdapter["getJobById"]>[0]) {

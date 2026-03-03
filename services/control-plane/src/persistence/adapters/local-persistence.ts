@@ -214,6 +214,40 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     return { asset, job };
   }
 
+  getAssetById(assetId: string): Asset | null {
+    return this.assets.get(assetId) ?? null;
+  }
+
+  updateAsset(
+    assetId: string,
+    updates: Partial<Pick<Asset, "metadata" | "version" | "integrity">>,
+    context: WriteContext
+  ): Asset | null {
+    const existing = this.assets.get(assetId);
+    if (!existing) {
+      return null;
+    }
+
+    const now = this.resolveNow(context);
+    const updated: Asset = {
+      ...existing,
+      updatedAt: now.toISOString(),
+      metadata: updates.metadata !== undefined
+        ? { ...existing.metadata, ...updates.metadata }
+        : existing.metadata,
+      version: updates.version !== undefined
+        ? updates.version
+        : existing.version,
+      integrity: updates.integrity !== undefined
+        ? updates.integrity
+        : existing.integrity,
+    };
+
+    this.assets.set(assetId, updated);
+    this.recordAudit(`asset ${assetId} metadata updated`, context.correlationId, now);
+    return updated;
+  }
+
   setJobStatus(
     jobId: string,
     status: WorkflowStatus,
@@ -271,6 +305,24 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     return updated;
   }
 
+  updateJobStatus(
+    jobId: string,
+    expectedStatus: WorkflowStatus,
+    newStatus: WorkflowStatus,
+    context: WriteContext
+  ): boolean {
+    const job = this.jobs.get(jobId);
+
+    // CAS check: only update if status matches expected
+    if (!job || job.status !== expectedStatus) {
+      return false;  // CAS failed
+    }
+
+    // CAS succeeded: update job status using existing setJobStatus logic
+    this.setJobStatus(jobId, newStatus, null, context);
+    return true;  // CAS succeeded
+  }
+
   getJobById(jobId: string): WorkflowJob | null {
     return this.jobs.get(jobId) ?? null;
   }
@@ -321,6 +373,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
 
     const job = this.jobs.get(claimable.jobId);
     if (!job) {
+      return null;
+    }
+
+    // CAS (Compare-And-Swap) safety check: verify job state hasn't changed since selection
+    // This catches race conditions where another worker claimed the job between find and update
+    if (job.status !== "pending" || job.leaseOwner) {
       return null;
     }
 
@@ -893,7 +951,7 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     payload: Record<string, unknown>,
     now: Date
   ): void {
-    this.outbox.unshift({
+    this.outbox.push({
       id: randomUUID(),
       eventType,
       correlationId,

@@ -11,8 +11,15 @@ class MediaWorker:
         self.client = client
         self.worker_id = worker_id
         self.lease_seconds = lease_seconds
+        self.error_backoff_seconds = 2
+        self.max_backoff_seconds = 300  # 5 minutes for long-running jobs
 
     def process_next_job(self) -> bool:
+        """Process next job with error handling and automatic backoff.
+
+        Returns True if a job was processed, False if no job available.
+        Raises exceptions for network/system errors (caught by caller).
+        """
         claimed = self.client.claim_next_job(self.worker_id, self.lease_seconds)
         if not claimed:
             return False
@@ -41,8 +48,28 @@ class MediaWorker:
 
         return True
 
+    def handle_error(self) -> None:
+        """Apply exponential backoff on errors.
+
+        Backs off: 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 300s max
+        """
+        time.sleep(self.error_backoff_seconds)
+        self.error_backoff_seconds = min(
+            self.error_backoff_seconds * 2, self.max_backoff_seconds
+        )
+
+    def reset_backoff(self) -> None:
+        """Reset backoff to initial value after successful processing."""
+        self.error_backoff_seconds = 2
+
 
 def run_forever() -> None:
+    """Run the worker forever, claiming and processing jobs with error handling.
+
+    - Polls for jobs every WORKER_POLL_SECONDS
+    - Implements exponential backoff on errors: 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 300s max
+    - Resets backoff on successful job processing
+    """
     base_url = os.environ.get("CONTROL_PLANE_URL", "http://localhost:8080")
     poll_seconds = float(os.environ.get("WORKER_POLL_SECONDS", "2"))
     worker_id = os.environ.get("WORKER_ID", "media-worker-1")
@@ -59,9 +86,28 @@ def run_forever() -> None:
     )
 
     while True:
-        processed = worker.process_next_job()
-        if not processed:
-            time.sleep(poll_seconds)
+        try:
+            processed = worker.process_next_job()
+            if not processed:
+                # No jobs available; wait before polling again
+                time.sleep(poll_seconds)
+            # Reset backoff on successful processing
+            worker.reset_backoff()
+        except (ConnectionError, TimeoutError) as e:
+            # Network error; apply exponential backoff and retry
+            print(
+                f"[{worker_id}] Network error processing job: {e}. "
+                f"Backing off {worker.error_backoff_seconds}s before retry.",
+                flush=True,
+            )
+            worker.handle_error()
+        except Exception as e:
+            # Unexpected error; apply exponential backoff
+            print(
+                f"[{worker_id}] Unexpected error processing job: {e}",
+                flush=True,
+            )
+            worker.handle_error()
 
 
 if __name__ == "__main__":
