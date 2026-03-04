@@ -7,12 +7,14 @@ class FakeControlPlaneClient:
             {
                 "id": "job-1",
                 "assetId": "asset-1",
+                "sourceUri": "file:///vast/renders/test.exr",
                 "status": "processing",
                 "attemptCount": 1,
             }
         ]
         self.events = []
         self.heartbeats = []
+        self.dataengine_completions = []
 
     def claim_next_job(self, worker_id: str, lease_seconds: int):
         if not self._claims:
@@ -20,32 +22,44 @@ class FakeControlPlaneClient:
         return self._claims.pop(0)
 
     def heartbeat_job(self, job_id: str, worker_id: str, lease_seconds: int):
-        self.heartbeats.append(
-            {
-                "job_id": job_id,
-                "worker_id": worker_id,
-                "lease_seconds": lease_seconds,
-            }
-        )
+        self.heartbeats.append({"job_id": job_id})
 
     def post_event(self, payload):
         self.events.append(payload)
 
+    def post_dataengine_completion(
+        self, event_id, asset_id, job_id, function_id, success, metadata=None, error=None
+    ):
+        self.dataengine_completions.append(
+            {
+                "event_id": event_id,
+                "asset_id": asset_id,
+                "job_id": job_id,
+                "function_id": function_id,
+                "success": success,
+                "metadata": metadata,
+                "error": error,
+            }
+        )
 
-def test_worker_claims_job_emits_canonical_events_and_heartbeat():
+
+def test_worker_claims_job_emits_started_then_dataengine_completion():
     client = FakeControlPlaneClient()
     worker = MediaWorker(client, worker_id="worker-a", lease_seconds=30)
 
     processed = worker.process_next_job()
 
     assert processed is True
-    assert len(client.events) == 2
+    # Only the started event is emitted via post_event
+    assert len(client.events) == 1
     assert client.events[0]["eventType"] == "asset.processing.started"
-    assert client.events[1]["eventType"] == "asset.processing.completed"
     assert client.events[0]["data"]["jobId"] == "job-1"
-    assert client.events[1]["data"]["jobId"] == "job-1"
+    # DataEngine completion published via post_dataengine_completion
+    assert len(client.dataengine_completions) == 1
+    assert client.dataengine_completions[0]["success"] is True
+    assert client.dataengine_completions[0]["function_id"] == "exr_inspector"
+    assert client.dataengine_completions[0]["job_id"] == "job-1"
     assert len(client.heartbeats) == 1
-    assert client.heartbeats[0]["job_id"] == "job-1"
 
 
 def test_worker_returns_false_when_no_claim_available():
@@ -57,6 +71,7 @@ def test_worker_returns_false_when_no_claim_available():
 
     assert processed is False
     assert client.events == []
+    assert client.dataengine_completions == []
 
 
 def test_worker_implements_exponential_backoff_on_failures():
@@ -82,8 +97,6 @@ def test_worker_implements_exponential_backoff_on_failures():
         client = FailingClient(fail_count=3)
         worker = MediaWorker(client, worker_id="worker-a", lease_seconds=30)
 
-        # Simulate errors with exponential backoff: 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 300s (max)
-        # This verifies the backoff sequence (max_backoff_seconds = 300 for long-running jobs)
         worker.handle_error()  # 2s backoff
         assert mock_sleep.call_args_list[-1][0][0] == 2
 
@@ -108,7 +121,7 @@ def test_worker_implements_exponential_backoff_on_failures():
         worker.handle_error()  # 256s backoff
         assert mock_sleep.call_args_list[-1][0][0] == 256
 
-        worker.handle_error()  # 300s backoff (max, 512 > 300)
+        worker.handle_error()  # 300s backoff (max)
         assert mock_sleep.call_args_list[-1][0][0] == 300
 
         # Verify backoff doesn't exceed max

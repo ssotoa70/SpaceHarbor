@@ -1,3 +1,14 @@
+"""
+DEV SIMULATION CLIENT
+=====================
+This module communicates with the control-plane.
+
+In production (VAST environment), the media-worker process is NOT used.
+VAST DataEngine handles all processing and publishes events directly to
+the VAST Event Broker (Kafka). This client simulates that flow locally.
+"""
+
+import datetime
 import requests
 
 
@@ -44,6 +55,45 @@ class ControlPlaneClient:
     def post_event(self, payload: dict) -> dict:
         response = requests.post(
             f"{self.base_url}/api/v1/events",
+            json=payload,
+            headers=self._headers(),
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def post_dataengine_completion(
+        self,
+        event_id: str,
+        asset_id: str,
+        job_id: str,
+        function_id: str,
+        success: bool,
+        metadata: dict | None = None,
+        error: str | None = None,
+    ) -> dict:
+        """
+        DEV SIMULATION ONLY.
+        Posts a mock VAST DataEngine completion CloudEvent to the control-plane events endpoint.
+        In production, VAST DataEngine publishes directly to the VAST Event Broker (Kafka).
+        """
+        payload = {
+            "specversion": "1.0",
+            "type": "vast.dataengine.pipeline.completed",
+            "source": "dev-simulation/media-worker",
+            "id": event_id,
+            "time": datetime.datetime.utcnow().isoformat() + "Z",
+            "data": {
+                "asset_id": asset_id,
+                "job_id": job_id,
+                "function_id": function_id,
+                "success": success,
+                "metadata": metadata,
+                "error": error,
+            },
+        }
+        response = requests.post(
+            f"{self.base_url}/api/v1/events/vast-dataengine",
             json=payload,
             headers=self._headers(),
             timeout=10,

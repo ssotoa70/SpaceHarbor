@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApp } from "../src/app";
+import { buildApp } from "../src/app.js";
 
 function withApiKeyEnv<T>(apiKey: string, run: () => Promise<T>): Promise<T> {
   const previous = process.env.ASSETHARBOR_API_KEY;

@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApp } from "../src/app";
-import type { AssetPriority, ProductionMetadata } from "../src/domain/models";
-import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence";
-import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence";
+import { buildApp } from "../src/app.js";
+import type { AssetPriority, ProductionMetadata } from "../src/domain/models.js";
+import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence.js";
+import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence.js";
 
 test("GET /assets returns queue rows with status", async () => {
   const app = buildApp();

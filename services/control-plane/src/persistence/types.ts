@@ -108,12 +108,20 @@ export interface PersistenceAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult;
+  getAssetById(assetId: string): any | null;
+  updateAsset(assetId: string, updates: any, context: WriteContext): any | null;
   setJobStatus(
     jobId: string,
     status: WorkflowStatus,
     lastError: string | null | undefined,
     context: WriteContext
   ): WorkflowJob | null;
+  updateJobStatus(
+    jobId: string,
+    expectedStatus: WorkflowStatus,
+    newStatus: WorkflowStatus,
+    context: WriteContext
+  ): boolean;
   getJobById(jobId: string): WorkflowJob | null;
   getPendingJobs(): WorkflowJob[];
   claimNextJob(workerId: string, leaseSeconds: number, context: WriteContext): WorkflowJob | null;

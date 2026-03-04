@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { OutboundConfigError, resolveOutboundConfig } from "../src/integrations/outbound/config";
+import { OutboundConfigError, resolveOutboundConfig } from "../src/integrations/outbound/config.js";
 
 test("resolve outbound config includes enabled webhook targets in non-strict mode", () => {
   const config = resolveOutboundConfig({

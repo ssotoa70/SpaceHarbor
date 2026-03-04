@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApp } from "../src/app";
-import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence";
-import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence";
+import { buildApp } from "../src/app.js";
+import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence.js";
+import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence.js";
 
 function createBridgedVastAdapter() {
   const backing = new LocalPersistenceAdapter();

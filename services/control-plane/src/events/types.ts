@@ -216,7 +216,7 @@ export function isCanonicalAssetEventEnvelope(input: unknown): input is Canonica
     return false;
   }
 
-  return hasReviewContractData(value.eventType, value.data);
+  return value.data ? hasReviewContractData(value.eventType as AssetEventType, value.data) : false;
 }
 
 export function normalizeLegacyEvent(event: LegacyAssetEventEnvelope): NormalizedAssetEvent {
@@ -234,5 +234,60 @@ export function normalizeCanonicalEvent(event: CanonicalAssetEventEnvelope): Nor
     eventType: event.eventType,
     jobId: event.data.jobId,
     error: event.data.error
+  };
+}
+
+// ---------------------------------------------------------------------------
+// VAST DataEngine CloudEvent — published by VAST Event Broker on pipeline completion
+// ---------------------------------------------------------------------------
+
+export interface VastDataEngineCompletionEvent {
+  specversion: "1.0";
+  type: "vast.dataengine.pipeline.completed";
+  source: string;
+  id: string;
+  time: string;
+  data: {
+    asset_id: string;
+    job_id: string;
+    function_id: string;
+    success: boolean;
+    metadata?: Record<string, unknown>;
+    error?: string;
+  };
+}
+
+export interface NormalizedVastEvent extends NormalizedAssetEvent {
+  metadata?: Record<string, unknown>;
+}
+
+export function isVastDataEngineCompletionEvent(
+  input: unknown,
+): input is VastDataEngineCompletionEvent {
+  if (!input || typeof input !== "object") return false;
+  const v = input as Record<string, unknown>;
+  if (v["type"] !== "vast.dataengine.pipeline.completed") return false;
+  if (typeof v["id"] !== "string") return false;
+  const data = v["data"] as Record<string, unknown> | undefined;
+  if (!data || typeof data !== "object") return false;
+  return (
+    typeof data["asset_id"] === "string" &&
+    typeof data["job_id"] === "string" &&
+    typeof data["function_id"] === "string" &&
+    typeof data["success"] === "boolean"
+  );
+}
+
+export function normalizeVastDataEngineEvent(
+  event: VastDataEngineCompletionEvent,
+): NormalizedVastEvent {
+  return {
+    eventId: event.id,
+    eventType: event.data.success
+      ? "asset.processing.completed"
+      : "asset.processing.failed",
+    jobId: event.data.job_id,
+    error: event.data.error,
+    metadata: event.data.metadata,
   };
 }

@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence";
+import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence.js";
 import {
   computeAuditRetentionCutoffIso,
   createAuditRetentionRunner,
   resolveAuditRetentionConfig
-} from "../src/retention/audit-retention";
+} from "../src/retention/audit-retention.js";
 
 test("audit retention config defaults to enabled dry-run mode", () => {
   const config = resolveAuditRetentionConfig({});

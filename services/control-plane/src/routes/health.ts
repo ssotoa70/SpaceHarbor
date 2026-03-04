@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { PersistenceAdapter } from "../persistence/types";
+import type { PersistenceAdapter } from "../persistence/types.js";
 
 export async function registerHealthRoute(
   app: FastifyInstance,

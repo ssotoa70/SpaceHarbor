@@ -15,3 +15,5 @@ const ALLOWED_TRANSITIONS: Record<WorkflowStatus, Set<WorkflowStatus>> = {
 export function canTransitionWorkflowStatus(from: WorkflowStatus, to: WorkflowStatus): boolean {
   return ALLOWED_TRANSITIONS[from].has(to);
 }
+
+export const canTransition = canTransitionWorkflowStatus;

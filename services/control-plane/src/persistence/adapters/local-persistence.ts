@@ -171,6 +171,7 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     const job: WorkflowJob = {
       id: randomUUID(),
       assetId: asset.id,
+      sourceUri: input.sourceUri,
       status: "pending",
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),

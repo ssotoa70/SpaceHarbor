@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApp } from "../src/app";
+import { buildApp } from "../src/app.js";
 
 const OCCURRED_AT = "2026-02-21T00:00:00.000Z";
 

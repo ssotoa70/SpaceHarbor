@@ -1,3 +1,17 @@
+"""
+DEV SIMULATION MODE
+===================
+This file simulates VAST DataEngine behavior locally when no VAST cluster is available.
+
+In production (VAST environment):
+- VAST element triggers fire automatically when files land in VAST views
+- VAST DataEngine runs registered pipeline functions (exr_inspector, ASR, transcode, etc.)
+- VAST Event Broker publishes completion CloudEvents to Kafka
+- Control-plane VastEventSubscriber consumes those events
+
+This file is NOT used in production VAST environments.
+"""
+
 import os
 import time
 from uuid import uuid4
@@ -15,10 +29,12 @@ class MediaWorker:
         self.max_backoff_seconds = 300  # 5 minutes for long-running jobs
 
     def process_next_job(self) -> bool:
-        """Process next job with error handling and automatic backoff.
+        """DEV SIMULATION: claim a job, run mock pipeline, publish DataEngine completion event.
 
         Returns True if a job was processed, False if no job available.
         Raises exceptions for network/system errors (caught by caller).
+
+        In production, VAST DataEngine element triggers replace this entire flow.
         """
         claimed = self.client.claim_next_job(self.worker_id, self.lease_seconds)
         if not claimed:
@@ -26,8 +42,9 @@ class MediaWorker:
 
         job_id = claimed["id"]
         asset_id = claimed["assetId"]
-        correlation_id = f"corr-{self.worker_id}-{job_id}-{uuid4()}"
+        correlation_id = f"dev-sim-{self.worker_id}-{job_id}-{uuid4()}"
 
+        # Emit started event so the UI can show processing state
         started = WorkflowEvent(
             event_type="asset.processing.started",
             asset_id=asset_id,
@@ -38,13 +55,36 @@ class MediaWorker:
 
         self.client.heartbeat_job(job_id, self.worker_id, self.lease_seconds)
 
-        completed = WorkflowEvent(
-            event_type="asset.processing.completed",
-            asset_id=asset_id,
-            job_id=job_id,
-            correlation_id=correlation_id,
-        )
-        self.client.post_event(completed.to_payload())
+        try:
+            # DEV SIMULATION: run local mock pipeline
+            # In production, VAST DataEngine runs the real function
+            mock_metadata = {
+                "codec": "exr",
+                "resolution": {"width": 4096, "height": 2160},
+                "frame_rate": 24.0,
+                "file_size_bytes": 52428800,
+            }
+
+            # Publish mock VAST DataEngine completion event to control-plane HTTP endpoint.
+            # Control-plane VastEventSubscriber will receive and update job status + metadata.
+            self.client.post_dataengine_completion(
+                event_id=str(uuid4()),
+                asset_id=asset_id,
+                job_id=job_id,
+                function_id="exr_inspector",
+                success=True,
+                metadata=mock_metadata,
+            )
+
+        except Exception as exc:
+            self.client.post_dataengine_completion(
+                event_id=str(uuid4()),
+                asset_id=asset_id,
+                job_id=job_id,
+                function_id="exr_inspector",
+                success=False,
+                error=str(exc),
+            )
 
         return True
 

@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createPersistenceAdapter, resolvePersistenceBackend, resolveVastFallbackToLocal } from "../src/persistence/factory";
-import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence";
-import type { OutboundNotifier } from "../src/integrations/outbound/notifier";
-import type { OutboundConfig } from "../src/integrations/outbound/types";
+import { createPersistenceAdapter, resolvePersistenceBackend, resolveVastFallbackToLocal } from "../src/persistence/factory.js";
+import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence.js";
+import type { OutboundNotifier } from "../src/integrations/outbound/notifier.js";
+import type { OutboundConfig } from "../src/integrations/outbound/types.js";
 
 test("persistence backend resolution defaults to local", () => {
   assert.equal(resolvePersistenceBackend(undefined), "local");

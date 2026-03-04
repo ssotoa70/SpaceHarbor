@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildApp } from "../src/app";
+import { buildApp } from "../src/app.js";
 
 test("POST /assets/ingest creates asset and pending workflow job", async () => {
   const app = buildApp();

@@ -14,6 +14,13 @@ export interface Asset {
   title: string;
   sourceUri: string;
   createdAt: string;
+  updatedAt?: string;
+  metadata?: Record<string, unknown>;
+  version?: string;
+  integrity?: {
+    checksum?: string;
+    fileSize?: number;
+  };
 }
 
 export interface AssetThumbnailPreview {
@@ -52,6 +59,7 @@ export interface HandoffMetadata {
 export interface WorkflowJob {
   id: string;
   assetId: string;
+  sourceUri: string;
   status: WorkflowStatus;
   createdAt: string;
   updatedAt: string;
@@ -162,4 +170,13 @@ export interface DlqItem {
   error: string;
   attemptCount: number;
   failedAt: string;
+}
+
+export interface ApprovalAuditEntry {
+  id: string;
+  assetId: string;
+  action: "request_review" | "approve" | "reject";
+  performedBy: string;
+  note: string | null;
+  at: string;
 }
