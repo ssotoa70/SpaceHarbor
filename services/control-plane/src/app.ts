@@ -16,6 +16,7 @@ import { registerJobsRoute } from "./routes/jobs.js";
 import { registerMetricsRoute } from "./routes/metrics.js";
 import { registerOutboxRoute } from "./routes/outbox.js";
 import { registerQueueRoute } from "./routes/queue.js";
+import { registerVastEventsRoute } from "./routes/vast-events.js";
 import { Kafka } from "kafkajs";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 
@@ -82,6 +83,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerIncidentRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);
     void registerEventsRoute(app, persistence, prefixes);
+    void registerVastEventsRoute(app, persistence, prefixes);
     void registerJobsRoute(app, persistence, prefixes);
     void registerQueueRoute(app, persistence);
     void registerOutboxRoute(app, persistence);
