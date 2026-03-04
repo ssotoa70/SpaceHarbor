@@ -16,6 +16,8 @@ import { registerJobsRoute } from "./routes/jobs.js";
 import { registerMetricsRoute } from "./routes/metrics.js";
 import { registerOutboxRoute } from "./routes/outbox.js";
 import { registerQueueRoute } from "./routes/queue.js";
+import { Kafka } from "kafkajs";
+import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 
 interface BuildAppOptions {
   persistenceAdapter?: PersistenceAdapter;
@@ -90,12 +92,34 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   // Expose persistence for test scaffolding (accessed as (app as any).persistence)
   (app as any).persistence = persistence;
 
+  // Wire VAST Event Broker subscriber — only when VAST_EVENT_BROKER_URL is configured
+  const brokerUrl = process.env.VAST_EVENT_BROKER_URL;
+  const topic = process.env.VAST_EVENT_BROKER_TOPIC ?? "assetharbor.dataengine.completed";
+  const groupId = process.env.VAST_EVENT_BROKER_GROUP ?? "assetharbor-control-plane";
+
+  let subscriber: VastEventSubscriber | null = null;
+
+  if (brokerUrl) {
+    const kafka = new Kafka({
+      clientId: "assetharbor-control-plane",
+      brokers: [brokerUrl],
+      ssl: process.env.VAST_EVENT_BROKER_SSL === "true",
+    });
+    subscriber = new VastEventSubscriber(persistence, kafka, topic, groupId);
+  }
+
   app.addHook("onReady", async () => {
     auditRetention.start();
+    if (subscriber) {
+      await subscriber.start();
+    }
   });
 
   app.addHook("onClose", async () => {
     auditRetention.stop();
+    if (subscriber) {
+      await subscriber.stop();
+    }
   });
 
   return app;

@@ -4,7 +4,7 @@ import {
   isVastDataEngineCompletionEvent,
   normalizeVastDataEngineEvent,
 } from "./types.js";
-import { processAssetEvent } from "../events/processor.js";
+import { processAssetEvent } from "./processor.js";
 
 export class VastEventSubscriber {
   private consumer: Consumer;
