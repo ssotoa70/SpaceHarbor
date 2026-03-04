@@ -118,6 +118,7 @@ export const workflowJobSchema = {
   required: [
     "id",
     "assetId",
+    "sourceUri",
     "status",
     "createdAt",
     "updatedAt",
@@ -136,6 +137,7 @@ export const workflowJobSchema = {
   properties: {
     id: { type: "string" },
     assetId: { type: "string" },
+    sourceUri: { type: "string" },
     status: { type: "string", enum: [...workflowStatusEnum] },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },

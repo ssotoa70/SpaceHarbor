@@ -59,6 +59,7 @@ export interface HandoffMetadata {
 export interface WorkflowJob {
   id: string;
   assetId: string;
+  sourceUri: string;
   status: WorkflowStatus;
   createdAt: string;
   updatedAt: string;
