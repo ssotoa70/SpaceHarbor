@@ -160,8 +160,8 @@ export interface DlqItem {
 export interface ApprovalAuditEntry {
   id: string;
   assetId: string;
-  action: "approved" | "rejected" | "pending";
-  actor: string;
-  timestamp: string;
-  comment?: string;
+  action: "request_review" | "approve" | "reject";
+  performedBy: string;
+  note: string | null;
+  at: string;
 }

@@ -15,6 +15,8 @@ import { registerIngestRoute } from "./routes/ingest.js";
 import { registerJobsRoute } from "./routes/jobs.js";
 import { registerMetricsRoute } from "./routes/metrics.js";
 import { registerOutboxRoute } from "./routes/outbox.js";
+import { registerApprovalRoutes } from "./routes/approval.js";
+import { registerDccRoute } from "./routes/dcc.js";
 import { registerQueueRoute } from "./routes/queue.js";
 import { registerVastEventsRoute } from "./routes/vast-events.js";
 import { Kafka } from "kafkajs";
@@ -77,7 +79,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   app.after(() => {
-    void registerHealthRoute(app);
+    void registerHealthRoute(app, persistence);
+    void registerApprovalRoutes(app, persistence, prefixes);
     void registerAssetsRoute(app, persistence, prefixes);
     void registerAuditRoute(app, persistence, prefixes);
     void registerIncidentRoute(app, persistence, prefixes);
@@ -87,6 +90,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerJobsRoute(app, persistence, prefixes);
     void registerQueueRoute(app, persistence);
     void registerOutboxRoute(app, persistence);
+    void registerDccRoute(app, persistence, prefixes);
     void registerDlqRoute(app, persistence);
     void registerMetricsRoute(app, persistence);
   });
