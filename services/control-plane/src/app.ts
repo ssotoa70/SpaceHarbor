@@ -87,6 +87,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerMetricsRoute(app, persistence);
   });
 
+  // Expose persistence for test scaffolding (accessed as (app as any).persistence)
+  (app as any).persistence = persistence;
+
   app.addHook("onReady", async () => {
     auditRetention.start();
   });
