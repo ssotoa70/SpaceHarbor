@@ -4,6 +4,12 @@ import { randomUUID } from "node:crypto";
 
 export type ApprovalAction = "request_review" | "approve" | "reject";
 
+const ACTION_AUDIT_ACTION: Record<ApprovalAction, "approved" | "rejected" | "pending"> = {
+  request_review: "pending",
+  approve: "approved",
+  reject: "rejected",
+};
+
 const ACTION_TARGET_STATUS: Record<ApprovalAction, WorkflowStatus> = {
   request_review: "qc_in_review",
   approve: "qc_approved",
@@ -65,10 +71,10 @@ export function validateApprovalTransition(
   const auditEntry: ApprovalAuditEntry = {
     id: randomUUID(),
     assetId,
-    action,
-    performedBy,
-    note,
-    at: now.toISOString(),
+    action: ACTION_AUDIT_ACTION[action],
+    actor: performedBy,
+    comment: note ?? undefined,
+    timestamp: now.toISOString(),
   };
 
   return {

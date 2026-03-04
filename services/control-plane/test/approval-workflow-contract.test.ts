@@ -9,7 +9,7 @@ function buildTestApp() {
   const persistence = new LocalPersistenceAdapter();
   persistence.reset();
   resetApprovalAuditLog();
-  const app = buildApp(persistence);
+  const app = buildApp({ persistenceAdapter: persistence });
   return { app, persistence };
 }
 

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence.js";
+import type { IngestResult } from "../src/domain/models.js";
 
 test("VAST adapter delegates ingest writes through workflow client boundary", () => {
   const calls: string[] = [];
@@ -11,13 +12,14 @@ test("VAST adapter delegates ingest writes through workflow client boundary", ()
       databaseUrl: "https://db.example",
       eventBrokerUrl: "https://events.example",
       dataEngineUrl: "https://engine.example",
-      strict: true
+      strict: true,
+      fallbackToLocal: false
     },
     async () => new Response(null, { status: 200 }),
     {
       createIngestAsset: () => {
         calls.push("createIngestAsset");
-        return null;
+        return null as unknown as IngestResult;
       }
     }
   );
@@ -273,7 +275,8 @@ test("VAST adapter publishes outbox items to event broker endpoint", async () =>
       databaseUrl: "https://db.example",
       eventBrokerUrl: "https://events.example",
       dataEngineUrl: "https://engine.example",
-      strict: true
+      strict: true,
+      fallbackToLocal: false
     },
     async (url, init) => {
       calls.push({
@@ -313,7 +316,8 @@ test("VAST adapter publish handles broker exceptions safely", async () => {
       databaseUrl: "https://db.example",
       eventBrokerUrl: "https://events.example",
       dataEngineUrl: "https://engine.example",
-      strict: true
+      strict: true,
+      fallbackToLocal: false
     },
     async () => {
       throw new Error("network down");
