@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildApp } from "../src/app.js";
+import type { AssetPriority, ProductionMetadata } from "../src/domain/models.js";
 import { LocalPersistenceAdapter } from "../src/persistence/adapters/local-persistence.js";
 import { VastPersistenceAdapter } from "../src/persistence/adapters/vast-persistence.js";
 
@@ -24,40 +25,72 @@ test("GET /assets returns queue rows with status", async () => {
     assets: Array<{
       title: string;
       status: string;
-      thumbnail: null;
-      proxy: null;
-      annotationHook: { enabled: boolean; provider: null; contextId: null };
-      handoffChecklist: {
-        releaseNotesReady: boolean;
-        verificationComplete: boolean;
-        commsDraftReady: boolean;
-        ownerAssigned: boolean;
-      };
-      handoff: {
-        status: "not_ready" | "ready_for_release";
-        owner: null;
-        lastUpdatedAt: null;
-      };
+      productionMetadata: Omit<ProductionMetadata, "priority"> & { priority: AssetPriority | null };
     }>;
   };
   assert.equal(body.assets[0].title, "Queue Asset");
   assert.equal(body.assets[0].status, "pending");
-  assert.equal(body.assets[0].thumbnail, null);
-  assert.equal(body.assets[0].proxy, null);
-  assert.deepEqual(body.assets[0].annotationHook, { enabled: false, provider: null, contextId: null });
-  assert.deepEqual(body.assets[0].handoffChecklist, {
-    releaseNotesReady: false,
-    verificationComplete: false,
-    commsDraftReady: false,
-    ownerAssigned: false
-  });
-  assert.deepEqual(body.assets[0].handoff, {
-    status: "not_ready",
+  assert.deepEqual(Object.keys(body.assets[0].productionMetadata).sort(), [
+    "dueDate",
+    "episode",
+    "owner",
+    "priority",
+    "sequence",
+    "shot",
+    "show",
+    "vendor",
+    "version"
+  ]);
+  assert.deepEqual(body.assets[0].productionMetadata, {
+    dueDate: null,
+    episode: null,
     owner: null,
-    lastUpdatedAt: null
+    priority: null,
+    sequence: null,
+    shot: null,
+    show: null,
+    vendor: null,
+    version: null
   });
 
   await app.close();
+});
+
+test("listAssetQueueRows coalesces legacy partial metadata to null-first defaults", () => {
+  const adapter = new LocalPersistenceAdapter();
+  const ingest = adapter.createIngestAsset(
+    {
+      title: "Legacy Metadata Asset",
+      sourceUri: "s3://bucket/legacy-metadata-asset.mov"
+    },
+    { correlationId: "corr-legacy" }
+  );
+
+  const metadataStore = (
+    adapter as unknown as {
+      assetProductionMetadata: Map<string, Partial<ProductionMetadata>>;
+    }
+  ).assetProductionMetadata;
+
+  metadataStore.set(ingest.asset.id, {
+    show: "Show A",
+    owner: undefined,
+    priority: undefined
+  });
+
+  const rows = adapter.listAssetQueueRows();
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].productionMetadata, {
+    show: "Show A",
+    episode: null,
+    sequence: null,
+    shot: null,
+    version: null,
+    vendor: null,
+    priority: null,
+    dueDate: null,
+    owner: null
+  });
 });
 
 test("GET /audit returns event history", async () => {

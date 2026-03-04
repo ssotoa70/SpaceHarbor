@@ -113,6 +113,86 @@ export const handoffSchema = {
   }
 } as const;
 
+export const productionMetadataSchema = {
+  type: "object",
+  required: ["show", "episode", "sequence", "shot", "version", "vendor", "priority", "dueDate", "owner"],
+  properties: {
+    show: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    episode: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    sequence: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    shot: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    version: {
+      anyOf: [{ type: "number" }, { type: "null" }]
+    },
+    vendor: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    priority: {
+      anyOf: [
+        { type: "string", enum: ["low", "normal", "high", "urgent"] },
+        { type: "null" }
+      ]
+    },
+    dueDate: {
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }]
+    },
+    owner: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    }
+  }
+} as const;
+
+export const assetQueueRowSchema = {
+  type: "object",
+  required: [
+    "id",
+    "jobId",
+    "title",
+    "sourceUri",
+    "status",
+    "thumbnail",
+    "proxy",
+    "annotationHook",
+    "handoffChecklist",
+    "handoff",
+    "productionMetadata"
+  ],
+  properties: {
+    id: { type: "string" },
+    jobId: {
+      anyOf: [{ type: "string" }, { type: "null" }]
+    },
+    title: { type: "string" },
+    sourceUri: { type: "string" },
+    status: { type: "string", enum: [...workflowStatusEnum] },
+    thumbnail: thumbnailSchema,
+    proxy: proxySchema,
+    annotationHook: annotationHookSchema,
+    handoffChecklist: handoffChecklistSchema,
+    handoff: handoffSchema,
+    productionMetadata: productionMetadataSchema
+  }
+} as const;
+
+export const assetsResponseSchema = {
+  type: "object",
+  required: ["assets"],
+  properties: {
+    assets: {
+      type: "array",
+      items: assetQueueRowSchema
+    }
+  }
+} as const;
+
 export const workflowJobSchema = {
   type: "object",
   required: [
@@ -155,36 +235,6 @@ export const workflowJobSchema = {
     leaseExpiresAt: {
       anyOf: [{ type: "string", format: "date-time" }, { type: "null" }]
     },
-    thumbnail: thumbnailSchema,
-    proxy: proxySchema,
-    annotationHook: annotationHookSchema,
-    handoffChecklist: handoffChecklistSchema,
-    handoff: handoffSchema
-  }
-} as const;
-
-export const assetQueueRowSchema = {
-  type: "object",
-  required: [
-    "id",
-    "jobId",
-    "title",
-    "sourceUri",
-    "status",
-    "thumbnail",
-    "proxy",
-    "annotationHook",
-    "handoffChecklist",
-    "handoff"
-  ],
-  properties: {
-    id: { type: "string" },
-    jobId: {
-      anyOf: [{ type: "string" }, { type: "null" }]
-    },
-    title: { type: "string" },
-    sourceUri: { type: "string" },
-    status: { type: "string", enum: [...workflowStatusEnum] },
     thumbnail: thumbnailSchema,
     proxy: proxySchema,
     annotationHook: annotationHookSchema,

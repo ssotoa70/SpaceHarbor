@@ -81,6 +81,20 @@ export interface IngestResult {
   job: WorkflowJob;
 }
 
+export type AssetPriority = "low" | "normal" | "high" | "urgent";
+
+export interface ProductionMetadata {
+  show: string | null;
+  episode: string | null;
+  sequence: string | null;
+  shot: string | null;
+  version: number | null;
+  vendor: string | null;
+  priority: AssetPriority | null;
+  dueDate: string | null;
+  owner: string | null;
+}
+
 export interface AssetQueueRow {
   id: string;
   jobId: string | null;
@@ -92,6 +106,7 @@ export interface AssetQueueRow {
   annotationHook: AnnotationHookMetadata;
   handoffChecklist: HandoffChecklistMetadata;
   handoff: HandoffMetadata;
+  productionMetadata: ProductionMetadata;
 }
 
 export interface AuditEvent {
