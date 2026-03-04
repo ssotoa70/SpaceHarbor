@@ -136,6 +136,14 @@ export const fetchAudit = (assetId?: string) =>
 
 ## 2. Media Pipeline Specialist Validation (Approved with Critical Gaps)
 
+> **⚠️ Architecture Correction (2026-03-04):**
+> The media worker does NOT execute pipeline functions in production.
+> VAST DataEngine runs all functions (exr_inspector, ASR, transcode, etc.) as containerized
+> images on Kubernetes, triggered automatically by VAST element triggers on file ingest.
+> The control-plane subscribes to VAST Event Broker (Kafka) for completion events.
+> `services/media-worker/` is dev-mode simulation only.
+> See `docs/plans/2026-03-04-sergio-131-design.md` for the correct architecture.
+
 ### exrinspector as MVP Sample
 
 ✅ **Appropriate choice.** EXR metadata extraction is correct entry point:

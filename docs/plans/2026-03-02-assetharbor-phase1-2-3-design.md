@@ -131,21 +131,22 @@ Post-production and VFX studios managing media assets across:
 │  └──────────────────────────────────────────────────────────┘  │
 │          ↑ HTTP polls  ↓ Kafka publishes                       │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │  MEDIA WORKER (Python)                                   │  │
+│  │  MEDIA WORKER (Python) — DEV SIMULATION ONLY             │  │
+│  │  ⚠️  NOT used in production VAST environments             │  │
 │  │                                                            │  │
-│  │  Poll/Claim Loop:                                         │  │
-│  │  ├─ Claim next job (atomic CAS)                           │  │
-│  │  ├─ Send heartbeat (every 30s)                            │  │
-│  │  ├─ Execute Data Engine pipeline                          │  │
-│  │  ├─ Emit started/completed/failed events                 │  │
-│  │  └─ Exponential backoff on failures (1s → 30s → 60s)     │  │
+│  │  Simulates VAST DataEngine locally (no VAST cluster):     │  │
+│  │  ├─ Poll/claim loop (mimics element trigger)              │  │
+│  │  ├─ Mock pipeline execution (exrinspector stub)           │  │
+│  │  └─ Publishes mock completion events                      │  │
 │  │                                                            │  │
-│  │  Data Engine Pipeline Executor:                           │  │
-│  │  ├─ Registry of pluggable functions                       │  │
-│  │  ├─ Input/output schema validation                        │  │
-│  │  ├─ Call VAST Data Engine (or mock for dev)              │  │
-│  │  └─ Record results in audit trail                         │  │
+│  │  Production replacement: VAST DataEngine (below)          │  │
 │  └──────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  EVENT BROKER SUBSCRIBER (Control-plane module)                  │
+│  ├─ Kafka consumer (Confluent Kafka, VAST Event Broker)          │
+│  ├─ Receives DataEngine completion CloudEvents                   │
+│  ├─ Correlates events to AssetHarbor job records                 │
+│  └─ Updates job status + asset metadata in VastDB               │
 │                                                                  │
 │  VAST ECOSYSTEM (Phase 2 integration)                            │
 │  ├─ Database (Trino REST API) ← persistence                     │
@@ -1124,65 +1125,39 @@ export class ExrInspectorFunction implements DataEngineFunction {
 }
 ```
 
-**Integration in media-worker:**
+**⚠️ Last Updated: 2026-03-04 — Architecture correction: VAST-native processing model**
+
+**Production end-to-end flow (VAST environment):**
+1. User uploads EXR sequence via `/api/v1/assets/ingest`
+2. Control-plane creates asset record in VastDB + places file reference in VAST view
+3. VAST element trigger fires automatically (`ElementCreated` on `*.exr`)
+4. VAST DataEngine runs registered `exr_inspector` pipeline (containerized on Kubernetes)
+5. `exr_inspector` function has direct VAST storage access — extracts metadata
+6. Function writes results to VastDB
+7. VAST Event Broker publishes `dataengine.job.completed` CloudEvent to Kafka topic
+8. **Control-plane Event Broker subscriber** receives CloudEvent
+9. Subscriber correlates event to AssetHarbor job, updates job status + asset metadata
+10. UI shows asset with metadata (codec, resolution, channels, duration, thumbnail)
+11. User can now approve/reject asset
+
+**Dev/local mode (no VAST cluster — simulation only):**
 ```python
-# services/media-worker/worker/main.py
-async def process_job(job: Job):
-  """Execute Data Engine pipeline for a claimed job."""
-  try:
-    asset = await get_asset(job.asset_id)
-
-    # Dispatch based on job type
-    if job.type == 'ingest':
-      # Ingest job: run exrinspector
-      metadata = await pipeline.execute(
-        job_id=job.id,
-        function_id='exr_inspector',
-        input={'asset_id': asset.id, 'file_path': asset.path}
-      )
-
-      # Update asset metadata in control-plane
-      await http_client.post(
-        f'{CONTROL_PLANE_URL}/api/v1/assets/{asset.id}/metadata',
-        json=metadata,
-        headers={'x-api-key': CONTROL_PLANE_API_KEY}
-      )
-
-      # Emit completed event
-      await emit_event({
-        id: uuid4(),
-        type: 'job_completed',
-        job_id: job.id,
-        asset_id: asset.id,
-        metadata: metadata,
-        timestamp: datetime.now().isoformat(),
-      })
-
-    # ... handle other job types
-
-  except Exception as e:
-    logger.error(f"Job {job.id} failed: {e}")
-    await emit_event({
-      id: uuid4(),
-      type: 'job_failed',
-      job_id: job.id,
-      error: str(e),
-      timestamp: datetime.now().isoformat(),
-    })
-    raise
+# services/media-worker/worker/main.py — DEV SIMULATION ONLY
+# Simulates VAST DataEngine element trigger + pipeline execution locally.
+# This code path is NOT used in production VAST environments.
+async def dev_simulate_vast_processing(job: Job):
+    asset_id = job["assetId"]
+    source_uri = job["sourceUri"]
+    # Calls local mock DataEngine (worker/data_engine.py)
+    # Publishes mock completion event
+    # Used only when VAST_EVENT_BROKER_URL is not configured
 ```
 
-**End-to-end flow:**
-1. User uploads EXR sequence via `/api/v1/assets/ingest`
-2. Control-plane creates asset + ingest job
-3. Media worker claims job
-4. Worker calls DataEnginePipeline.execute('exr_inspector', { asset_id, file_path })
-5. exrinspector extracts metadata (real VAST or mock)
-6. Worker updates asset metadata via `/api/v1/assets/:id/metadata`
-7. Worker emits `job_completed` event
-8. Control-plane publishes event to Kafka
-9. UI shows asset with metadata (codec, resolution, channels, duration, thumbnail)
-10. User can now approve/reject asset
+**Dual execution modes (production configurable):**
+- **Mode A — Event-driven (default):** VAST element trigger → VAST DataEngine (Kubernetes) → VAST Event Broker → control-plane subscriber
+- **Mode B — HTTP server function:** Control-plane calls VAST DataEngine HTTP endpoint directly (on-demand, synchronous)
+
+**DataEnginePipeline in control-plane** (`src/data-engine/`) is the **orchestration wrapper** — it provides schema validation, audit trail, and function registry. It does NOT execute functions locally. In Mode B, `ExrInspectorFunction.execute()` delegates to `VAST_DATA_ENGINE_URL`. In Mode A, the function runs autonomously on VAST infrastructure.
 
 ---
 
