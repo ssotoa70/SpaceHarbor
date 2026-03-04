@@ -1,4 +1,12 @@
 """
+DEV SIMULATION ONLY — Not used in production VAST environments.
+
+In production, VAST DataEngine runs pipeline functions as containerized images
+on Kubernetes, triggered by VAST element triggers (file CRUD on VAST views).
+This module provides local mock execution for development without a VAST cluster.
+
+----
+
 Data Engine Pipeline Architecture
 
 Modular pipeline for processing media assets through various extraction and analysis steps.
