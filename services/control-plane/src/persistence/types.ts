@@ -202,6 +202,13 @@ export interface IngestInput {
   title: string;
   sourceUri: string;
   annotationHook?: AnnotationHookMetadata | null;
+  // Optional — provided by ScannerFunction (VAST DataEngine trigger)
+  shotId?: string;
+  projectId?: string;
+  versionLabel?: string;
+  fileSizeBytes?: number;
+  md5Checksum?: string;
+  createdBy?: string;
 }
 
 export interface WriteContext {

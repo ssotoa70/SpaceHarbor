@@ -9,6 +9,13 @@ import type { PersistenceAdapter } from "../persistence/types.js";
 interface IngestPayload {
   title: string;
   sourceUri: string;
+  // Optional — provided by ScannerFunction (VAST DataEngine trigger)
+  shotId?: string;
+  projectId?: string;
+  versionLabel?: string;
+  fileSizeBytes?: number;
+  md5Checksum?: string;
+  createdBy?: string;
 }
 
 const ingestBodySchema = {
@@ -16,7 +23,13 @@ const ingestBodySchema = {
   required: ["title", "sourceUri"],
   properties: {
     title: { type: "string", minLength: 1 },
-    sourceUri: { type: "string", minLength: 1 }
+    sourceUri: { type: "string", minLength: 1 },
+    shotId: { type: "string" },
+    projectId: { type: "string" },
+    versionLabel: { type: "string" },
+    fileSizeBytes: { type: "number" },
+    md5Checksum: { type: "string" },
+    createdBy: { type: "string" }
   }
 } as const;
 
@@ -65,7 +78,16 @@ export async function registerIngestRoute(
         }
 
         const result = persistence.createIngestAsset(
-          { title, sourceUri },
+          {
+            title,
+            sourceUri,
+            shotId: request.body?.shotId,
+            projectId: request.body?.projectId,
+            versionLabel: request.body?.versionLabel,
+            fileSizeBytes: request.body?.fileSizeBytes,
+            md5Checksum: request.body?.md5Checksum,
+            createdBy: request.body?.createdBy,
+          },
           { correlationId: resolveCorrelationId(request) }
         );
         return reply.status(201).send(result);

@@ -207,7 +207,10 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       id: randomUUID(),
       title: input.title,
       sourceUri: input.sourceUri,
-      createdAt: now.toISOString()
+      createdAt: now.toISOString(),
+      ...(input.shotId !== undefined && { shotId: input.shotId }),
+      ...(input.projectId !== undefined && { projectId: input.projectId }),
+      ...(input.versionLabel !== undefined && { versionLabel: input.versionLabel }),
     };
 
     const job: WorkflowJob = {

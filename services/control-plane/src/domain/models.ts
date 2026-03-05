@@ -52,6 +52,10 @@ export interface Asset {
   metadata?: VfxMetadata;
   version?: AssetVersion;
   integrity?: AssetIntegrity;
+  // Optional VFX hierarchy context — populated when ingested via ScannerFunction
+  shotId?: string;
+  projectId?: string;
+  versionLabel?: string;
 }
 
 export interface AssetThumbnailPreview {
