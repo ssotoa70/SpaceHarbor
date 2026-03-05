@@ -8,12 +8,26 @@ import type {
   AssetQueueRow,
   AuditEvent,
   DlqItem,
+  Episode,
+  EpisodeStatus,
   IncidentCoordination,
   IncidentGuidedActions,
   IncidentHandoff,
   IncidentNote,
   IngestResult,
   OutboxItem,
+  Project,
+  ProjectStatus,
+  ReviewStatus,
+  Sequence,
+  Shot,
+  ShotStatus,
+  Task,
+  TaskStatus,
+  TaskType,
+  Version,
+  VersionApproval,
+  VfxMetadata,
   WorkflowJob,
   WorkflowStatus
 } from "../../domain/models.js";
@@ -21,9 +35,20 @@ import { mapOutboxItemToOutboundPayload } from "../../integrations/outbound/payl
 import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
 import type { OutboundConfig, OutboundTarget } from "../../integrations/outbound/types.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
+import {
+  ImmutabilityViolationError,
+  ReferentialIntegrityError
+} from "../types.js";
 import type {
   AuditRetentionApplyResult,
   AuditRetentionPreview,
+  CreateEpisodeInput,
+  CreateProjectInput,
+  CreateSequenceInput,
+  CreateShotInput,
+  CreateTaskInput,
+  CreateVersionApprovalInput,
+  CreateVersionInput,
   FailureResult,
   IncidentGuidedActionsUpdate,
   IncidentHandoffUpdate,
@@ -123,6 +148,15 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   private incidentHandoff: IncidentHandoff = { ...DEFAULT_INCIDENT_HANDOFF };
   private readonly incidentNotes: IncidentNote[] = [];
   private readonly processedEventIds = new Set<string>();
+
+  // VFX hierarchy stores
+  private readonly projects = new Map<string, Project>();
+  private readonly episodes = new Map<string, Episode>();
+  private readonly sequences = new Map<string, Sequence>();
+  private readonly shots = new Map<string, Shot>();
+  private readonly tasks = new Map<string, Task>();
+  private readonly versions = new Map<string, Version>();
+  private readonly versionApprovals: VersionApproval[] = [];
   private readonly outboundCounters = {
     attempts: 0,
     success: 0,
@@ -157,6 +191,14 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.outboundCounters.byTarget.slack = { attempts: 0, success: 0, failure: 0 };
     this.outboundCounters.byTarget.teams = { attempts: 0, success: 0, failure: 0 };
     this.outboundCounters.byTarget.production = { attempts: 0, success: 0, failure: 0 };
+    // VFX hierarchy
+    this.projects.clear();
+    this.episodes.clear();
+    this.sequences.clear();
+    this.shots.clear();
+    this.tasks.clear();
+    this.versions.clear();
+    this.versionApprovals.length = 0;
   }
 
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult {
@@ -165,7 +207,10 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       id: randomUUID(),
       title: input.title,
       sourceUri: input.sourceUri,
-      createdAt: now.toISOString()
+      createdAt: now.toISOString(),
+      ...(input.shotId !== undefined && { shotId: input.shotId }),
+      ...(input.projectId !== undefined && { projectId: input.projectId }),
+      ...(input.versionLabel !== undefined && { versionLabel: input.versionLabel }),
     };
 
     const job: WorkflowJob = {
@@ -983,5 +1028,367 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   private incrementOutboundCounter(target: OutboundTarget, key: "attempts" | "success" | "failure"): void {
     this.outboundCounters[key] += 1;
     this.outboundCounters.byTarget[target][key] += 1;
+  }
+
+  // ---------------------------------------------------------------------------
+  // VFX Hierarchy methods
+  // ---------------------------------------------------------------------------
+
+  async createProject(input: CreateProjectInput, ctx: WriteContext): Promise<Project> {
+    const now = this.resolveNow(ctx).toISOString();
+    const project: Project = {
+      id: randomUUID(),
+      code: input.code,
+      name: input.name,
+      type: input.type,
+      status: input.status,
+      frameRate: input.frameRate ?? null,
+      colorSpace: input.colorSpace ?? null,
+      resolutionW: input.resolutionW ?? null,
+      resolutionH: input.resolutionH ?? null,
+      startDate: input.startDate ?? null,
+      deliveryDate: input.deliveryDate ?? null,
+      owner: input.owner ?? null,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.projects.set(project.id, project);
+    return project;
+  }
+
+  async getProjectById(id: string): Promise<Project | null> {
+    return this.projects.get(id) ?? null;
+  }
+
+  async listProjects(status?: ProjectStatus): Promise<Project[]> {
+    const all = Array.from(this.projects.values());
+    return status ? all.filter((p) => p.status === status) : all;
+  }
+
+  async createSequence(input: CreateSequenceInput, ctx: WriteContext): Promise<Sequence> {
+    const project = this.projects.get(input.projectId);
+    if (!project) {
+      throw new ReferentialIntegrityError(
+        `Project not found: ${input.projectId}`
+      );
+    }
+    if (input.episodeId && !this.episodes.has(input.episodeId)) {
+      throw new ReferentialIntegrityError(`Episode not found: ${input.episodeId}`);
+    }
+    const now = this.resolveNow(ctx).toISOString();
+    const seq: Sequence = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      code: input.code,
+      episode: input.episode ?? null,
+      episodeId: input.episodeId ?? null,
+      name: input.name ?? null,
+      status: input.status,
+      shotCount: 0,
+      frameRangeStart: input.frameRangeStart ?? null,
+      frameRangeEnd: input.frameRangeEnd ?? null,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.sequences.set(seq.id, seq);
+    return seq;
+  }
+
+  async getSequenceById(id: string): Promise<Sequence | null> {
+    return this.sequences.get(id) ?? null;
+  }
+
+  async listSequencesByProject(projectId: string): Promise<Sequence[]> {
+    return Array.from(this.sequences.values()).filter((s) => s.projectId === projectId);
+  }
+
+  async createShot(input: CreateShotInput, ctx: WriteContext): Promise<Shot> {
+    if (!this.projects.has(input.projectId)) {
+      throw new ReferentialIntegrityError(`Project not found: ${input.projectId}`);
+    }
+    if (!this.sequences.has(input.sequenceId)) {
+      throw new ReferentialIntegrityError(`Sequence not found: ${input.sequenceId}`);
+    }
+    const now = this.resolveNow(ctx).toISOString();
+    const shot: Shot = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      sequenceId: input.sequenceId,
+      code: input.code,
+      name: input.name ?? null,
+      status: input.status,
+      frameRangeStart: input.frameRangeStart,
+      frameRangeEnd: input.frameRangeEnd,
+      frameCount: input.frameCount,
+      frameRate: input.frameRate ?? null,
+      vendor: input.vendor ?? null,
+      lead: input.lead ?? null,
+      priority: input.priority ?? null,
+      dueDate: input.dueDate ?? null,
+      notes: input.notes ?? null,
+      latestVersionId: null,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.shots.set(shot.id, shot);
+    // Increment shotCount on the parent sequence
+    const seq = this.sequences.get(input.sequenceId)!;
+    this.sequences.set(seq.id, { ...seq, shotCount: seq.shotCount + 1, updatedAt: now });
+    return shot;
+  }
+
+  async getShotById(id: string): Promise<Shot | null> {
+    return this.shots.get(id) ?? null;
+  }
+
+  async listShotsBySequence(sequenceId: string): Promise<Shot[]> {
+    return Array.from(this.shots.values()).filter((s) => s.sequenceId === sequenceId);
+  }
+
+  async updateShotStatus(shotId: string, status: ShotStatus, ctx: WriteContext): Promise<Shot | null> {
+    const shot = this.shots.get(shotId);
+    if (!shot) return null;
+    const updated = { ...shot, status, updatedAt: this.resolveNow(ctx).toISOString() };
+    this.shots.set(shotId, updated);
+    return updated;
+  }
+
+  async createVersion(input: CreateVersionInput, ctx: WriteContext): Promise<Version> {
+    if (!this.shots.has(input.shotId)) {
+      throw new ReferentialIntegrityError(`Shot not found: ${input.shotId}`);
+    }
+    // Auto-increment version_number per shot
+    const existingVersions = Array.from(this.versions.values()).filter(
+      (v) => v.shotId === input.shotId
+    );
+    const versionNumber =
+      existingVersions.length === 0
+        ? 1
+        : Math.max(...existingVersions.map((v) => v.versionNumber)) + 1;
+
+    const now = this.resolveNow(ctx).toISOString();
+    const version: Version = {
+      id: randomUUID(),
+      shotId: input.shotId,
+      projectId: input.projectId,
+      sequenceId: input.sequenceId,
+      versionLabel: input.versionLabel,
+      versionNumber,
+      parentVersionId: input.parentVersionId ?? null,
+      status: input.status,
+      mediaType: input.mediaType,
+      codec: null,
+      resolutionW: null,
+      resolutionH: null,
+      frameRate: null,
+      frameRangeStart: null,
+      frameRangeEnd: null,
+      headHandle: input.headHandle ?? null,
+      tailHandle: input.tailHandle ?? null,
+      pixelAspectRatio: null,
+      displayWindow: null,
+      dataWindow: null,
+      compressionType: null,
+      colorSpace: null,
+      bitDepth: null,
+      channelCount: null,
+      fileSizeBytes: null,
+      md5Checksum: null,
+      vastElementHandle: null,
+      vastPath: null,
+      createdBy: input.createdBy,
+      createdAt: now,
+      publishedAt: null,
+      notes: input.notes ?? null,
+      taskId: input.taskId ?? null,
+      reviewStatus: input.reviewStatus ?? "wip"
+    };
+    this.versions.set(version.id, version);
+    // Update shot's latestVersionId
+    const shot = this.shots.get(input.shotId)!;
+    this.shots.set(shot.id, { ...shot, latestVersionId: version.id, updatedAt: now });
+    return version;
+  }
+
+  async getVersionById(id: string): Promise<Version | null> {
+    return this.versions.get(id) ?? null;
+  }
+
+  async listVersionsByShot(shotId: string): Promise<Version[]> {
+    return Array.from(this.versions.values())
+      .filter((v) => v.shotId === shotId)
+      .sort((a, b) => a.versionNumber - b.versionNumber);
+  }
+
+  async publishVersion(versionId: string, ctx: WriteContext): Promise<Version | null> {
+    const version = this.versions.get(versionId);
+    if (!version) return null;
+    if (version.publishedAt !== null) {
+      throw new ImmutabilityViolationError(
+        `Version ${versionId} is already published at ${version.publishedAt}`
+      );
+    }
+    const now = this.resolveNow(ctx).toISOString();
+    const published = { ...version, status: "published" as const, publishedAt: now };
+    this.versions.set(versionId, published);
+    return published;
+  }
+
+  async updateVersionReviewStatus(versionId: string, status: ReviewStatus, _ctx: WriteContext): Promise<Version | null> {
+    const version = this.versions.get(versionId);
+    if (!version) return null;
+    const updated = { ...version, reviewStatus: status };
+    this.versions.set(versionId, updated);
+    return updated;
+  }
+
+  async updateVersionTechnicalMetadata(
+    versionId: string,
+    meta: Partial<VfxMetadata>,
+    ctx: WriteContext
+  ): Promise<Version | null> {
+    const version = this.versions.get(versionId);
+    if (!version) return null;
+    if (version.publishedAt !== null) {
+      throw new ImmutabilityViolationError(
+        `Cannot update published version ${versionId}`
+      );
+    }
+    const updated: Version = {
+      ...version,
+      codec: meta.codec ?? version.codec,
+      resolutionW: meta.resolution?.width ?? version.resolutionW,
+      resolutionH: meta.resolution?.height ?? version.resolutionH,
+      frameRate: meta.frame_rate ?? version.frameRate,
+      frameRangeStart: meta.frame_range?.start ?? version.frameRangeStart,
+      frameRangeEnd: meta.frame_range?.end ?? version.frameRangeEnd,
+      headHandle: meta.frame_head_handle ?? version.headHandle,
+      tailHandle: meta.frame_tail_handle ?? version.tailHandle,
+      pixelAspectRatio: meta.pixel_aspect_ratio ?? version.pixelAspectRatio,
+      compressionType: meta.compression_type ?? version.compressionType,
+      colorSpace: meta.color_space ?? version.colorSpace,
+      bitDepth: meta.bit_depth ?? version.bitDepth,
+      fileSizeBytes: meta.file_size_bytes ?? version.fileSizeBytes,
+      md5Checksum: meta.md5_checksum ?? version.md5Checksum,
+      displayWindow: meta.display_window
+        ? { x: meta.display_window.x, y: meta.display_window.y, w: meta.display_window.width, h: meta.display_window.height }
+        : version.displayWindow,
+      dataWindow: meta.data_window
+        ? { x: meta.data_window.x, y: meta.data_window.y, w: meta.data_window.width, h: meta.data_window.height }
+        : version.dataWindow
+    };
+    this.versions.set(versionId, updated);
+    return updated;
+  }
+
+  async createVersionApproval(
+    input: CreateVersionApprovalInput,
+    ctx: WriteContext
+  ): Promise<VersionApproval> {
+    if (!this.versions.has(input.versionId)) {
+      throw new ReferentialIntegrityError(`Version not found: ${input.versionId}`);
+    }
+    const approval: VersionApproval = {
+      id: randomUUID(),
+      versionId: input.versionId,
+      shotId: input.shotId,
+      projectId: input.projectId,
+      action: input.action,
+      performedBy: input.performedBy,
+      role: input.role ?? null,
+      note: input.note ?? null,
+      at: this.resolveNow(ctx).toISOString()
+    };
+    this.versionApprovals.push(approval);
+    return approval;
+  }
+
+  async listApprovalsByVersion(versionId: string): Promise<VersionApproval[]> {
+    return this.versionApprovals.filter((a) => a.versionId === versionId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Episode methods (SERGIO-136)
+  // ---------------------------------------------------------------------------
+
+  async createEpisode(input: CreateEpisodeInput, ctx: WriteContext): Promise<Episode> {
+    if (!this.projects.has(input.projectId)) {
+      throw new ReferentialIntegrityError(`Project not found: ${input.projectId}`);
+    }
+    const now = this.resolveNow(ctx).toISOString();
+    const episode: Episode = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      code: input.code,
+      name: input.name ?? null,
+      status: input.status,
+      sequenceCount: 0,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.episodes.set(episode.id, episode);
+    return episode;
+  }
+
+  async getEpisodeById(id: string): Promise<Episode | null> {
+    return this.episodes.get(id) ?? null;
+  }
+
+  async listEpisodesByProject(projectId: string): Promise<Episode[]> {
+    return Array.from(this.episodes.values()).filter((e) => e.projectId === projectId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Task methods (SERGIO-136)
+  // ---------------------------------------------------------------------------
+
+  async createTask(input: CreateTaskInput, ctx: WriteContext): Promise<Task> {
+    if (!this.shots.has(input.shotId)) {
+      throw new ReferentialIntegrityError(`Shot not found: ${input.shotId}`);
+    }
+    const existingTasks = Array.from(this.tasks.values()).filter(
+      (t) => t.shotId === input.shotId
+    );
+    const taskNumber =
+      existingTasks.length === 0
+        ? 1
+        : Math.max(...existingTasks.map((t) => t.taskNumber)) + 1;
+
+    const now = this.resolveNow(ctx).toISOString();
+    const task: Task = {
+      id: randomUUID(),
+      shotId: input.shotId,
+      projectId: input.projectId,
+      sequenceId: input.sequenceId,
+      code: input.code,
+      type: input.type,
+      status: input.status,
+      assignee: input.assignee ?? null,
+      dueDate: input.dueDate ?? null,
+      taskNumber,
+      notes: input.notes ?? null,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.tasks.set(task.id, task);
+    return task;
+  }
+
+  async getTaskById(id: string): Promise<Task | null> {
+    return this.tasks.get(id) ?? null;
+  }
+
+  async listTasksByShot(shotId: string): Promise<Task[]> {
+    return Array.from(this.tasks.values())
+      .filter((t) => t.shotId === shotId)
+      .sort((a, b) => a.taskNumber - b.taskNumber);
+  }
+
+  async updateTaskStatus(taskId: string, status: TaskStatus, ctx: WriteContext): Promise<Task | null> {
+    const task = this.tasks.get(taskId);
+    if (!task) return null;
+    const updated = { ...task, status, updatedAt: this.resolveNow(ctx).toISOString() };
+    this.tasks.set(taskId, updated);
+    return updated;
   }
 }

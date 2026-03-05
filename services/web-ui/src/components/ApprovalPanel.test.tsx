@@ -88,4 +88,24 @@ describe("ApprovalPanel", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("Server error");
     });
   });
+
+  it("shows WIP review status badge when reviewStatus is wip", () => {
+    render(<ApprovalPanel asset={{ ...mockAsset, reviewStatus: "wip" }} onActionComplete={vi.fn()} />);
+    expect(screen.getByTestId("review-status-badge")).toHaveTextContent("WIP");
+  });
+
+  it("shows Internal Review badge when reviewStatus is internal_review", () => {
+    render(<ApprovalPanel asset={{ ...mockAsset, reviewStatus: "internal_review" }} onActionComplete={vi.fn()} />);
+    expect(screen.getByTestId("review-status-badge")).toHaveTextContent("Internal Review");
+  });
+
+  it("shows Approved badge when reviewStatus is approved", () => {
+    render(<ApprovalPanel asset={{ ...mockAsset, reviewStatus: "approved" }} onActionComplete={vi.fn()} />);
+    expect(screen.getByTestId("review-status-badge")).toHaveTextContent("Approved");
+  });
+
+  it("shows no review status badge when reviewStatus is absent", () => {
+    render(<ApprovalPanel asset={mockAsset} onActionComplete={vi.fn()} />);
+    expect(screen.queryByTestId("review-status-badge")).not.toBeInTheDocument();
+  });
 });

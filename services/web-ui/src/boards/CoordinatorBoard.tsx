@@ -95,8 +95,8 @@ export function CoordinatorBoard({ assets, nowMs, onReplayJob }: CoordinatorBoar
   }, [blockerReasonFilter, ownerFilter, priorityFilter, query, readinessFilter, rows, statusFilter, vendorFilter]);
 
   const statusOptions = useMemo(() => toSortedUniqueValues(rows.map((row) => row.status)), [rows]);
-  const ownerOptions = useMemo(() => toSortedUniqueValues(rows.map((row) => row.productionMetadata.owner)), [rows]);
-  const vendorOptions = useMemo(() => toSortedUniqueValues(rows.map((row) => row.productionMetadata.vendor)), [rows]);
+  const ownerOptions = useMemo(() => toSortedUniqueValues(rows.map((row) => row.productionMetadata.owner ?? null)), [rows]);
+  const vendorOptions = useMemo(() => toSortedUniqueValues(rows.map((row) => row.productionMetadata.vendor ?? null)), [rows]);
   const blockerReasonOptions = useMemo(
     () =>
       toSortedUniqueValues(rows.flatMap((row) => row.dependencyReadiness.reasons)) as DependencyReadinessReason[],

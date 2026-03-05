@@ -327,29 +327,43 @@ export function App() {
   }
 
   return (
-    <main className="layout">
-      <header className="hero">
-        <h1>AssetHarbor</h1>
-        <p>Queue-first media operations for ingest, workflow, and audit visibility.</p>
+    <div className="appshell">
+      <header className="appshell__topbar">
+        <span className="appshell__brand">AssetHarbor</span>
+        <span
+          className={`appshell__health appshell__health--${health.state}`}
+          aria-label={`Health: ${health.state}`}
+        >
+          &#9679;
+        </span>
+      </header>
+
+      <aside className="appshell__sidebar">
         <fieldset className="role-selector" role="radiogroup" aria-label="Role view">
-          <legend>Role view</legend>
+          <legend className="visually-hidden">Role view</legend>
           <div className="role-selector-options">
             {roleOptions.map((roleOption) => (
-              <label key={roleOption.value} className="role-selector-option">
+              <label
+                key={roleOption.value}
+                className={`appshell__nav-item${selectedRole === roleOption.value ? " appshell__nav-item--active" : ""}`}
+                aria-current={selectedRole === roleOption.value ? "page" : undefined}
+              >
                 <input
                   type="radio"
                   name="role-view"
                   value={roleOption.value}
                   checked={selectedRole === roleOption.value}
                   onChange={() => setSelectedRole(roleOption.value)}
+                  className="visually-hidden"
                 />
                 {roleOption.label}
               </label>
             ))}
           </div>
         </fieldset>
-      </header>
+      </aside>
 
+      <main className="appshell__main">
       <section className="panel" aria-labelledby="health-heading">
         <h2 id="health-heading">Operational Health</h2>
         <div className={`health-strip health-${health.state}`}>
@@ -586,6 +600,7 @@ export function App() {
           )}
         </ul>
       </section>
-    </main>
+      </main>
+    </div>
   );
 }

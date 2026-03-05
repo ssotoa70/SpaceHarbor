@@ -215,7 +215,7 @@ export function toSupervisorBlockerReasonSummaryItems(summary: SupervisorSummary
 }
 
 export function toQueueViewRow(asset: AssetRow, nowMs: number): QueueViewRow {
-  const ageMinutes = deriveAgeMinutes(asset.productionMetadata.dueDate, nowMs);
+  const ageMinutes = deriveAgeMinutes(asset.productionMetadata.dueDate ?? null, nowMs);
   const agingBucket = deriveAgingBucket(ageMinutes);
   return {
     ...asset,

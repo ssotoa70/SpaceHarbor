@@ -38,7 +38,11 @@ export const assetSchema = {
     id: { type: "string" },
     title: { type: "string" },
     sourceUri: { type: "string" },
-    createdAt: { type: "string", format: "date-time" }
+    createdAt: { type: "string", format: "date-time" },
+    // Optional VFX hierarchy context — populated when ingested via ScannerFunction
+    shotId: { type: "string" },
+    projectId: { type: "string" },
+    versionLabel: { type: "string" }
   }
 } as const;
 

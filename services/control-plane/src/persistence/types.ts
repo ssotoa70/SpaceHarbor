@@ -1,18 +1,200 @@
 import type {
   AnnotationHookMetadata,
+  ApprovalAction,
+  Asset,
+  AssetPriority,
   AssetQueueRow,
   AuditEvent,
   DlqItem,
+  Episode,
+  EpisodeStatus,
   IncidentCoordination,
   IncidentGuidedActions,
   IncidentHandoff,
   IncidentHandoffState,
   IncidentNote,
   IngestResult,
+  MediaType,
   OutboxItem,
+  Project,
+  ProjectStatus,
+  ProjectType,
+  ReviewStatus,
+  Sequence,
+  SequenceStatus,
+  Shot,
+  ShotStatus,
+  Task,
+  TaskStatus,
+  TaskType,
+  Version,
+  VersionApproval,
+  VersionStatus,
+  VfxMetadata,
   WorkflowJob,
   WorkflowStatus
 } from "../domain/models.js";
+
+// ---------------------------------------------------------------------------
+// VFX Hierarchy error classes
+// ---------------------------------------------------------------------------
+
+export class ReferentialIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReferentialIntegrityError";
+  }
+}
+
+export class ImmutabilityViolationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ImmutabilityViolationError";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VFX Hierarchy input types
+// ---------------------------------------------------------------------------
+
+export interface CreateProjectInput {
+  code: string;
+  name: string;
+  type: ProjectType;
+  status: ProjectStatus;
+  frameRate?: number;
+  colorSpace?: string;
+  resolutionW?: number;
+  resolutionH?: number;
+  startDate?: string;
+  deliveryDate?: string;
+  owner?: string;
+}
+
+export interface CreateSequenceInput {
+  projectId: string;
+  code: string;
+  episode?: string;
+  episodeId?: string;
+  name?: string;
+  status: SequenceStatus;
+  frameRangeStart?: number;
+  frameRangeEnd?: number;
+}
+
+export interface CreateShotInput {
+  projectId: string;
+  sequenceId: string;
+  code: string;
+  name?: string;
+  status: ShotStatus;
+  frameRangeStart: number;
+  frameRangeEnd: number;
+  frameCount: number;
+  frameRate?: number;
+  vendor?: string;
+  lead?: string;
+  priority?: AssetPriority;
+  dueDate?: string;
+  notes?: string;
+}
+
+export interface CreateVersionInput {
+  shotId: string;
+  projectId: string;
+  sequenceId: string;
+  versionLabel: string;
+  parentVersionId?: string;
+  status: VersionStatus;
+  mediaType: MediaType;
+  createdBy: string;
+  notes?: string;
+  taskId?: string;
+  reviewStatus?: ReviewStatus;
+  headHandle?: number;
+  tailHandle?: number;
+}
+
+export interface CreateEpisodeInput {
+  projectId: string;
+  code: string;
+  name?: string;
+  status: EpisodeStatus;
+}
+
+export interface CreateTaskInput {
+  shotId: string;
+  projectId: string;
+  sequenceId: string;
+  code: string;
+  type: TaskType;
+  status: TaskStatus;
+  assignee?: string;
+  dueDate?: string;
+  notes?: string;
+}
+
+export interface CreateVersionApprovalInput {
+  versionId: string;
+  shotId: string;
+  projectId: string;
+  action: ApprovalAction;
+  performedBy: string;
+  role?: string;
+  note?: string;
+}
+
+// ---------------------------------------------------------------------------
+// VFX Hierarchy adapter interface (subset implemented by all adapters)
+// ---------------------------------------------------------------------------
+
+export interface VfxHierarchyAdapter {
+  // Projects
+  createProject(input: CreateProjectInput, ctx: WriteContext): Promise<Project>;
+  getProjectById(id: string): Promise<Project | null>;
+  listProjects(status?: ProjectStatus): Promise<Project[]>;
+
+  // Sequences
+  createSequence(input: CreateSequenceInput, ctx: WriteContext): Promise<Sequence>;
+  getSequenceById(id: string): Promise<Sequence | null>;
+  listSequencesByProject(projectId: string): Promise<Sequence[]>;
+
+  // Shots
+  createShot(input: CreateShotInput, ctx: WriteContext): Promise<Shot>;
+  getShotById(id: string): Promise<Shot | null>;
+  listShotsBySequence(sequenceId: string): Promise<Shot[]>;
+  updateShotStatus(shotId: string, status: ShotStatus, ctx: WriteContext): Promise<Shot | null>;
+
+  // Versions
+  createVersion(input: CreateVersionInput, ctx: WriteContext): Promise<Version>;
+  getVersionById(id: string): Promise<Version | null>;
+  listVersionsByShot(shotId: string): Promise<Version[]>;
+  publishVersion(versionId: string, ctx: WriteContext): Promise<Version | null>;
+  updateVersionReviewStatus(versionId: string, status: ReviewStatus, ctx: WriteContext): Promise<Version | null>;
+  updateVersionTechnicalMetadata(
+    versionId: string,
+    meta: Partial<VfxMetadata>,
+    ctx: WriteContext
+  ): Promise<Version | null>;
+
+  // Approvals
+  createVersionApproval(
+    input: CreateVersionApprovalInput,
+    ctx: WriteContext
+  ): Promise<VersionApproval>;
+  listApprovalsByVersion(versionId: string): Promise<VersionApproval[]>;
+
+  // Episodes (SERGIO-136)
+  createEpisode(input: CreateEpisodeInput, ctx: WriteContext): Promise<Episode>;
+  getEpisodeById(id: string): Promise<Episode | null>;
+  listEpisodesByProject(projectId: string): Promise<Episode[]>;
+
+  // Tasks (SERGIO-136)
+  createTask(input: CreateTaskInput, ctx: WriteContext): Promise<Task>;
+  getTaskById(id: string): Promise<Task | null>;
+  listTasksByShot(shotId: string): Promise<Task[]>;
+  updateTaskStatus(taskId: string, status: TaskStatus, ctx: WriteContext): Promise<Task | null>;
+}
 
 export type PersistenceBackend = "local" | "vast";
 
@@ -20,6 +202,13 @@ export interface IngestInput {
   title: string;
   sourceUri: string;
   annotationHook?: AnnotationHookMetadata | null;
+  // Optional — provided by ScannerFunction (VAST DataEngine trigger)
+  shotId?: string;
+  projectId?: string;
+  versionLabel?: string;
+  fileSizeBytes?: number;
+  md5Checksum?: string;
+  createdBy?: string;
 }
 
 export interface WriteContext {
@@ -104,12 +293,16 @@ export interface AuditRetentionApplyResult {
   remainingCount: number;
 }
 
-export interface PersistenceAdapter {
+export interface PersistenceAdapter extends VfxHierarchyAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult;
-  getAssetById(assetId: string): any | null;
-  updateAsset(assetId: string, updates: any, context: WriteContext): any | null;
+  getAssetById(assetId: string): Asset | null;
+  updateAsset(
+    assetId: string,
+    updates: Partial<Pick<Asset, "metadata" | "version" | "integrity">>,
+    context: WriteContext
+  ): Asset | null;
   setJobStatus(
     jobId: string,
     status: WorkflowStatus,

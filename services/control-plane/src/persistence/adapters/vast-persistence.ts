@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { AuditEvent } from "../../domain/models.js";
+import type { AuditEvent, Episode, Project, ProjectStatus, ReviewStatus, Sequence, Shot, ShotStatus, Task, TaskStatus, Version, VersionApproval, VfxMetadata } from "../../domain/models.js";
 import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
 import type { OutboundConfig } from "../../integrations/outbound/types.js";
 import type { AuditSignal } from "../../domain/models.js";
@@ -9,6 +9,13 @@ import { LocalPersistenceAdapter } from "./local-persistence.js";
 import type {
   AuditRetentionApplyResult,
   AuditRetentionPreview,
+  CreateEpisodeInput,
+  CreateProjectInput,
+  CreateSequenceInput,
+  CreateShotInput,
+  CreateTaskInput,
+  CreateVersionApprovalInput,
+  CreateVersionInput,
   FailureResult,
   IncidentGuidedActionsUpdate,
   IncidentHandoffUpdate,
@@ -347,5 +354,118 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     }
 
     return this.config.fallbackToLocal;
+  }
+
+  // ---------------------------------------------------------------------------
+  // VFX Hierarchy — delegate to localFallback (VAST Trino implementation pending)
+  // ---------------------------------------------------------------------------
+
+  async createProject(input: CreateProjectInput, ctx: WriteContext): Promise<Project> {
+    return this.localFallback.createProject(input, ctx);
+  }
+
+  async getProjectById(id: string): Promise<Project | null> {
+    return this.localFallback.getProjectById(id);
+  }
+
+  async listProjects(status?: ProjectStatus): Promise<Project[]> {
+    return this.localFallback.listProjects(status);
+  }
+
+  async createSequence(input: CreateSequenceInput, ctx: WriteContext): Promise<Sequence> {
+    return this.localFallback.createSequence(input, ctx);
+  }
+
+  async getSequenceById(id: string): Promise<Sequence | null> {
+    return this.localFallback.getSequenceById(id);
+  }
+
+  async listSequencesByProject(projectId: string): Promise<Sequence[]> {
+    return this.localFallback.listSequencesByProject(projectId);
+  }
+
+  async createShot(input: CreateShotInput, ctx: WriteContext): Promise<Shot> {
+    return this.localFallback.createShot(input, ctx);
+  }
+
+  async getShotById(id: string): Promise<Shot | null> {
+    return this.localFallback.getShotById(id);
+  }
+
+  async listShotsBySequence(sequenceId: string): Promise<Shot[]> {
+    return this.localFallback.listShotsBySequence(sequenceId);
+  }
+
+  async updateShotStatus(shotId: string, status: ShotStatus, ctx: WriteContext): Promise<Shot | null> {
+    return this.localFallback.updateShotStatus(shotId, status, ctx);
+  }
+
+  async createVersion(input: CreateVersionInput, ctx: WriteContext): Promise<Version> {
+    return this.localFallback.createVersion(input, ctx);
+  }
+
+  async getVersionById(id: string): Promise<Version | null> {
+    return this.localFallback.getVersionById(id);
+  }
+
+  async listVersionsByShot(shotId: string): Promise<Version[]> {
+    return this.localFallback.listVersionsByShot(shotId);
+  }
+
+  async publishVersion(versionId: string, ctx: WriteContext): Promise<Version | null> {
+    return this.localFallback.publishVersion(versionId, ctx);
+  }
+
+  async updateVersionReviewStatus(versionId: string, status: ReviewStatus, ctx: WriteContext): Promise<Version | null> {
+    return this.localFallback.updateVersionReviewStatus(versionId, status, ctx);
+  }
+
+  async updateVersionTechnicalMetadata(
+    versionId: string,
+    meta: Partial<VfxMetadata>,
+    ctx: WriteContext
+  ): Promise<Version | null> {
+    return this.localFallback.updateVersionTechnicalMetadata(versionId, meta, ctx);
+  }
+
+  async createVersionApproval(
+    input: CreateVersionApprovalInput,
+    ctx: WriteContext
+  ): Promise<VersionApproval> {
+    return this.localFallback.createVersionApproval(input, ctx);
+  }
+
+  async listApprovalsByVersion(versionId: string): Promise<VersionApproval[]> {
+    return this.localFallback.listApprovalsByVersion(versionId);
+  }
+
+  // Episode stubs (SERGIO-136)
+  async createEpisode(input: CreateEpisodeInput, ctx: WriteContext): Promise<Episode> {
+    return this.localFallback.createEpisode(input, ctx);
+  }
+
+  async getEpisodeById(id: string): Promise<Episode | null> {
+    return this.localFallback.getEpisodeById(id);
+  }
+
+  async listEpisodesByProject(projectId: string): Promise<Episode[]> {
+    return this.localFallback.listEpisodesByProject(projectId);
+  }
+
+  // Task stubs (SERGIO-136)
+  async createTask(input: CreateTaskInput, ctx: WriteContext): Promise<Task> {
+    return this.localFallback.createTask(input, ctx);
+  }
+
+  async getTaskById(id: string): Promise<Task | null> {
+    return this.localFallback.getTaskById(id);
+  }
+
+  async listTasksByShot(shotId: string): Promise<Task[]> {
+    return this.localFallback.listTasksByShot(shotId);
+  }
+
+  async updateTaskStatus(taskId: string, status: TaskStatus, ctx: WriteContext): Promise<Task | null> {
+    return this.localFallback.updateTaskStatus(taskId, status, ctx);
   }
 }
