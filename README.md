@@ -4,126 +4,171 @@
 [![CD](https://github.com/ssotoa70/assetharbor/actions/workflows/cd.yml/badge.svg)](https://github.com/ssotoa70/assetharbor/actions/workflows/cd.yml)
 [![Wiki 2.0](https://img.shields.io/badge/docs-Wiki%202.0-blue)](https://github.com/ssotoa70/assetharbor/wiki)
 
-Lightweight, VAST-native MAM MVP with three deployables:
+A **VAST-native Media Asset Management (MAM)** system designed for Post-Production and VFX studios. AssetHarbor orchestrates VAST's core services—**VAST Database**, **VAST DataEngine**, and **VAST Event Broker**—to provide serverless media processing, durable event-driven workflows, and immutable metadata linking via element handles.
 
-- `control-plane`
-- `media-worker`
-- `web-ui`
+## Architecture
 
-Runtime services are containerized and orchestrated via Docker Compose.
+AssetHarbor is built on three core VAST services:
 
-## Quick start
+- **VAST Database (VastDB/Trino)** — persistent storage for assets, jobs, metadata, and audit logs
+- **VAST DataEngine** — serverless media processing (exr_inspector, ASR, transcode) triggered automatically by VAST element events
+- **VAST Event Broker** — Kafka-compatible streaming for DataEngine completion events and workflow coordination
 
-1. Copy `.env.example` to `.env` and set persistence backend and VAST endpoints/token.
-2. Build and start containers:
+**Processing flow:**
+
+```
+Artist ingest → POST /api/v1/assets/ingest
+  → Asset record created in VastDB
+  → File placed in VAST view (S3)
+  → VAST element trigger fires (ElementCreated on *.exr / *.mov / audio)
+  → VAST DataEngine runs registered pipeline
+  → Results written to VastDB
+  → VAST Event Broker publishes completion event
+  → Control-plane VastEventSubscriber consumes event
+  → Updates job status + asset metadata
+  → Web UI approval queue reflects result
+```
+
+## Services
+
+Three containerized deployables orchestrated via Docker Compose:
+
+| Service | Tech | Port | Role |
+|---------|------|------|------|
+| `control-plane` | Fastify / TypeScript | 8080 | REST API, Kafka consumer, approval workflow, audit |
+| `media-worker` | Python | — | DEV SIMULATION ONLY—local mock when no VAST cluster |
+| `web-ui` | React / Vite | 4173 | Role-based UI (Operator, Coordinator, Supervisor) |
+
+**Note:** In a production VAST environment, `media-worker` is not deployed. Processing is fully event-driven via VAST DataEngine and the Event Broker.
+
+## Deployment Modes
+
+**Production (VAST cluster available):**
+- Set `ASSETHARBOR_PERSISTENCE_BACKEND=vast`
+- Configure VAST endpoints (see Environment Variables below)
+- `media-worker` service is optional (not deployed in docker-compose)
+- Control-plane subscribes to VAST Event Broker for DataEngine completion events
+
+**Development (local/no VAST cluster):**
+- Set `ASSETHARBOR_PERSISTENCE_BACKEND=local`
+- `media-worker` simulates VAST element triggers and DataEngine pipeline locally
+- Posts mock CloudEvents to `POST /api/v1/events/vast-dataengine` for local testing
+
+## Quick Start
+
+1. Copy `.env.example` to `.env` and configure:
+
+```bash
+cp .env.example .env
+```
+
+2. Set required environment variables (see below).
+
+3. Build and start services:
 
 ```bash
 docker compose up --build
 ```
 
-3. Open UI at `http://localhost:4173`.
-4. Control-plane API runs at `http://localhost:8080`.
+4. Verify services are healthy:
+   - API health: `http://localhost:8080/health`
+   - Web UI: `http://localhost:4173`
+   - API docs (Swagger): `http://localhost:8080/docs` (non-production only)
 
-## Test commands
+## Environment Variables
 
-- Workspace preflight: `npm run check:workspace`
-- Root compose contract: `npm run test:compose`
-- Root docs contract: `npm run test:docs`
-- Contract suite (API + events): `npm run test:contracts`
-- Control-plane tests: `npm run test:control-plane`
-- Media-worker tests: `npm run test:worker`
-- Web-ui tests: `npm run test:web-ui`
-- Full suite: `npm run test:all`
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ASSETHARBOR_PERSISTENCE_BACKEND` | `local` | Persistence adapter: `local` (in-memory, dev) or `vast` (production) |
+| `ASSETHARBOR_VAST_STRICT` | `false` | If true, fail hard at startup if VAST endpoints unavailable |
+| `ASSETHARBOR_API_KEY` | (empty) | Optional API key; if set, all POST endpoints require `x-api-key` header |
+| `CONTROL_PLANE_API_KEY` | (empty) | API key for media-worker to call control-plane (in secured environments) |
+| `VITE_API_KEY` | (empty) | API key for web-ui to call control-plane (in secured environments) |
+| `VAST_DATABASE_URL` | (empty) | VAST Database (Trino REST API) endpoint, e.g., `https://vast-db.example/api` |
+| `VAST_EVENT_BROKER_URL` | (empty) | VAST Event Broker (Kafka-compatible) endpoint, e.g., `https://vast-events.example/api` |
+| `VAST_DATAENGINE_URL` | (empty) | VAST DataEngine REST API endpoint, e.g., `https://vast-engine.example/api` |
+| `VAST_API_TOKEN` | (empty) | Authentication token for all VAST endpoints |
 
-## Worktree safety checklist
+## API Routes
 
-Run this before editing code to avoid writing in the wrong directory:
+### Asset Management
+
+- `POST /api/v1/assets/ingest` — Create new asset ingest job
+- `GET /api/v1/assets` — List assets with current status
+
+### Job Queue
+
+- `GET /api/v1/jobs/pending` — Poll pending jobs (for media-worker)
+- `GET /api/v1/jobs/:id` — Get full job state
+- `POST /api/v1/queue/claim` — Claim a pending job (begin processing)
+- `POST /api/v1/jobs/:id/heartbeat` — Extend worker lease
+- `POST /api/v1/queue/reap-stale` — Requeue jobs with expired leases
+- `POST /api/v1/jobs/:id/replay` — Replay failed job
+
+### Dead Letter Queue
+
+- `GET /api/v1/dlq` — List dead-lettered jobs (exhausted retries)
+
+### Events
+
+- `POST /api/v1/events` — Publish event (dev/test only)
+- `POST /api/v1/events/vast-dataengine` — Receive simulated VAST DataEngine completion (local dev mode)
+
+### Audit & Observability
+
+- `GET /api/v1/audit` — Audit trail with correlation IDs
+- `GET /api/v1/metrics` — Queue, job, DLQ, and outbox counters
+- `GET /health` — Service health check
+
+### Legacy Aliases
+
+For backward compatibility with existing internal clients:
+
+- `POST /assets/ingest` → `POST /api/v1/assets/ingest`
+- `GET /assets` → `GET /api/v1/assets`
+- `GET /jobs/pending` → `GET /api/v1/jobs/pending`
+- `GET /jobs/:id` → `GET /api/v1/jobs/:id`
+- `POST /events` → `POST /api/v1/events`
+- `GET /audit` → `GET /api/v1/audit`
+
+## Test Commands
 
 ```bash
-npm run check:workspace
-git worktree list
-git branch --show-current
+npm run check:workspace          # Workspace preflight
+npm run test:compose             # Docker Compose contract
+npm run test:docs                # Documentation contract
+npm run test:contracts           # API + event contracts
+npm run test:control-plane       # Control-plane unit + integration
+npm run test:worker              # Media-worker unit tests
+npm run test:web-ui              # Web-UI component tests
+npm run test:all                 # Full suite
 ```
 
-Optional strict mode (only allow a specific parent path):
+## Security
 
-```bash
-EXPECTED_WORKTREE_PREFIX="$HOME/.config/superpowers/worktrees/AssetHarbor" npm run check:workspace
-```
-
-## Core routes
-
-- `POST /api/v1/assets/ingest`
-- `GET /api/v1/assets`
-- `GET /api/v1/jobs/pending`
-- `GET /api/v1/jobs/:id`
-- `POST /api/v1/jobs/:id/heartbeat`
-- `POST /api/v1/jobs/:id/replay`
-- `POST /api/v1/queue/claim`
-- `POST /api/v1/queue/reap-stale`
-- `GET /api/v1/dlq`
-- `POST /api/v1/events`
-- `GET /api/v1/outbox`
-- `POST /api/v1/outbox/publish`
-- `GET /api/v1/audit`
-- `GET /api/v1/metrics`
-
-Legacy-compatible aliases (for existing internal clients):
-
-- `POST /assets/ingest`
-- `GET /assets`
-- `GET /jobs/pending`
-- `GET /jobs/:id`
-- `POST /events`
-- `GET /audit`
-
-## Persistence backend
-
-- `ASSETHARBOR_PERSISTENCE_BACKEND=local` uses local in-memory adapter.
-- `ASSETHARBOR_PERSISTENCE_BACKEND=vast` uses VAST adapter mode.
-- `ASSETHARBOR_VAST_STRICT=true` enforces required VAST endpoint configuration at startup.
-- `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=true` enables continuity fallback when VAST workflow client operations fail.
-- `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL=false` enables fail-fast behavior for VAST workflow client failures.
-
-## Security baseline
-
-- Set `ASSETHARBOR_API_KEY` to require `x-api-key` on all POST API endpoints (v1 and legacy aliases).
-- Configure `CONTROL_PLANE_API_KEY` for media-worker requests in secured environments.
-- Configure `VITE_API_KEY` for web-ui requests in secured environments.
-
-## Observability baseline
-
-- `x-correlation-id` is echoed on API responses and propagated through workflow/audit traces.
-- `GET /api/v1/metrics` returns queue, job, DLQ, and outbox counters.
-- `GET /api/v1/audit` includes `vast fallback` markers when continuity fallback is used.
+- API key (`ASSETHARBOR_API_KEY`): protects POST endpoints
+- Request correlation ID (`x-correlation-id`): propagated through all workflows and audit logs
+- Service-to-service auth: use `CONTROL_PLANE_API_KEY` and `VITE_API_KEY` in secured deployments
+- Audit trail (`GET /api/v1/audit`): all state changes logged with user, timestamp, and correlation ID
 
 ## CI/CD
 
-- `ci.yml` validates compose config, docs checks, API/event contract checks, and all service tests.
-- `ci.yml` also enforces PR guardrails to block stale/conflicted (`dirty`/`behind`) and oversized PRs before full verification.
-- `cd.yml` builds and publishes container images to GHCR for each service on `main` and semantic version tags.
+- `ci.yml` — Validates Docker Compose config, docs, API/event contracts, and all service tests
+- `cd.yml` — Builds and publishes container images to GHCR on `main` and semantic version tags
 - Actions dashboard: `https://github.com/ssotoa70/assetharbor/actions`
 
-## Wiki 2.0
+## Documentation
 
-Wiki 2.0 is the operational source of truth for deep docs that should not crowd the README.
+For deeper architecture and operational guidance, see:
 
-- Wiki home: `https://github.com/ssotoa70/assetharbor/wiki`
-- Seed content in repo: `docs/wiki-2.0/`
+- **Architecture & Design:** [`docs/VAST_NATIVE_ARCHITECTURE.md`](docs/VAST_NATIVE_ARCHITECTURE.md) — comprehensive VAST-native system design
+- **Operations Runbook:** [`docs/runbook.md`](docs/runbook.md) — deployment, troubleshooting, and SLO definitions
+- **API Contracts:** [`docs/api-contracts.md`](docs/api-contracts.md) — OpenAPI schema and endpoint details
+- **Event Contracts:** [`docs/event-contracts.md`](docs/event-contracts.md) — event types and payloads
 
-Suggested page map:
+## Contributing
 
-- `Home` - navigation and ownership
-- `Getting-Started` - setup and first run
-- `Architecture` - components and data flow
-- `API-Reference` - endpoints and error model
-- `Operations-Runbook` - deploy, rollback, incident workflow
-- `Security-and-Compliance` - secrets, access, audit
-- `Release-Process` - versioning and release checklist
-
-Contribution flow:
-
-1. Link docs updates to the related engineering issue.
-2. Update wiki page(s) and matching `docs/wiki-2.0` mirror page in same change.
-3. Include docs impact notes in PR description.
-4. Verify links from `Home` before merge.
+1. Link documentation updates to related Linear issues.
+2. Update wiki pages and matching `docs/wiki-2.0` mirror pages in same change.
+3. Include docs impact notes in PR descriptions.
+4. Verify all links before merge.
