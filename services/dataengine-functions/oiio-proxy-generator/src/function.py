@@ -37,8 +37,9 @@ def main() -> int:
         log.error("VAST_SOURCE_PATH and VAST_ASSET_ID must be set")
         return 1
 
+    dev_mode = os.environ.get("DEV_MODE", "false").lower() == "true"
     processor = OiioProcessor()
-    transform = OcioTransform(config_path=os.environ.get("OCIO_CONFIG_PATH"))
+    transform = OcioTransform(config_path=os.environ.get("OCIO_CONFIG_PATH"), dev_mode=dev_mode)
 
     # Step 1: OCIO — color transform to sRGB for thumbnail
     transformed_for_thumb = transform.apply(source_path, target_colorspace="sRGB")
