@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { approveAsset, rejectAsset, requestReview } from "../api";
 import type { AssetRow, ReviewStatus } from "../types";
+import { ReviewButton } from "./ReviewButton";
 
 const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
   wip: "WIP",
@@ -176,6 +177,7 @@ export function ApprovalPanel({ asset, onActionComplete }: ApprovalPanelProps) {
       )}
 
       <div className="approval-actions">
+        <ReviewButton assetId={asset.id} />
         <button
           type="button"
           className="btn btn--approve"

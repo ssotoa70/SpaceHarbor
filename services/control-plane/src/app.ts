@@ -17,6 +17,7 @@ import { registerMetricsRoute } from "./routes/metrics.js";
 import { registerOutboxRoute } from "./routes/outbox.js";
 import { registerApprovalRoutes } from "./routes/approval.js";
 import { registerDccRoute } from "./routes/dcc.js";
+import { registerReviewRoutes } from "./routes/review.js";
 import { registerQueueRoute } from "./routes/queue.js";
 import { registerVastEventsRoute } from "./routes/vast-events.js";
 import { Kafka } from "kafkajs";
@@ -91,6 +92,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerQueueRoute(app, persistence);
     void registerOutboxRoute(app, persistence);
     void registerDccRoute(app, persistence, prefixes);
+    void registerReviewRoutes(app, persistence, prefixes);
     void registerDlqRoute(app, persistence);
     void registerMetricsRoute(app, persistence);
   });

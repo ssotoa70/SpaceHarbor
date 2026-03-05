@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { fetchApprovalQueue } from "../api";
 import type { AssetRow, SortDirection, SortField } from "../types";
+import { ReviewButton } from "./ReviewButton";
 
 interface AssetQueueProps {
   onSelectAsset: (asset: AssetRow) => void;
@@ -86,12 +87,13 @@ export function AssetQueue({ onSelectAsset, selectedAssetId, refreshKey }: Asset
                 Created{sortIndicator("created_at")}
               </button>
             </th>
+            <th scope="col">Actions</th>
           </tr>
         </thead>
         <tbody>
           {assets.length === 0 && !loading ? (
             <tr>
-              <td colSpan={5}>No assets in approval queue.</td>
+              <td colSpan={6}>No assets in approval queue.</td>
             </tr>
           ) : (
             assets.map((asset) => {
@@ -127,6 +129,9 @@ export function AssetQueue({ onSelectAsset, selectedAssetId, refreshKey }: Asset
                     <span className={`status status-${asset.status}`}>{asset.status}</span>
                   </td>
                   <td>{created}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <ReviewButton assetId={asset.id} />
+                  </td>
                 </tr>
               );
             })
