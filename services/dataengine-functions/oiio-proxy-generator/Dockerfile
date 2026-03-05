@@ -4,7 +4,9 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openimageio-tools \
     python3-openimageio \
+    python3-pyopencolorio \
     ffmpeg \
+    ocio-configs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
