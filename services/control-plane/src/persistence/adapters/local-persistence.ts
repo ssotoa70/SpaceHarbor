@@ -18,6 +18,7 @@ import type {
   OutboxItem,
   Project,
   ProjectStatus,
+  ReviewStatus,
   Sequence,
   Shot,
   ShotStatus,
@@ -1194,7 +1195,8 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       createdAt: now,
       publishedAt: null,
       notes: input.notes ?? null,
-      taskId: input.taskId ?? null
+      taskId: input.taskId ?? null,
+      reviewStatus: input.reviewStatus ?? "wip"
     };
     this.versions.set(version.id, version);
     // Update shot's latestVersionId
@@ -1225,6 +1227,14 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     const published = { ...version, status: "published" as const, publishedAt: now };
     this.versions.set(versionId, published);
     return published;
+  }
+
+  async updateVersionReviewStatus(versionId: string, status: ReviewStatus, _ctx: WriteContext): Promise<Version | null> {
+    const version = this.versions.get(versionId);
+    if (!version) return null;
+    const updated = { ...version, reviewStatus: status };
+    this.versions.set(versionId, updated);
+    return updated;
   }
 
   async updateVersionTechnicalMetadata(

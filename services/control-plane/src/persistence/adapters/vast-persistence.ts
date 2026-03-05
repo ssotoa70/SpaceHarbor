@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { AuditEvent, Episode, Project, ProjectStatus, Sequence, Shot, ShotStatus, Task, TaskStatus, Version, VersionApproval, VfxMetadata } from "../../domain/models.js";
+import type { AuditEvent, Episode, Project, ProjectStatus, ReviewStatus, Sequence, Shot, ShotStatus, Task, TaskStatus, Version, VersionApproval, VfxMetadata } from "../../domain/models.js";
 import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
 import type { OutboundConfig } from "../../integrations/outbound/types.js";
 import type { AuditSignal } from "../../domain/models.js";
@@ -414,6 +414,10 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   async publishVersion(versionId: string, ctx: WriteContext): Promise<Version | null> {
     return this.localFallback.publishVersion(versionId, ctx);
+  }
+
+  async updateVersionReviewStatus(versionId: string, status: ReviewStatus, ctx: WriteContext): Promise<Version | null> {
+    return this.localFallback.updateVersionReviewStatus(versionId, status, ctx);
   }
 
   async updateVersionTechnicalMetadata(

@@ -1,3 +1,5 @@
+export type ReviewStatus = "wip" | "internal_review" | "client_review" | "approved";
+
 export type WorkflowStatus =
   | "pending"
   | "processing"
@@ -331,6 +333,7 @@ export interface Version {
   publishedAt: string | null;
   notes: string | null;
   taskId: string | null;
+  reviewStatus: ReviewStatus;
 }
 
 export interface VersionApproval {

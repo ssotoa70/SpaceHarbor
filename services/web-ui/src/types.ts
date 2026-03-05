@@ -1,5 +1,7 @@
 export type ApprovalStatus = "qc_pending" | "qc_in_review" | "qc_approved" | "qc_rejected";
 
+export type ReviewStatus = "wip" | "internal_review" | "client_review" | "approved";
+
 export type WorkflowStatus =
   | "pending"
   | "processing"
@@ -51,6 +53,7 @@ export interface AssetRow {
   metadata?: AssetMetadata;
   version?: AssetVersion;
   productionMetadata?: ProductionMetadata;
+  reviewStatus?: ReviewStatus;
 }
 
 export interface AuditRow {

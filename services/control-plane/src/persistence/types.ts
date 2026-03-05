@@ -19,6 +19,7 @@ import type {
   Project,
   ProjectStatus,
   ProjectType,
+  ReviewStatus,
   Sequence,
   SequenceStatus,
   Shot,
@@ -109,6 +110,7 @@ export interface CreateVersionInput {
   createdBy: string;
   notes?: string;
   taskId?: string;
+  reviewStatus?: ReviewStatus;
 }
 
 export interface CreateEpisodeInput {
@@ -166,6 +168,7 @@ export interface VfxHierarchyAdapter {
   getVersionById(id: string): Promise<Version | null>;
   listVersionsByShot(shotId: string): Promise<Version[]>;
   publishVersion(versionId: string, ctx: WriteContext): Promise<Version | null>;
+  updateVersionReviewStatus(versionId: string, status: ReviewStatus, ctx: WriteContext): Promise<Version | null>;
   updateVersionTechnicalMetadata(
     versionId: string,
     meta: Partial<VfxMetadata>,

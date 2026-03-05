@@ -1,7 +1,21 @@
 import { useState } from "react";
 
 import { approveAsset, rejectAsset, requestReview } from "../api";
-import type { AssetRow } from "../types";
+import type { AssetRow, ReviewStatus } from "../types";
+
+const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
+  wip: "WIP",
+  internal_review: "Internal Review",
+  client_review: "Client Review",
+  approved: "Approved",
+};
+
+const REVIEW_STATUS_COLORS: Record<ReviewStatus, string> = {
+  wip: "#6b7280",
+  internal_review: "#3b82f6",
+  client_review: "#f59e0b",
+  approved: "#10b981",
+};
 
 interface ApprovalPanelProps {
   asset: AssetRow | null;
@@ -82,6 +96,20 @@ export function ApprovalPanel({ asset, onActionComplete }: ApprovalPanelProps) {
         <dd>
           <span className={`status status-${asset.status}`}>{asset.status}</span>
         </dd>
+        {asset.reviewStatus && (
+          <>
+            <dt>Review</dt>
+            <dd>
+              <span
+                data-testid="review-status-badge"
+                className={`review-status review-status-${asset.reviewStatus}`}
+                style={{ color: REVIEW_STATUS_COLORS[asset.reviewStatus] }}
+              >
+                {REVIEW_STATUS_LABELS[asset.reviewStatus]}
+              </span>
+            </dd>
+          </>
+        )}
         <dt>Resolution</dt>
         <dd>{resolution}</dd>
         <dt>Frame Range</dt>

@@ -538,3 +538,128 @@ for (const { name, adapter } of makeAdapters()) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// SERGIO-138: ReviewStatus tests (R2-A)
+// ---------------------------------------------------------------------------
+
+// Helper: build a minimal project + sequence + shot for a given adapter
+async function makeShot(adapter: VfxHierarchyAdapter) {
+  const project = await adapter.createProject(
+    { code: "RS_TEST", name: "ReviewStatus Test", type: "feature", status: "active" },
+    CTX
+  );
+  const seq = await adapter.createSequence(
+    { projectId: project.id, code: "SEQ010", status: "active" },
+    CTX
+  );
+  const shot = await adapter.createShot(
+    {
+      projectId: project.id,
+      sequenceId: seq.id,
+      code: "SH010",
+      status: "active",
+      frameRangeStart: 1001,
+      frameRangeEnd: 1048,
+      frameCount: 48
+    },
+    CTX
+  );
+  return { project, seq, shot };
+}
+
+// Test 1: createVersion defaults reviewStatus to "wip"
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] createVersion defaults reviewStatus to "wip"`, async () => {
+    const { project, seq, shot } = await makeShot(adapter);
+    const version = await adapter.createVersion(
+      {
+        shotId: shot.id,
+        projectId: project.id,
+        sequenceId: seq.id,
+        versionLabel: "v001",
+        status: "draft",
+        mediaType: "exr_sequence",
+        createdBy: "artist@studio.com"
+      },
+      CTX
+    );
+    assert.equal(version.reviewStatus, "wip");
+  });
+}
+
+// Test 2: updateVersionReviewStatus changes status to "internal_review"
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] updateVersionReviewStatus changes status to "internal_review"`, async () => {
+    const { project, seq, shot } = await makeShot(adapter);
+    const version = await adapter.createVersion(
+      {
+        shotId: shot.id,
+        projectId: project.id,
+        sequenceId: seq.id,
+        versionLabel: "v001",
+        status: "draft",
+        mediaType: "exr_sequence",
+        createdBy: "artist@studio.com"
+      },
+      CTX
+    );
+    const updated = await adapter.updateVersionReviewStatus(version.id, "internal_review", CTX);
+    assert.ok(updated, "should return updated version");
+    assert.equal(updated!.reviewStatus, "internal_review");
+    assert.equal(updated!.id, version.id);
+  });
+}
+
+// Test 3: updateVersionReviewStatus on non-existent version returns null
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] updateVersionReviewStatus on non-existent version returns null`, async () => {
+    const result = await adapter.updateVersionReviewStatus("non-existent-id", "approved", CTX);
+    assert.equal(result, null);
+  });
+}
+
+// Test 4: updateVersionReviewStatus to "approved" persists correctly
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] updateVersionReviewStatus to "approved" persists correctly`, async () => {
+    const { project, seq, shot } = await makeShot(adapter);
+    const version = await adapter.createVersion(
+      {
+        shotId: shot.id,
+        projectId: project.id,
+        sequenceId: seq.id,
+        versionLabel: "v001",
+        status: "review",
+        mediaType: "exr_sequence",
+        createdBy: "artist@studio.com"
+      },
+      CTX
+    );
+    await adapter.updateVersionReviewStatus(version.id, "approved", CTX);
+    const fetched = await adapter.getVersionById(version.id);
+    assert.ok(fetched, "version should still exist");
+    assert.equal(fetched!.reviewStatus, "approved");
+  });
+}
+
+// Test 5: published version CAN have reviewStatus updated (immutability applies to publishedAt only)
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] published version can have reviewStatus updated`, async () => {
+    const { project, seq, shot } = await makeShot(adapter);
+    const version = await adapter.createVersion(
+      {
+        shotId: shot.id,
+        projectId: project.id,
+        sequenceId: seq.id,
+        versionLabel: "v001",
+        status: "draft",
+        mediaType: "exr_sequence",
+        createdBy: "artist@studio.com"
+      },
+      CTX
+    );
+    await adapter.publishVersion(version.id, CTX);
+    const updated = await adapter.updateVersionReviewStatus(version.id, "client_review", CTX);
+    assert.ok(updated, "should return updated version");
+    assert.equal(updated!.reviewStatus, "client_review");
+  });
+}
