@@ -8,13 +8,25 @@
 
 ## Executive Summary
 
-AssetHarbor Phase 2 is a **complete redesign** as a VAST-native system, not a conversion of the MVP. The system will be built from the ground up to leverage VAST's core capabilities:
+AssetHarbor Phase 2 is a **complete redesign** as a VAST-native system, not a conversion of the MVP. The system is built from the ground up to leverage VAST's core capabilities:
 
 - **VAST Database** - Primary persistence for all state
 - **VAST Catalog** - "Inseparable context" metadata attached to Element handles
 - **VAST Event Broker** - Event streaming and workflow triggers
 - **VAST DataEngine** - Serverless media processing pipelines
 - **VAST Element Store** - Native file/media storage
+
+---
+
+## Current Status
+
+**As of March 4, 2026:** MVP sprint (28-day Phase 4, March 1-28) is complete.
+
+- ✅ **Control-plane:** 139/139 tests passing, 0 TypeScript errors
+- ✅ **Web-UI:** 70/70 tests passing
+- ✅ **Completed tickets:** SERGIO-129 (TS clean), SERGIO-130 (VastDbAdapter), SERGIO-131 (VastEventSubscriber), SERGIO-120 (VFX metadata typing), SERGIO-132 (AppShell UI)
+- ✅ **Architecture:** Fully event-driven with VAST Event Broker and VastEventSubscriber
+- ⚠️ **Media-worker:** Dev simulation only—not deployed in production VAST environments
 
 ---
 
@@ -115,6 +127,14 @@ Asset Record: { id: 123, title: "shot_001", elementHandle: "elem_abc123xyz" }
 │  └────────────────────────────────────────────────────┘    │
 │                                                             │
 │  ┌────────────────────────────────────────────────────┐    │
+│  │ VastEventSubscriber (Kafka Consumer)               │    │
+│  │ • Consumes VAST Event Broker completion events     │    │
+│  │ • Correlates events to AssetHarbor job records     │    │
+│  │ • Updates job status and asset metadata in VastDB │    │
+│  │ • Triggers approval workflow state transitions     │    │
+│  └────────────────────────────────────────────────────┘    │
+│                                                             │
+│  ┌────────────────────────────────────────────────────┐    │
 │  │ Services                                           │    │
 │  │ • Asset ingestion                                  │    │
 │  │ • Metadata management                              │    │
@@ -150,6 +170,17 @@ Asset Record: { id: 123, title: "shot_001", elementHandle: "elem_abc123xyz" }
 │  • Houdini plugin                  │
 │  • Direct ingest from DCC          │
 └────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────┐
+│  Media-Worker (Dev Simulation Only)                │
+│                                                    │
+│  ⚠️ NOT deployed in production VAST environments   │
+│                                                    │
+│  • Simulates VAST element trigger locally         │
+│  • Mock DataEngine pipeline execution             │
+│  • Publishes CloudEvents to control-plane         │
+│  • Used for local development and testing         │
+└────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -265,33 +296,44 @@ CREATE TABLE approvals (
 
 ```
 1. File Uploaded to Element Store
-   └─ VAST Event Broker: "element.created"
-      └─ AssetHarbor: Receives event, creates Asset record
+   └─ VAST Event Broker: "element.created" CloudEvent
+      └─ VastEventSubscriber (Kafka consumer in control-plane): Receives event
+         └─ Creates Asset record in VastDB
 
 2. Asset Created
-   └─ AssetHarbor: Publishes "asset.ingest.started"
-   └─ VAST DataEngine: Receives event, starts probe job
+   └─ Control-plane: Publishes "asset.ingest.started" event
+   └─ VAST Element Trigger: Fires on file creation (*.exr, *.mov, audio)
 
-3. Probe Completes (via VAST Element trigger)
-   └─ VAST Event Broker: "dataengine.job.completed"
-   └─ AssetHarbor: Receives, updates Asset metadata, queues transcode jobs
+3. VAST DataEngine Executes Pipeline
+   └─ VAST Element trigger → Registered pipeline runs
+      ├─ exr_inspector: extracts technical metadata
+      ├─ ASR (automatic speech recognition): transcribes audio
+      ├─ transcode: creates proxy/delivery formats
+      └─ Results written to VastDB
 
-4. Transcoding Completes
-   └─ VAST Event Broker: "dataengine.job.completed"
-   └─ AssetHarbor: Creates output Element, updates Catalog
+4. Processing Completes
+   └─ VAST Event Broker: "dataengine.job.completed" CloudEvent (published by DataEngine)
+      └─ VastEventSubscriber: Receives event
+         ├─ Correlates to AssetHarbor job record
+         ├─ Updates job status (completed/failed)
+         ├─ Updates asset metadata in VastDB
+         └─ Transitions to approval workflow
 
 5. Awaiting Approval
-   └─ AssetHarbor: Publishes "asset.ready_for_review"
-   └─ UI: Displays asset in approval queue
+   └─ Control-plane: Publishes "asset.ready_for_review"
+   └─ Web UI: Displays asset in approval queue
 
 6. Approved by Reviewer
-   └─ AssetHarbor: Updates approval_status, publishes "asset.approved"
-   └─ UI: Marks as approved, removes from review queue
+   └─ Control-plane: Updates approval_status in VastDB
+   └─ Control-plane: Publishes "asset.approved" event
+   └─ Web UI: Marks as approved, removes from review queue
 
 7. Archival
-   └─ AssetHarbor: Publishes "asset.archive"
-   └─ VAST DataEngine: May compress, move to cold storage
+   └─ Control-plane: Publishes "asset.archive"
+   └─ VAST DataEngine: May compress, move to cold storage via registered archive pipeline
 ```
+
+**Key Point:** VastEventSubscriber is the critical link—it bridges VAST Event Broker (Kafka) and AssetHarbor job state by consuming completion CloudEvents and updating VastDB in real-time.
 
 ---
 
@@ -377,8 +419,9 @@ CREATE TABLE approvals (
 ### 3. **VAST DataEngine Owns Media Processing**
 - Control-plane orchestrates, DataEngine executes
 - DataEngine is the "worker pool"
-- No separate Python worker service needed
+- No separate Python worker service needed in production
 - Serverless scaling via VAST
+- **Local Development:** `services/media-worker/` simulates element triggers and DataEngine locally—not deployed in production
 
 ### 4. **Eventual Consistency**
 - Asset records are source of truth in VAST DB
