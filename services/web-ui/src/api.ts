@@ -1,4 +1,5 @@
 import type { MetricsSnapshot } from "./operator/types";
+import type { AssetRow as ApprovalAssetRow, SortField, SortDirection } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const API_KEY = import.meta.env.VITE_API_KEY;
@@ -270,4 +271,60 @@ export async function updateIncidentHandoff(input: {
 
   const body = (await response.json()) as { handoff: IncidentHandoff };
   return body.handoff;
+}
+
+export async function fetchApprovalQueue(
+  sortField: SortField,
+  sortDir: SortDirection,
+  page: number,
+  pageSize: number
+): Promise<{ assets: ApprovalAssetRow[]; total: number }> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/assets/approval-queue?sort=${sortField}&dir=${sortDir}&page=${page}&limit=${pageSize}`
+    );
+    if (!response.ok) {
+      return { assets: [], total: 0 };
+    }
+    const body = (await response.json()) as { assets: ApprovalAssetRow[] };
+    return { assets: body.assets, total: body.assets.length };
+  } catch {
+    return { assets: [], total: 0 };
+  }
+}
+
+export async function approveAsset(assetId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/assets/${assetId}/approve`, {
+    method: "POST",
+    headers: withAuth({ "content-type": "application/json" }),
+    body: JSON.stringify({ performed_by: "web-ui" })
+  });
+
+  if (!response.ok) {
+    throw new Error(`approve failed: ${response.status}`);
+  }
+}
+
+export async function rejectAsset(assetId: string, reason: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/assets/${assetId}/reject`, {
+    method: "POST",
+    headers: withAuth({ "content-type": "application/json" }),
+    body: JSON.stringify({ performed_by: "web-ui", reason })
+  });
+
+  if (!response.ok) {
+    throw new Error(`reject failed: ${response.status}`);
+  }
+}
+
+export async function requestReview(assetId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/assets/${assetId}/request-review`, {
+    method: "POST",
+    headers: withAuth({ "content-type": "application/json" }),
+    body: JSON.stringify({ performed_by: "web-ui" })
+  });
+
+  if (!response.ok) {
+    throw new Error(`request-review failed: ${response.status}`);
+  }
 }
