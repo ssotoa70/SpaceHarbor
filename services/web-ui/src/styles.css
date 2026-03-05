@@ -736,3 +736,112 @@ td {
     font-size: 0.9rem;
   }
 }
+
+/* ── AppShell layout ───────────────────────────────────────────────── */
+
+.appshell {
+  min-height: 100vh;
+}
+
+.appshell__topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  z-index: 100;
+  background: linear-gradient(120deg, #0f3b53, #1f5f7a);
+  color: #f6fbff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.25rem;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.appshell__brand {
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+}
+
+.appshell__health {
+  font-size: 0.875rem;
+}
+
+.appshell__health--healthy {
+  color: #a3e6b8;
+}
+
+.appshell__health--degraded {
+  color: #ffc97a;
+}
+
+.appshell__health--unknown {
+  color: #b0c4d8;
+}
+
+.appshell__sidebar {
+  position: fixed;
+  top: 48px;
+  left: 0;
+  width: 160px;
+  height: calc(100vh - 48px);
+  background: #1a2f3e;
+  padding: 1rem 0;
+  z-index: 90;
+  overflow-y: auto;
+}
+
+.appshell__sidebar .role-selector {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.appshell__sidebar .role-selector-options {
+  display: flex;
+  flex-direction: column;
+}
+
+.appshell__nav-item {
+  display: block;
+  padding: 0.625rem 1.25rem;
+  color: #b0c8d8;
+  cursor: pointer;
+  font-size: 0.9rem;
+  user-select: none;
+}
+
+.appshell__nav-item:hover {
+  background: #243f50;
+  color: #e8f4fb;
+}
+
+.appshell__nav-item--active {
+  background: #1f5f7a;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.appshell__main {
+  margin-left: 160px;
+  margin-top: 48px;
+  padding: 1.5rem;
+  min-height: calc(100vh - 48px);
+  background: linear-gradient(180deg, #f7fafc 0%, #e9f0f5 100%);
+  display: grid;
+  gap: 1rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
