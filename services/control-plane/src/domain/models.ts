@@ -9,18 +9,45 @@ export type WorkflowStatus =
   | "qc_approved"
   | "qc_rejected";
 
+export interface VfxMetadata {
+  codec?: string;
+  channels?: string[];
+  resolution?: { width: number; height: number };
+  color_space?: string;
+  frame_count?: number;
+  bit_depth?: number;
+  duration_ms?: number;
+  thumbnail_url?: string;
+  frame_range?: { start: number; end: number };
+  frame_rate?: number;
+  pixel_aspect_ratio?: number;
+  display_window?: { x: number; y: number; width: number; height: number };
+  data_window?: { x: number; y: number; width: number; height: number };
+  compression_type?: string;
+  file_size_bytes?: number;
+  md5_checksum?: string;
+}
+
+export interface AssetVersion {
+  version_label: string;
+  parent_version_id?: string;
+}
+
+export interface AssetIntegrity {
+  file_size_bytes?: number;
+  checksum: { type: string; value: string };
+  verified_at?: string;
+}
+
 export interface Asset {
   id: string;
   title: string;
   sourceUri: string;
   createdAt: string;
   updatedAt?: string;
-  metadata?: Record<string, unknown>;
-  version?: string;
-  integrity?: {
-    checksum?: string;
-    fileSize?: number;
-  };
+  metadata?: VfxMetadata;
+  version?: AssetVersion;
+  integrity?: AssetIntegrity;
 }
 
 export interface AssetThumbnailPreview {

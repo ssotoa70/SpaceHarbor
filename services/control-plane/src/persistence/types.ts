@@ -1,5 +1,6 @@
 import type {
   AnnotationHookMetadata,
+  Asset,
   AssetQueueRow,
   AuditEvent,
   DlqItem,
@@ -108,8 +109,12 @@ export interface PersistenceAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult;
-  getAssetById(assetId: string): any | null;
-  updateAsset(assetId: string, updates: any, context: WriteContext): any | null;
+  getAssetById(assetId: string): Asset | null;
+  updateAsset(
+    assetId: string,
+    updates: Partial<Pick<Asset, "metadata" | "version" | "integrity">>,
+    context: WriteContext
+  ): Asset | null;
   setJobStatus(
     jobId: string,
     status: WorkflowStatus,

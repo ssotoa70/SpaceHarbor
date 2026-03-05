@@ -64,7 +64,7 @@ export function OperatorBoard({
                   </td>
                   <td>
                     {asset.status === "failed" && asset.jobId ? (
-                      <button type="button" onClick={() => onReplay(asset.jobId)}>
+                      <button type="button" onClick={() => onReplay(asset.jobId ?? "")}>
                         Replay
                       </button>
                     ) : (

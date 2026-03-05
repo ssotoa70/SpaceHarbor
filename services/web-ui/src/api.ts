@@ -1,5 +1,5 @@
 import type { MetricsSnapshot } from "./operator/types";
-import type { AssetRow as ApprovalAssetRow, SortField, SortDirection } from "./types";
+import type { AssetRow as ApprovalAssetRow, SortField, SortDirection, ProductionMetadata } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const API_KEY = import.meta.env.VITE_API_KEY;
@@ -31,34 +31,35 @@ export interface AssetRow {
   title: string;
   sourceUri: string;
   status: string;
-  thumbnail: {
+  thumbnail?: {
     uri: string;
     width: number;
     height: number;
     generatedAt: string;
   } | null;
-  proxy: {
+  proxy?: {
     uri: string;
     durationSeconds: number;
     codec: string;
     generatedAt: string;
   } | null;
-  annotationHook: {
+  annotationHook?: {
     enabled: boolean;
     provider: string | null;
     contextId: string | null;
   };
-  handoffChecklist: {
+  handoffChecklist?: {
     releaseNotesReady: boolean;
     verificationComplete: boolean;
     commsDraftReady: boolean;
     ownerAssigned: boolean;
   };
-  handoff: {
+  handoff?: {
     status: "not_ready" | "ready_for_release";
     owner: string | null;
     lastUpdatedAt: string | null;
   };
+  productionMetadata: ProductionMetadata;
 }
 
 export interface AuditSignal {
@@ -123,7 +124,7 @@ export async function fetchAssets(): Promise<AssetRow[]> {
   return body.assets;
 }
 
-export async function ingestAsset(input: { title: string; sourceUri: string }): Promise<void> {
+export async function ingestAsset(input: { title: string; sourceUri: string; projectId?: string }): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/api/v1/assets/ingest`, {
     method: "POST",
     headers: withAuth({

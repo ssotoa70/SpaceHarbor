@@ -27,6 +27,20 @@ export interface AssetVersion {
   parent_version_id?: string;
 }
 
+export type AssetPriority = "low" | "normal" | "high" | "urgent";
+
+export interface ProductionMetadata {
+  show?: string | null;
+  episode?: string | null;
+  sequence?: string | null;
+  shot?: string | null;
+  version?: number | null;
+  vendor?: string | null;
+  priority?: AssetPriority | null;
+  dueDate?: string | null;
+  owner?: string | null;
+}
+
 export interface AssetRow {
   id: string;
   jobId: string | null;
@@ -36,6 +50,7 @@ export interface AssetRow {
   createdAt?: string;
   metadata?: AssetMetadata;
   version?: AssetVersion;
+  productionMetadata?: ProductionMetadata;
 }
 
 export interface AuditRow {

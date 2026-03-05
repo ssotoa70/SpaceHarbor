@@ -32,7 +32,7 @@ export function deriveDependencyReadiness(
   const reasons: DependencyReadinessReason[] = [];
   const metadata = asset.productionMetadata;
 
-  if (!hasValue(metadata.owner)) {
+  if (!hasValue(metadata.owner ?? null)) {
     reasons.push("missing_owner");
   }
 
@@ -40,7 +40,7 @@ export function deriveDependencyReadiness(
     reasons.push("missing_priority");
   }
 
-  if (!hasValue(metadata.dueDate)) {
+  if (!hasValue(metadata.dueDate ?? null)) {
     reasons.push("missing_due_date");
   }
 
