@@ -81,6 +81,7 @@ docker compose up --build
 |----------|---------|-------------|
 | `ASSETHARBOR_PERSISTENCE_BACKEND` | `local` | Persistence adapter: `local` (in-memory, dev) or `vast` (production) |
 | `ASSETHARBOR_VAST_STRICT` | `false` | If true, fail hard at startup if VAST endpoints unavailable |
+| `ASSETHARBOR_VAST_FALLBACK_TO_LOCAL` | `true` | If true, fall back to local adapter when VAST endpoints fail; if false, fail-fast |
 | `ASSETHARBOR_API_KEY` | (empty) | Optional API key; if set, all POST endpoints require `x-api-key` header |
 | `CONTROL_PLANE_API_KEY` | (empty) | API key for media-worker to call control-plane (in secured environments) |
 | `VITE_API_KEY` | (empty) | API key for web-ui to call control-plane (in secured environments) |
