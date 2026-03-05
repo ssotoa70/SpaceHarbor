@@ -56,6 +56,7 @@ export interface Asset {
   shotId?: string;
   projectId?: string;
   versionLabel?: string;
+  review_uri?: string;  // rvlink:// URI for OpenRV launch
 }
 
 export interface AssetThumbnailPreview {
