@@ -1,7 +1,28 @@
 import type { WorkflowStatus } from "../domain/models.js";
 import type { PersistenceAdapter, WriteContext } from "../persistence/types.js";
 import { canTransitionWorkflowStatus } from "../workflow/transitions.js";
-import type { NormalizedAssetEvent } from "./types.js";
+import type { NormalizedAssetEvent, ProxyGeneratedEvent } from "./types.js";
+
+export function processProxyGeneratedEvent(
+  event: ProxyGeneratedEvent,
+  persistence: PersistenceAdapter,
+  context: WriteContext,
+): void {
+  const asset = persistence.getAssetById(event.asset_id);
+  if (!asset) return;
+
+  persistence.updateAsset(
+    event.asset_id,
+    {
+      metadata: {
+        ...(asset.metadata ?? {}),
+        thumbnail_url: event.thumbnail_uri,
+        proxy_url: event.proxy_uri,
+      },
+    },
+    context,
+  );
+}
 
 function isReviewContractEvent(eventType: NormalizedAssetEvent["eventType"]): boolean {
   return (
