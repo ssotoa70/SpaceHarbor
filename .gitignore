@@ -9,3 +9,4 @@ services/media-worker/tests/__pycache__/
 .env
 dist/
 coverage/
+.worktrees/
