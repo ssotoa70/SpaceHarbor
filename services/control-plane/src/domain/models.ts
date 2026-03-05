@@ -20,6 +20,7 @@ export interface VfxMetadata {
   bit_depth?: number;
   duration_ms?: number;
   thumbnail_url?: string;
+  proxy_url?: string;
   frame_range?: { start: number; end: number };
   frame_rate?: number;
   pixel_aspect_ratio?: number;

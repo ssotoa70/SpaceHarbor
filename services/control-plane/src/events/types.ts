@@ -238,6 +238,29 @@ export function normalizeCanonicalEvent(event: CanonicalAssetEventEnvelope): Nor
 }
 
 // ---------------------------------------------------------------------------
+// OIIO Proxy Generator CloudEvent — published by oiio-proxy-generator container
+// ---------------------------------------------------------------------------
+
+export interface ProxyGeneratedEvent {
+  type: "proxy.generated";
+  asset_id: string;
+  thumbnail_uri: string;
+  proxy_uri: string;
+  timestamp: string;
+}
+
+export function isProxyGeneratedEvent(input: unknown): input is ProxyGeneratedEvent {
+  if (!input || typeof input !== "object") return false;
+  const v = input as Record<string, unknown>;
+  return (
+    v["type"] === "proxy.generated" &&
+    typeof v["asset_id"] === "string" &&
+    typeof v["thumbnail_uri"] === "string" &&
+    typeof v["proxy_uri"] === "string"
+  );
+}
+
+// ---------------------------------------------------------------------------
 // VAST DataEngine CloudEvent — published by VAST Event Broker on pipeline completion
 // ---------------------------------------------------------------------------
 
