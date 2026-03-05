@@ -207,3 +207,175 @@ export interface ApprovalAuditEntry {
   note: string | null;
   at: string;
 }
+
+// ---------------------------------------------------------------------------
+// VFX Hierarchy: Project → Sequence → Shot → Version → VersionApproval
+// ---------------------------------------------------------------------------
+
+export type ProjectType = "feature" | "episodic" | "commercial" | "vfx_only";
+export type ProjectStatus = "active" | "archived" | "delivered";
+export type SequenceStatus = "active" | "locked" | "delivered";
+export type ShotStatus = "active" | "omit" | "locked" | "delivered";
+export type VersionStatus =
+  | "draft"
+  | "review"
+  | "approved"
+  | "rejected"
+  | "published"
+  | "archived";
+export type MediaType =
+  | "exr_sequence"
+  | "mov"
+  | "dpx"
+  | "audio"
+  | "vdb"
+  | "usd"
+  | "plate";
+export type VersionAssetRole = "primary" | "proxy" | "thumbnail" | "aov" | "reference";
+export type ApprovalAction =
+  | "submit_for_review"
+  | "approve"
+  | "reject"
+  | "request_changes";
+
+export interface Project {
+  id: string;
+  code: string;
+  name: string;
+  type: ProjectType;
+  status: ProjectStatus;
+  frameRate: number | null;
+  colorSpace: string | null;
+  resolutionW: number | null;
+  resolutionH: number | null;
+  startDate: string | null;
+  deliveryDate: string | null;
+  owner: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Sequence {
+  id: string;
+  projectId: string;
+  code: string;
+  episode: string | null;
+  episodeId: string | null;
+  name: string | null;
+  status: SequenceStatus;
+  shotCount: number;
+  frameRangeStart: number | null;
+  frameRangeEnd: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Shot {
+  id: string;
+  projectId: string;
+  sequenceId: string;
+  code: string;
+  name: string | null;
+  status: ShotStatus;
+  frameRangeStart: number;
+  frameRangeEnd: number;
+  frameCount: number;
+  frameRate: number | null;
+  vendor: string | null;
+  lead: string | null;
+  priority: AssetPriority | null;
+  dueDate: string | null;
+  notes: string | null;
+  latestVersionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DisplayDataWindow {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface Version {
+  id: string;
+  shotId: string;
+  projectId: string;
+  sequenceId: string;
+  versionLabel: string;
+  versionNumber: number;
+  parentVersionId: string | null;
+  status: VersionStatus;
+  mediaType: MediaType;
+  // VFX technical metadata (from VAST DataEngine exr_inspector)
+  codec: string | null;
+  resolutionW: number | null;
+  resolutionH: number | null;
+  frameRate: number | null;
+  frameRangeStart: number | null;
+  frameRangeEnd: number | null;
+  pixelAspectRatio: number | null;
+  displayWindow: DisplayDataWindow | null;
+  dataWindow: DisplayDataWindow | null;
+  compressionType: string | null;
+  colorSpace: string | null;
+  bitDepth: number | null;
+  channelCount: number | null;
+  fileSizeBytes: number | null;
+  md5Checksum: string | null;
+  vastElementHandle: string | null;
+  vastPath: string | null;
+  createdBy: string;
+  createdAt: string;
+  publishedAt: string | null;
+  notes: string | null;
+  taskId: string | null;
+}
+
+export interface VersionApproval {
+  id: string;
+  versionId: string;
+  shotId: string;
+  projectId: string;
+  action: ApprovalAction;
+  performedBy: string;
+  role: string | null;
+  note: string | null;
+  at: string;
+}
+
+// ---------------------------------------------------------------------------
+// VFX Hierarchy: Episode + Task (SERGIO-136)
+// ---------------------------------------------------------------------------
+
+export type EpisodeStatus = "active" | "locked" | "delivered";
+export type TaskType = "comp" | "fx" | "roto" | "paint" | "matchmove" | "layout" | "lighting" | "other";
+export type TaskStatus = "not_started" | "in_progress" | "pending_review" | "approved" | "on_hold";
+
+export interface Episode {
+  id: string;
+  projectId: string;
+  code: string;
+  name: string | null;
+  status: EpisodeStatus;
+  sequenceCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Task {
+  id: string;
+  shotId: string;
+  projectId: string;
+  sequenceId: string;
+  code: string;
+  type: TaskType;
+  status: TaskStatus;
+  assignee: string | null;
+  dueDate: string | null;
+  taskNumber: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
