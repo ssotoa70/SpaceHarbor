@@ -45,10 +45,11 @@ const mayaExportBodySchema = {
 
 const mayaExportResponseSchema = {
   type: "object",
-  required: ["job_id", "status"],
+  required: ["job_id", "status", "manager_uri"],
   properties: {
     job_id: { type: "string" },
     status: { type: "string", enum: ["queued"] },
+    manager_uri: { type: "string" },
   },
 } as const;
 
@@ -116,9 +117,11 @@ export async function registerDccRoute(
 
         recordDccAudit("DCC export requested via Maya", asset_id, export_format);
 
+        const managerBase = process.env.OPENASSETIO_MANAGER_URL ?? "http://openassetio-manager:8001";
         return reply.status(200).send({
           job_id: `dcc-job-${randomUUID()}`,
           status: "queued" as const,
+          manager_uri: `${managerBase}/resolve`,
         });
       },
     );

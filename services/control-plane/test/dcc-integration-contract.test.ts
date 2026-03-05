@@ -93,6 +93,32 @@ test("GET /api/v1/dcc/status/:job_id returns completed status", async () => {
   await app.close();
 });
 
+test("POST /api/v1/dcc/maya/export-asset response includes manager_uri", async () => {
+  const app = buildApp();
+  clearDccAuditTrail();
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/dcc/maya/export-asset",
+    payload: {
+      asset_id: "asset-001",
+      shot_id: "shot-100",
+      version_label: "v1",
+      export_format: "exr",
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.ok("manager_uri" in body, "response should include manager_uri");
+  assert.ok(
+    typeof body.manager_uri === "string" && body.manager_uri.includes("/resolve"),
+    `manager_uri should contain /resolve, got: ${body.manager_uri}`,
+  );
+
+  await app.close();
+});
+
 test("POST /api/v1/dcc/maya/export-asset rejects incomplete payload", async () => {
   const app = buildApp();
 
