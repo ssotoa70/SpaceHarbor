@@ -1,5 +1,6 @@
 import os
-from fastapi import APIRouter, HTTPException
+import uuid
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from src.resolver import VastResolver, AssetNotFoundError
 
@@ -11,6 +12,8 @@ _resolver = VastResolver(
     dev_mode=os.getenv("DEV_MODE", "true").lower() == "true",
 )
 
+
+# --- /resolve ---
 
 class ResolveRequest(BaseModel):
     entity_ref: str
@@ -28,3 +31,49 @@ async def resolve(body: ResolveRequest) -> ResolveResponse:
         return ResolveResponse(entity_ref=body.entity_ref, uri=uri)
     except AssetNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# --- /register ---
+
+class RegisterRequest(BaseModel):
+    name: str
+    shot_id: str
+    source_uri: str
+    version_label: str
+
+
+class RegisterResponse(BaseModel):
+    entity_ref: str
+    asset_id: str
+
+
+@router.post("/register", response_model=RegisterResponse, status_code=201)
+async def register(body: RegisterRequest) -> RegisterResponse:
+    asset_id = str(uuid.uuid4())
+    if not os.getenv("DEV_MODE", "true").lower() == "true":
+        import requests as req
+        cp_url = os.getenv("CONTROL_PLANE_URL", "http://control-plane:3000")
+        resp = req.post(f"{cp_url}/api/v1/ingest", json={
+            "asset_id": asset_id,
+            "name": body.name,
+            "shot_id": body.shot_id,
+            "source_uri": body.source_uri,
+            "version_label": body.version_label,
+        }, timeout=10)
+        resp.raise_for_status()
+    return RegisterResponse(entity_ref=f"asset:{asset_id}", asset_id=asset_id)
+
+
+# --- /browse ---
+
+class BrowseResponse(BaseModel):
+    assets: list[dict]
+
+
+@router.get("/browse", response_model=BrowseResponse)
+async def browse(
+    shot_id: str | None = Query(default=None),
+    project_id: str | None = Query(default=None),
+) -> BrowseResponse:
+    assets = _resolver.list_assets(shot_id=shot_id, project_id=project_id)
+    return BrowseResponse(assets=assets)
