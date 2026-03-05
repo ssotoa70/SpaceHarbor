@@ -10,6 +10,3 @@ services/media-worker/tests/__pycache__/
 dist/
 coverage/
 .worktrees/
-**/.venv/
-**/__pycache__/
-**/.pytest_cache/

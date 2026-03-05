@@ -47,6 +47,28 @@ services:
       retries: 3
       start_period: 10s
 
+  openassetio-manager:
+    build:
+      context: services/openassetio-manager
+      dockerfile: Dockerfile
+    container_name: assetharbor-openassetio-manager
+    ports:
+      - "8001:8001"
+    environment:
+      - DEV_MODE=true
+      - TRINO_HOST=vastdb
+      - TRINO_PORT=8080
+      - CONTROL_PLANE_URL=http://control-plane:3000
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
   web-ui:
     build:
       context: ./services/web-ui

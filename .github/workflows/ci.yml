@@ -37,6 +37,9 @@ jobs:
           PR_MAX_TOTAL_CHANGES: "1200"
         run: node scripts/ci/pr-guardrails.js
 
+      - name: Check declared dependencies
+        run: node scripts/ci/check-declared-deps.js
+
       - name: Install control-plane dependencies
         run: npm ci --prefix services/control-plane
 
