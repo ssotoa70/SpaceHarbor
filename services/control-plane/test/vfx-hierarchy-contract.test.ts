@@ -663,3 +663,78 @@ for (const { name, adapter } of makeAdapters()) {
     assert.equal(updated!.reviewStatus, "client_review");
   });
 }
+
+// ---------------------------------------------------------------------------
+// SERGIO-139: Frame Handles (headHandle + tailHandle)
+// ---------------------------------------------------------------------------
+
+// Test 1: createVersion → headHandle and tailHandle default to null
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] createVersion defaults headHandle and tailHandle to null`, async () => {
+    const { project, seq, shot } = await makeShot(adapter);
+    const version = await adapter.createVersion(
+      { shotId: shot.id, projectId: project.id, sequenceId: seq.id, versionLabel: "v001", status: "draft", mediaType: "exr_sequence", createdBy: "artist@studio.com" },
+      CTX
+    );
+    assert.strictEqual(version.headHandle, null);
+    assert.strictEqual(version.tailHandle, null);
+  });
+}
+
+// Test 2: createVersion with headHandle=8, tailHandle=8 → values persisted
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] createVersion persists explicit headHandle and tailHandle`, async () => {
+    const { project, seq, shot } = await makeShot(adapter);
+    const version = await adapter.createVersion(
+      { shotId: shot.id, projectId: project.id, sequenceId: seq.id, versionLabel: "v001", status: "draft", mediaType: "exr_sequence", createdBy: "artist@studio.com", headHandle: 8, tailHandle: 8 },
+      CTX
+    );
+    assert.strictEqual(version.headHandle, 8);
+    assert.strictEqual(version.tailHandle, 8);
+  });
+}
+
+// Test 3: updateVersionTechnicalMetadata with frame_head_handle=16, frame_tail_handle=16
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] updateVersionTechnicalMetadata updates headHandle and tailHandle`, async () => {
+    const { project, seq, shot } = await makeShot(adapter);
+    const version = await adapter.createVersion(
+      { shotId: shot.id, projectId: project.id, sequenceId: seq.id, versionLabel: "v001", status: "draft", mediaType: "exr_sequence", createdBy: "artist@studio.com" },
+      CTX
+    );
+    const updated = await adapter.updateVersionTechnicalMetadata(version.id, { frame_head_handle: 16, frame_tail_handle: 16 }, CTX);
+    assert.ok(updated, "should return updated version");
+    assert.strictEqual(updated!.headHandle, 16);
+    assert.strictEqual(updated!.tailHandle, 16);
+  });
+}
+
+// Test 4: getVersionById returns headHandle and tailHandle fields
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] getVersionById returns headHandle and tailHandle`, async () => {
+    const { project, seq, shot } = await makeShot(adapter);
+    const version = await adapter.createVersion(
+      { shotId: shot.id, projectId: project.id, sequenceId: seq.id, versionLabel: "v001", status: "draft", mediaType: "exr_sequence", createdBy: "artist@studio.com", headHandle: 4, tailHandle: 4 },
+      CTX
+    );
+    const fetched = await adapter.getVersionById(version.id);
+    assert.ok(fetched);
+    assert.strictEqual(fetched!.headHandle, 4);
+    assert.strictEqual(fetched!.tailHandle, 4);
+  });
+}
+
+// Test 5: headHandle and tailHandle survive publishVersion
+for (const { name, adapter } of makeAdapters()) {
+  test(`[${name}] headHandle and tailHandle survive publishVersion`, async () => {
+    const { project, seq, shot } = await makeShot(adapter);
+    const version = await adapter.createVersion(
+      { shotId: shot.id, projectId: project.id, sequenceId: seq.id, versionLabel: "v001", status: "draft", mediaType: "exr_sequence", createdBy: "artist@studio.com", headHandle: 8, tailHandle: 8 },
+      CTX
+    );
+    const published = await adapter.publishVersion(version.id, CTX);
+    assert.ok(published);
+    assert.strictEqual(published!.headHandle, 8);
+    assert.strictEqual(published!.tailHandle, 8);
+  });
+}

@@ -28,6 +28,8 @@ export interface VfxMetadata {
   compression_type?: string;
   file_size_bytes?: number;
   md5_checksum?: string;
+  frame_head_handle?: number;  // padding frames before frameRangeStart
+  frame_tail_handle?: number;  // padding frames after frameRangeEnd
 }
 
 export interface AssetVersion {
@@ -317,6 +319,8 @@ export interface Version {
   frameRate: number | null;
   frameRangeStart: number | null;
   frameRangeEnd: number | null;
+  headHandle: number | null;
+  tailHandle: number | null;
   pixelAspectRatio: number | null;
   displayWindow: DisplayDataWindow | null;
   dataWindow: DisplayDataWindow | null;

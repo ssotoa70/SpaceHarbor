@@ -88,6 +88,8 @@ class ExrInspectorStage(ProcessorStage):
                     "last": 1024,
                 },
                 "frame_rate": 24.0,
+                "frame_head_handle": 8,   # standard 8-frame handle before cut
+                "frame_tail_handle": 8,   # standard 8-frame handle after cut
                 "pixel_aspect_ratio": 1.0,
                 # Display window (crop bounds)
                 "display_window": {

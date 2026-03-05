@@ -111,6 +111,8 @@ export interface CreateVersionInput {
   notes?: string;
   taskId?: string;
   reviewStatus?: ReviewStatus;
+  headHandle?: number;
+  tailHandle?: number;
 }
 
 export interface CreateEpisodeInput {
