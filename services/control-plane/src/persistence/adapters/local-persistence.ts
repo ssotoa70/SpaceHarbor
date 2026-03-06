@@ -15,6 +15,10 @@ import type {
   IncidentHandoff,
   IncidentNote,
   IngestResult,
+  LookVariant,
+  Material,
+  MaterialDependency,
+  MaterialVersion,
   OutboxItem,
   Project,
   ProjectStatus,
@@ -27,6 +31,7 @@ import type {
   TaskType,
   Version,
   VersionApproval,
+  VersionMaterialBinding,
   VfxMetadata,
   WorkflowJob,
   WorkflowStatus
@@ -43,12 +48,17 @@ import type {
   AuditRetentionApplyResult,
   AuditRetentionPreview,
   CreateEpisodeInput,
+  CreateLookVariantInput,
+  CreateMaterialDependencyInput,
+  CreateMaterialInput,
+  CreateMaterialVersionInput,
   CreateProjectInput,
   CreateSequenceInput,
   CreateShotInput,
   CreateTaskInput,
   CreateVersionApprovalInput,
   CreateVersionInput,
+  CreateVersionMaterialBindingInput,
   FailureResult,
   IncidentGuidedActionsUpdate,
   IncidentHandoffUpdate,
@@ -157,6 +167,14 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   private readonly tasks = new Map<string, Task>();
   private readonly versions = new Map<string, Version>();
   private readonly versionApprovals: VersionApproval[] = [];
+
+  // MaterialX storage
+  private readonly materials = new Map<string, Material>();
+  private readonly materialVersions = new Map<string, MaterialVersion>();
+  private readonly lookVariants = new Map<string, LookVariant>();
+  private readonly versionMaterialBindings: VersionMaterialBinding[] = [];
+  private readonly materialDependencies: MaterialDependency[] = [];
+
   private readonly outboundCounters = {
     attempts: 0,
     success: 0,
@@ -199,6 +217,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.tasks.clear();
     this.versions.clear();
     this.versionApprovals.length = 0;
+    // MaterialX
+    this.materials.clear();
+    this.materialVersions.clear();
+    this.lookVariants.clear();
+    this.versionMaterialBindings.length = 0;
+    this.materialDependencies.length = 0;
   }
 
   createIngestAsset(input: IngestInput, context: WriteContext): IngestResult {
@@ -1390,5 +1414,215 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     const updated = { ...task, status, updatedAt: this.resolveNow(ctx).toISOString() };
     this.tasks.set(taskId, updated);
     return updated;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Material methods (MaterialX)
+  // ---------------------------------------------------------------------------
+
+  async createMaterial(input: CreateMaterialInput, ctx: WriteContext): Promise<Material> {
+    if (!this.projects.has(input.projectId)) {
+      throw new ReferentialIntegrityError(`Project not found: ${input.projectId}`);
+    }
+    const now = this.resolveNow(ctx).toISOString();
+    const material: Material = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      name: input.name,
+      description: input.description ?? null,
+      status: input.status,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.materials.set(material.id, material);
+    return material;
+  }
+
+  async getMaterialById(id: string): Promise<Material | null> {
+    return this.materials.get(id) ?? null;
+  }
+
+  async listMaterialsByProject(projectId: string): Promise<Material[]> {
+    return Array.from(this.materials.values()).filter(
+      (m) => m.projectId === projectId
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Material Version methods
+  // ---------------------------------------------------------------------------
+
+  async createMaterialVersion(input: CreateMaterialVersionInput, ctx: WriteContext): Promise<MaterialVersion> {
+    if (!this.materials.has(input.materialId)) {
+      throw new ReferentialIntegrityError(`Material not found: ${input.materialId}`);
+    }
+    if (input.parentVersionId && !this.materialVersions.has(input.parentVersionId)) {
+      throw new ReferentialIntegrityError(`Parent material version not found: ${input.parentVersionId}`);
+    }
+
+    const existing = Array.from(this.materialVersions.values()).filter(
+      (v) => v.materialId === input.materialId
+    );
+    const versionNumber =
+      existing.length === 0
+        ? 1
+        : Math.max(...existing.map((v) => v.versionNumber)) + 1;
+
+    const now = this.resolveNow(ctx).toISOString();
+    const mv: MaterialVersion = {
+      id: randomUUID(),
+      materialId: input.materialId,
+      versionNumber,
+      versionLabel: input.versionLabel,
+      parentVersionId: input.parentVersionId ?? null,
+      status: input.status,
+      sourcePath: input.sourcePath,
+      contentHash: input.contentHash,
+      usdMaterialPath: input.usdMaterialPath ?? null,
+      renderContexts: input.renderContexts ?? [],
+      colorspaceConfig: input.colorspaceConfig ?? null,
+      mtlxSpecVersion: input.mtlxSpecVersion ?? null,
+      lookNames: input.lookNames ?? [],
+      vastElementHandle: null,
+      vastPath: null,
+      createdBy: input.createdBy,
+      createdAt: now,
+      publishedAt: null
+    };
+    this.materialVersions.set(mv.id, mv);
+    return mv;
+  }
+
+  async getMaterialVersionById(id: string): Promise<MaterialVersion | null> {
+    return this.materialVersions.get(id) ?? null;
+  }
+
+  async listMaterialVersionsByMaterial(materialId: string): Promise<MaterialVersion[]> {
+    return Array.from(this.materialVersions.values())
+      .filter((v) => v.materialId === materialId)
+      .sort((a, b) => a.versionNumber - b.versionNumber);
+  }
+
+  async findMaterialVersionBySourcePathAndHash(
+    sourcePath: string,
+    contentHash: string
+  ): Promise<MaterialVersion | null> {
+    for (const mv of this.materialVersions.values()) {
+      if (mv.sourcePath === sourcePath && mv.contentHash === contentHash) {
+        return mv;
+      }
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Look Variant methods
+  // ---------------------------------------------------------------------------
+
+  async createLookVariant(input: CreateLookVariantInput, ctx: WriteContext): Promise<LookVariant> {
+    if (!this.materialVersions.has(input.materialVersionId)) {
+      throw new ReferentialIntegrityError(
+        `Material version not found: ${input.materialVersionId}`
+      );
+    }
+    const lv: LookVariant = {
+      id: randomUUID(),
+      materialVersionId: input.materialVersionId,
+      lookName: input.lookName,
+      description: input.description ?? null,
+      materialAssigns: input.materialAssigns ?? null,
+      createdAt: this.resolveNow(ctx).toISOString()
+    };
+    this.lookVariants.set(lv.id, lv);
+    return lv;
+  }
+
+  async listLookVariantsByMaterialVersion(materialVersionId: string): Promise<LookVariant[]> {
+    return Array.from(this.lookVariants.values()).filter(
+      (lv) => lv.materialVersionId === materialVersionId
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Version-Material Binding methods ("Where Used?")
+  // ---------------------------------------------------------------------------
+
+  async createVersionMaterialBinding(
+    input: CreateVersionMaterialBindingInput,
+    ctx: WriteContext
+  ): Promise<VersionMaterialBinding> {
+    if (!this.lookVariants.has(input.lookVariantId)) {
+      throw new ReferentialIntegrityError(`Look variant not found: ${input.lookVariantId}`);
+    }
+    if (!this.versions.has(input.versionId)) {
+      throw new ReferentialIntegrityError(`Version not found: ${input.versionId}`);
+    }
+    const binding: VersionMaterialBinding = {
+      id: randomUUID(),
+      lookVariantId: input.lookVariantId,
+      versionId: input.versionId,
+      boundBy: input.boundBy,
+      boundAt: this.resolveNow(ctx).toISOString()
+    };
+    this.versionMaterialBindings.push(binding);
+    return binding;
+  }
+
+  async listBindingsByLookVariant(lookVariantId: string): Promise<VersionMaterialBinding[]> {
+    return this.versionMaterialBindings.filter((b) => b.lookVariantId === lookVariantId);
+  }
+
+  async listBindingsByVersion(versionId: string): Promise<VersionMaterialBinding[]> {
+    return this.versionMaterialBindings.filter((b) => b.versionId === versionId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Material Dependency methods
+  // ---------------------------------------------------------------------------
+
+  async createMaterialDependency(
+    input: CreateMaterialDependencyInput,
+    ctx: WriteContext
+  ): Promise<MaterialDependency> {
+    if (!this.materialVersions.has(input.materialVersionId)) {
+      throw new ReferentialIntegrityError(
+        `Material version not found: ${input.materialVersionId}`
+      );
+    }
+    const dep: MaterialDependency = {
+      id: randomUUID(),
+      materialVersionId: input.materialVersionId,
+      texturePath: input.texturePath,
+      contentHash: input.contentHash,
+      textureType: input.textureType ?? null,
+      colorspace: input.colorspace ?? null,
+      dependencyDepth: input.dependencyDepth,
+      createdAt: this.resolveNow(ctx).toISOString()
+    };
+    this.materialDependencies.push(dep);
+    return dep;
+  }
+
+  async listDependenciesByMaterialVersion(materialVersionId: string): Promise<MaterialDependency[]> {
+    return this.materialDependencies.filter((d) => d.materialVersionId === materialVersionId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cascade-delete safety
+  // ---------------------------------------------------------------------------
+
+  async countBindingsForMaterial(materialId: string): Promise<number> {
+    const mvIds = new Set(
+      Array.from(this.materialVersions.values())
+        .filter((v) => v.materialId === materialId)
+        .map((v) => v.id)
+    );
+    const lvIds = new Set(
+      Array.from(this.lookVariants.values())
+        .filter((lv) => mvIds.has(lv.materialVersionId))
+        .map((lv) => lv.id)
+    );
+    return this.versionMaterialBindings.filter((b) => lvIds.has(b.lookVariantId)).length;
   }
 }

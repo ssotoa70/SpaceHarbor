@@ -14,6 +14,11 @@ import type {
   IncidentHandoffState,
   IncidentNote,
   IngestResult,
+  LookVariant,
+  Material,
+  MaterialDependency,
+  MaterialStatus,
+  MaterialVersion,
   MediaType,
   OutboxItem,
   Project,
@@ -27,8 +32,10 @@ import type {
   Task,
   TaskStatus,
   TaskType,
+  TextureType,
   Version,
   VersionApproval,
+  VersionMaterialBinding,
   VersionStatus,
   VfxMetadata,
   WorkflowJob,
@@ -145,6 +152,55 @@ export interface CreateVersionApprovalInput {
 }
 
 // ---------------------------------------------------------------------------
+// MaterialX input types
+// ---------------------------------------------------------------------------
+
+export interface CreateMaterialInput {
+  projectId: string;
+  name: string;
+  description?: string;
+  status: MaterialStatus;
+  createdBy: string;
+}
+
+export interface CreateMaterialVersionInput {
+  materialId: string;
+  versionLabel: string;
+  parentVersionId?: string;
+  status: VersionStatus;
+  sourcePath: string;
+  contentHash: string;
+  usdMaterialPath?: string;
+  renderContexts?: string[];
+  colorspaceConfig?: string;
+  mtlxSpecVersion?: string;
+  lookNames?: string[];
+  createdBy: string;
+}
+
+export interface CreateLookVariantInput {
+  materialVersionId: string;
+  lookName: string;
+  description?: string;
+  materialAssigns?: string;
+}
+
+export interface CreateVersionMaterialBindingInput {
+  lookVariantId: string;
+  versionId: string;
+  boundBy: string;
+}
+
+export interface CreateMaterialDependencyInput {
+  materialVersionId: string;
+  texturePath: string;
+  contentHash: string;
+  textureType?: TextureType;
+  colorspace?: string;
+  dependencyDepth: number;
+}
+
+// ---------------------------------------------------------------------------
 // VFX Hierarchy adapter interface (subset implemented by all adapters)
 // ---------------------------------------------------------------------------
 
@@ -194,6 +250,33 @@ export interface VfxHierarchyAdapter {
   getTaskById(id: string): Promise<Task | null>;
   listTasksByShot(shotId: string): Promise<Task[]>;
   updateTaskStatus(taskId: string, status: TaskStatus, ctx: WriteContext): Promise<Task | null>;
+
+  // Materials (MaterialX)
+  createMaterial(input: CreateMaterialInput, ctx: WriteContext): Promise<Material>;
+  getMaterialById(id: string): Promise<Material | null>;
+  listMaterialsByProject(projectId: string): Promise<Material[]>;
+
+  // Material Versions
+  createMaterialVersion(input: CreateMaterialVersionInput, ctx: WriteContext): Promise<MaterialVersion>;
+  getMaterialVersionById(id: string): Promise<MaterialVersion | null>;
+  listMaterialVersionsByMaterial(materialId: string): Promise<MaterialVersion[]>;
+  findMaterialVersionBySourcePathAndHash(sourcePath: string, contentHash: string): Promise<MaterialVersion | null>;
+
+  // Look Variants
+  createLookVariant(input: CreateLookVariantInput, ctx: WriteContext): Promise<LookVariant>;
+  listLookVariantsByMaterialVersion(materialVersionId: string): Promise<LookVariant[]>;
+
+  // Version-Material Bindings ("Where Used?")
+  createVersionMaterialBinding(input: CreateVersionMaterialBindingInput, ctx: WriteContext): Promise<VersionMaterialBinding>;
+  listBindingsByLookVariant(lookVariantId: string): Promise<VersionMaterialBinding[]>;
+  listBindingsByVersion(versionId: string): Promise<VersionMaterialBinding[]>;
+
+  // Material Dependencies
+  createMaterialDependency(input: CreateMaterialDependencyInput, ctx: WriteContext): Promise<MaterialDependency>;
+  listDependenciesByMaterialVersion(materialVersionId: string): Promise<MaterialDependency[]>;
+
+  // Cascade-delete safety check
+  countBindingsForMaterial(materialId: string): Promise<number>;
 }
 
 export type PersistenceBackend = "local" | "vast";
