@@ -240,7 +240,8 @@ export type MediaType =
   | "audio"
   | "vdb"
   | "usd"
-  | "plate";
+  | "plate"
+  | "mtlx";
 export type VersionAssetRole = "primary" | "proxy" | "thumbnail" | "aov" | "reference";
 export type ApprovalAction =
   | "submit_for_review"
@@ -391,4 +392,74 @@ export interface Task {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// MaterialX domain types
+// ---------------------------------------------------------------------------
+
+export type MaterialStatus = "active" | "deprecated" | "archived";
+
+export type TextureType =
+  | "albedo" | "roughness" | "normal" | "sss"
+  | "displacement" | "emission" | "opacity" | "other";
+
+export interface Material {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  status: MaterialStatus;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaterialVersion {
+  id: string;
+  materialId: string;
+  versionNumber: number;
+  versionLabel: string;
+  parentVersionId: string | null;
+  status: VersionStatus;
+  sourcePath: string;
+  contentHash: string;
+  usdMaterialPath: string | null;
+  renderContexts: string[];
+  colorspaceConfig: string | null;
+  mtlxSpecVersion: string | null;
+  lookNames: string[];
+  vastElementHandle: string | null;
+  vastPath: string | null;
+  createdBy: string;
+  createdAt: string;
+  publishedAt: string | null;
+}
+
+export interface LookVariant {
+  id: string;
+  materialVersionId: string;
+  lookName: string;
+  description: string | null;
+  materialAssigns: string | null;
+  createdAt: string;
+}
+
+export interface VersionMaterialBinding {
+  id: string;
+  lookVariantId: string;
+  versionId: string;
+  boundBy: string;
+  boundAt: string;
+}
+
+export interface MaterialDependency {
+  id: string;
+  materialVersionId: string;
+  texturePath: string;
+  contentHash: string;
+  textureType: TextureType | null;
+  colorspace: string | null;
+  dependencyDepth: number;
+  createdAt: string;
 }

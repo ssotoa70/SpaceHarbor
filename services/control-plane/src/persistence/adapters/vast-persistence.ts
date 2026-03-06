@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { AuditEvent, Episode, Project, ProjectStatus, ReviewStatus, Sequence, Shot, ShotStatus, Task, TaskStatus, Version, VersionApproval, VfxMetadata } from "../../domain/models.js";
+import type { AuditEvent, Episode, LookVariant, Material, MaterialDependency, MaterialVersion, Project, ProjectStatus, ReviewStatus, Sequence, Shot, ShotStatus, Task, TaskStatus, Version, VersionApproval, VersionMaterialBinding, VfxMetadata } from "../../domain/models.js";
 import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
 import type { OutboundConfig } from "../../integrations/outbound/types.js";
 import type { AuditSignal } from "../../domain/models.js";
@@ -10,12 +10,17 @@ import type {
   AuditRetentionApplyResult,
   AuditRetentionPreview,
   CreateEpisodeInput,
+  CreateLookVariantInput,
+  CreateMaterialDependencyInput,
+  CreateMaterialInput,
+  CreateMaterialVersionInput,
   CreateProjectInput,
   CreateSequenceInput,
   CreateShotInput,
   CreateTaskInput,
   CreateVersionApprovalInput,
   CreateVersionInput,
+  CreateVersionMaterialBindingInput,
   FailureResult,
   IncidentGuidedActionsUpdate,
   IncidentHandoffUpdate,
@@ -467,5 +472,66 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   async updateTaskStatus(taskId: string, status: TaskStatus, ctx: WriteContext): Promise<Task | null> {
     return this.localFallback.updateTaskStatus(taskId, status, ctx);
+  }
+
+  // MaterialX stubs — delegate to localFallback
+  async createMaterial(input: CreateMaterialInput, ctx: WriteContext): Promise<Material> {
+    return this.localFallback.createMaterial(input, ctx);
+  }
+
+  async getMaterialById(id: string): Promise<Material | null> {
+    return this.localFallback.getMaterialById(id);
+  }
+
+  async listMaterialsByProject(projectId: string): Promise<Material[]> {
+    return this.localFallback.listMaterialsByProject(projectId);
+  }
+
+  async createMaterialVersion(input: CreateMaterialVersionInput, ctx: WriteContext): Promise<MaterialVersion> {
+    return this.localFallback.createMaterialVersion(input, ctx);
+  }
+
+  async getMaterialVersionById(id: string): Promise<MaterialVersion | null> {
+    return this.localFallback.getMaterialVersionById(id);
+  }
+
+  async listMaterialVersionsByMaterial(materialId: string): Promise<MaterialVersion[]> {
+    return this.localFallback.listMaterialVersionsByMaterial(materialId);
+  }
+
+  async findMaterialVersionBySourcePathAndHash(sourcePath: string, contentHash: string): Promise<MaterialVersion | null> {
+    return this.localFallback.findMaterialVersionBySourcePathAndHash(sourcePath, contentHash);
+  }
+
+  async createLookVariant(input: CreateLookVariantInput, ctx: WriteContext): Promise<LookVariant> {
+    return this.localFallback.createLookVariant(input, ctx);
+  }
+
+  async listLookVariantsByMaterialVersion(materialVersionId: string): Promise<LookVariant[]> {
+    return this.localFallback.listLookVariantsByMaterialVersion(materialVersionId);
+  }
+
+  async createVersionMaterialBinding(input: CreateVersionMaterialBindingInput, ctx: WriteContext): Promise<VersionMaterialBinding> {
+    return this.localFallback.createVersionMaterialBinding(input, ctx);
+  }
+
+  async listBindingsByLookVariant(lookVariantId: string): Promise<VersionMaterialBinding[]> {
+    return this.localFallback.listBindingsByLookVariant(lookVariantId);
+  }
+
+  async listBindingsByVersion(versionId: string): Promise<VersionMaterialBinding[]> {
+    return this.localFallback.listBindingsByVersion(versionId);
+  }
+
+  async createMaterialDependency(input: CreateMaterialDependencyInput, ctx: WriteContext): Promise<MaterialDependency> {
+    return this.localFallback.createMaterialDependency(input, ctx);
+  }
+
+  async listDependenciesByMaterialVersion(materialVersionId: string): Promise<MaterialDependency[]> {
+    return this.localFallback.listDependenciesByMaterialVersion(materialVersionId);
+  }
+
+  async countBindingsForMaterial(materialId: string): Promise<number> {
+    return this.localFallback.countBindingsForMaterial(materialId);
   }
 }
