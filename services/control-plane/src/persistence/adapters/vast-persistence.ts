@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { AuditEvent, Episode, LookVariant, Material, MaterialDependency, MaterialVersion, Project, ProjectStatus, ReviewStatus, Sequence, Shot, ShotStatus, Task, TaskStatus, Version, VersionApproval, VersionMaterialBinding, VfxMetadata } from "../../domain/models.js";
+import type { AuditEvent, ClipConformStatus, Episode, LookVariant, Material, MaterialDependency, MaterialVersion, Project, ProjectStatus, ReviewStatus, Sequence, Shot, ShotStatus, Task, TaskStatus, Timeline, TimelineClip, TimelineStatus, Version, VersionApproval, VersionMaterialBinding, VfxMetadata } from "../../domain/models.js";
 import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
 import type { OutboundConfig } from "../../integrations/outbound/types.js";
 import type { AuditSignal } from "../../domain/models.js";
@@ -533,5 +533,28 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   async countBindingsForMaterial(materialId: string): Promise<number> {
     return this.localFallback.countBindingsForMaterial(materialId);
+  }
+
+  // Timelines (OTIO) — delegate to local
+  async createTimeline(input: import("../types.js").CreateTimelineInput, ctx: import("../types.js").WriteContext): Promise<Timeline> {
+    return this.localFallback.createTimeline(input, ctx);
+  }
+  async getTimelineById(id: string): Promise<Timeline | null> {
+    return this.localFallback.getTimelineById(id);
+  }
+  async listTimelinesByProject(projectId: string): Promise<Timeline[]> {
+    return this.localFallback.listTimelinesByProject(projectId);
+  }
+  async updateTimelineStatus(id: string, status: TimelineStatus, ctx: import("../types.js").WriteContext): Promise<Timeline | null> {
+    return this.localFallback.updateTimelineStatus(id, status, ctx);
+  }
+  async createTimelineClip(input: import("../types.js").CreateTimelineClipInput, ctx: import("../types.js").WriteContext): Promise<TimelineClip> {
+    return this.localFallback.createTimelineClip(input, ctx);
+  }
+  async listClipsByTimeline(timelineId: string): Promise<TimelineClip[]> {
+    return this.localFallback.listClipsByTimeline(timelineId);
+  }
+  async updateClipConformStatus(clipId: string, status: ClipConformStatus, shotId?: string, assetId?: string): Promise<void> {
+    return this.localFallback.updateClipConformStatus(clipId, status, shotId, assetId);
   }
 }

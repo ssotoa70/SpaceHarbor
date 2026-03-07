@@ -34,7 +34,11 @@ import type {
   VersionMaterialBinding,
   VfxMetadata,
   WorkflowJob,
-  WorkflowStatus
+  WorkflowStatus,
+  Timeline,
+  TimelineStatus,
+  TimelineClip,
+  ClipConformStatus
 } from "../../domain/models.js";
 import { mapOutboxItemToOutboundPayload } from "../../integrations/outbound/payload-mapper.js";
 import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
@@ -59,6 +63,8 @@ import type {
   CreateVersionApprovalInput,
   CreateVersionInput,
   CreateVersionMaterialBindingInput,
+  CreateTimelineInput,
+  CreateTimelineClipInput,
   FailureResult,
   IncidentGuidedActionsUpdate,
   IncidentHandoffUpdate,
@@ -174,6 +180,10 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   private readonly lookVariants = new Map<string, LookVariant>();
   private readonly versionMaterialBindings: VersionMaterialBinding[] = [];
   private readonly materialDependencies: MaterialDependency[] = [];
+
+  // Timeline / OTIO storage
+  private readonly timelines = new Map<string, Timeline>();
+  private readonly timelineClips = new Map<string, TimelineClip>();
 
   private readonly outboundCounters = {
     attempts: 0,
@@ -1624,5 +1634,83 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
         .map((lv) => lv.id)
     );
     return this.versionMaterialBindings.filter((b) => lvIds.has(b.lookVariantId)).length;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Timelines (OTIO)
+  // ---------------------------------------------------------------------------
+
+  async createTimeline(input: CreateTimelineInput, ctx: WriteContext): Promise<Timeline> {
+    const timeline: Timeline = {
+      id: randomUUID(),
+      name: input.name,
+      projectId: input.projectId,
+      frameRate: input.frameRate,
+      durationFrames: input.durationFrames,
+      status: "ingested",
+      sourceUri: input.sourceUri,
+      createdAt: this.resolveNow(ctx).toISOString(),
+    };
+    this.timelines.set(timeline.id, timeline);
+    return timeline;
+  }
+
+  async getTimelineById(id: string): Promise<Timeline | null> {
+    return this.timelines.get(id) ?? null;
+  }
+
+  async listTimelinesByProject(projectId: string): Promise<Timeline[]> {
+    return Array.from(this.timelines.values()).filter((t) => t.projectId === projectId);
+  }
+
+  async updateTimelineStatus(
+    id: string,
+    status: TimelineStatus,
+    ctx: WriteContext
+  ): Promise<Timeline | null> {
+    const timeline = this.timelines.get(id);
+    if (!timeline) return null;
+    const updated = { ...timeline, status };
+    this.timelines.set(id, updated);
+    return updated;
+  }
+
+  async createTimelineClip(input: CreateTimelineClipInput, ctx: WriteContext): Promise<TimelineClip> {
+    const clip: TimelineClip = {
+      id: randomUUID(),
+      timelineId: input.timelineId,
+      trackName: input.trackName,
+      clipName: input.clipName,
+      sourceUri: input.sourceUri,
+      inFrame: input.inFrame,
+      outFrame: input.outFrame,
+      durationFrames: input.durationFrames,
+      shotId: null,
+      assetId: null,
+      conformStatus: "pending",
+    };
+    this.timelineClips.set(clip.id, clip);
+    return clip;
+  }
+
+  async listClipsByTimeline(timelineId: string): Promise<TimelineClip[]> {
+    return Array.from(this.timelineClips.values()).filter((c) => c.timelineId === timelineId);
+  }
+
+  async updateClipConformStatus(
+    clipId: string,
+    status: ClipConformStatus,
+    shotId?: string,
+    assetId?: string
+  ): Promise<void> {
+    const clip = this.timelineClips.get(clipId);
+    if (!clip) return;
+    const updated = {
+      ...clip,
+      conformStatus: status,
+      shotId: shotId ?? clip.shotId,
+      assetId: assetId ?? clip.assetId,
+    };
+    this.timelineClips.set(clipId, updated);
   }
 }
