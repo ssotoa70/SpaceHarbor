@@ -20,6 +20,8 @@ import { registerDccRoute } from "./routes/dcc.js";
 import { registerReviewRoutes } from "./routes/review.js";
 import { registerQueueRoute } from "./routes/queue.js";
 import { registerVastEventsRoute } from "./routes/vast-events.js";
+import { registerMaterialsRoute } from "./routes/materials.js";
+import { registerTimelinesRoute } from "./routes/timelines.js";
 import { Kafka } from "kafkajs";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 
@@ -95,6 +97,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerReviewRoutes(app, persistence, prefixes);
     void registerDlqRoute(app, persistence);
     void registerMetricsRoute(app, persistence);
+    void registerMaterialsRoute(app, persistence);
+    void registerTimelinesRoute(app, persistence);
   });
 
   // Expose persistence for test scaffolding (accessed as (app as any).persistence)
