@@ -115,11 +115,63 @@ docker compose up --build
 - `POST /api/v1/events` — Publish event (dev/test only)
 - `POST /api/v1/events/vast-dataengine` — Receive simulated VAST DataEngine completion (local dev mode)
 
+### Approval Workflow
+
+- `POST /api/v1/assets/:id/request-review` — Submit asset for review
+- `POST /api/v1/assets/:id/approve` — Approve asset
+- `POST /api/v1/assets/:id/reject` — Reject asset
+- `GET /api/v1/assets/approval-queue` — List assets in review
+
+### Review
+
+- `GET /api/v1/assets/:id/review-uri` — Get OpenRV launch URI for asset preview
+
+### DCC Integration (stubs)
+
+- `POST /api/v1/dcc/maya/export-asset` — Export asset to Maya (stub)
+- `POST /api/v1/dcc/nuke/import-metadata` — Import metadata from Nuke (stub)
+- `GET /api/v1/dcc/supported-formats` — List supported DCC formats
+- `GET /api/v1/dcc/status/:job_id` — Get DCC job status (stub)
+
+### Materials (MaterialX)
+
+- `POST /api/v1/materials` — Create a material
+- `GET /api/v1/materials` — List materials
+- `GET /api/v1/materials/:id` — Get material by ID
+- `POST /api/v1/materials/:id/parse` — Parse MaterialX document
+- `GET /api/v1/materials/:id/inputs` — Get material inputs
+- `GET /api/v1/materials/:id/outputs` — Get material outputs
+- `POST /api/v1/materials/:id/assign` — Assign material to asset
+- `GET /api/v1/materials/:id/assignments` — Get material assignments
+- `POST /api/v1/materials/:id/validate` — Validate material
+- `GET /api/v1/materials/:id/graph` — Get material node graph
+- `GET /api/v1/materials/:id/dependencies` — Get material dependencies
+- `POST /api/v1/materials/:id/bake` — Bake material (texture generation)
+- `GET /api/v1/materials/:id/bake-status` — Get bake status
+
+### Timelines (OTIO)
+
+- `POST /api/v1/timelines/ingest` — Ingest an OTIO timeline file
+- `GET /api/v1/timelines` — List timelines
+- `GET /api/v1/timelines/:id` — Get timeline by ID
+- `POST /api/v1/timelines/:id/conform` — Conform timeline to media
+- `GET /api/v1/timelines/:id/conform-status` — Get conform status
+
+### Incident Coordination
+
+- `GET /api/v1/incident/coordination` — Get incident coordination state
+- `PUT /api/v1/incident/coordination/actions` — Execute incident actions
+- `POST /api/v1/incident/coordination/notes` — Add incident notes
+- `PUT /api/v1/incident/coordination/handoff` — Handoff incident
+
 ### Audit & Observability
 
 - `GET /api/v1/audit` — Audit trail with correlation IDs
 - `GET /api/v1/metrics` — Queue, job, DLQ, and outbox counters
+- `GET /api/v1/outbox` — List outbox items
+- `POST /api/v1/outbox/publish` — Publish pending outbox items
 - `GET /health` — Service health check
+- `GET /health/ready` — Readiness probe
 
 ### Legacy Aliases
 
