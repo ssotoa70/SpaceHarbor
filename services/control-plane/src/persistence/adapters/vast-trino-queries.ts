@@ -6,6 +6,7 @@
  * Row-to-domain mapping is done here.
  */
 
+import { randomUUID } from "node:crypto";
 import type { TrinoClient, TrinoQueryResult } from "../../db/trino-client.js";
 import type {
   Episode,
@@ -36,6 +37,22 @@ import type {
   VersionMaterialBinding,
   MaterialDependency
 } from "../../domain/models.js";
+import type {
+  CreateProjectInput,
+  CreateSequenceInput,
+  CreateShotInput,
+  CreateVersionInput,
+  CreateVersionApprovalInput,
+  CreateEpisodeInput,
+  CreateTaskInput,
+  CreateMaterialInput,
+  CreateMaterialVersionInput,
+  CreateLookVariantInput,
+  CreateVersionMaterialBindingInput,
+  CreateMaterialDependencyInput,
+  WriteContext
+} from "../types.js";
+import { ReferentialIntegrityError } from "../types.js";
 
 const S = 'vast."assetharbor/production"';
 
@@ -456,4 +473,280 @@ export async function queryCountBindingsForMaterial(client: TrinoClient, materia
     return Number(r.data[0][0]);
   }
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// WRITE queries
+// ---------------------------------------------------------------------------
+
+function nowIso(ctx: WriteContext): string {
+  return ctx.now ?? new Date().toISOString();
+}
+
+export async function insertProject(client: TrinoClient, input: CreateProjectInput, ctx: WriteContext): Promise<Project> {
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.projects (id, code, name, type, status, frame_rate, color_space, resolution_w, resolution_h, start_date, delivery_date, owner, created_at, updated_at) VALUES (${esc(id)}, ${esc(input.code)}, ${esc(input.name)}, ${esc(input.type)}, ${esc(input.status)}, ${escNum(input.frameRate)}, ${esc(input.colorSpace)}, ${escNum(input.resolutionW)}, ${escNum(input.resolutionH)}, ${escTimestamp(input.startDate)}, ${escTimestamp(input.deliveryDate)}, ${esc(input.owner)}, TIMESTAMP ${esc(now)}, TIMESTAMP ${esc(now)})`);
+
+  return {
+    id, code: input.code, name: input.name, type: input.type, status: input.status,
+    frameRate: input.frameRate ?? null, colorSpace: input.colorSpace ?? null,
+    resolutionW: input.resolutionW ?? null, resolutionH: input.resolutionH ?? null,
+    startDate: input.startDate ?? null, deliveryDate: input.deliveryDate ?? null,
+    owner: input.owner ?? null, createdAt: now, updatedAt: now
+  };
+}
+
+export async function insertSequence(client: TrinoClient, input: CreateSequenceInput, ctx: WriteContext): Promise<Sequence> {
+  // Referential integrity: project must exist
+  const project = await queryProjectById(client, input.projectId);
+  if (!project) throw new ReferentialIntegrityError(`Project ${input.projectId} not found`);
+
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.sequences (id, project_id, code, episode, name, status, shot_count, frame_range_start, frame_range_end, created_at, updated_at) VALUES (${esc(id)}, ${esc(input.projectId)}, ${esc(input.code)}, ${esc(input.episode)}, ${esc(input.name)}, ${esc(input.status)}, 0, ${escNum(input.frameRangeStart)}, ${escNum(input.frameRangeEnd)}, TIMESTAMP ${esc(now)}, TIMESTAMP ${esc(now)})`);
+
+  return {
+    id, projectId: input.projectId, code: input.code,
+    episode: input.episode ?? null, episodeId: input.episodeId ?? null,
+    name: input.name ?? null, status: input.status, shotCount: 0,
+    frameRangeStart: input.frameRangeStart ?? null, frameRangeEnd: input.frameRangeEnd ?? null,
+    createdAt: now, updatedAt: now
+  };
+}
+
+export async function insertShot(client: TrinoClient, input: CreateShotInput, ctx: WriteContext): Promise<Shot> {
+  const project = await queryProjectById(client, input.projectId);
+  if (!project) throw new ReferentialIntegrityError(`Project ${input.projectId} not found`);
+  const seq = await querySequenceById(client, input.sequenceId);
+  if (!seq) throw new ReferentialIntegrityError(`Sequence ${input.sequenceId} not found`);
+
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.shots (id, project_id, sequence_id, code, name, status, frame_range_start, frame_range_end, frame_count, frame_rate, vendor, lead, priority, due_date, notes, latest_version_id, created_at, updated_at) VALUES (${esc(id)}, ${esc(input.projectId)}, ${esc(input.sequenceId)}, ${esc(input.code)}, ${esc(input.name)}, ${esc(input.status)}, ${escNum(input.frameRangeStart)}, ${escNum(input.frameRangeEnd)}, ${escNum(input.frameCount)}, ${escNum(input.frameRate)}, ${esc(input.vendor)}, ${esc(input.lead)}, ${esc(input.priority)}, ${escTimestamp(input.dueDate)}, ${esc(input.notes)}, NULL, TIMESTAMP ${esc(now)}, TIMESTAMP ${esc(now)})`);
+
+  return {
+    id, projectId: input.projectId, sequenceId: input.sequenceId,
+    code: input.code, name: input.name ?? null, status: input.status,
+    frameRangeStart: input.frameRangeStart, frameRangeEnd: input.frameRangeEnd,
+    frameCount: input.frameCount, frameRate: input.frameRate ?? null,
+    vendor: input.vendor ?? null, lead: input.lead ?? null,
+    priority: input.priority ?? null, dueDate: input.dueDate ?? null,
+    notes: input.notes ?? null, latestVersionId: null,
+    createdAt: now, updatedAt: now
+  };
+}
+
+export async function insertVersion(client: TrinoClient, input: CreateVersionInput, ctx: WriteContext): Promise<Version> {
+  // Determine next version number
+  const existing = await queryVersionsByShot(client, input.shotId);
+  const versionNumber = existing.length > 0 ? existing[0].versionNumber + 1 : 1;
+
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.versions (id, shot_id, project_id, sequence_id, version_label, version_number, parent_version_id, status, media_type, created_by, created_at, notes) VALUES (${esc(id)}, ${esc(input.shotId)}, ${esc(input.projectId)}, ${esc(input.sequenceId)}, ${esc(input.versionLabel)}, ${escNum(versionNumber)}, ${esc(input.parentVersionId)}, ${esc(input.status)}, ${esc(input.mediaType)}, ${esc(input.createdBy)}, TIMESTAMP ${esc(now)}, ${esc(input.notes)})`);
+
+  // Insert companion rows if provided
+  const reviewStatus = input.reviewStatus ?? "wip";
+  await client.query(`INSERT INTO ${S}.version_review_status (version_id, review_status, updated_at) VALUES (${esc(id)}, ${esc(reviewStatus)}, TIMESTAMP ${esc(now)})`);
+
+  if (input.headHandle != null || input.tailHandle != null) {
+    await client.query(`INSERT INTO ${S}.version_frame_handles (version_id, head_handle, tail_handle, updated_at) VALUES (${esc(id)}, ${escNum(input.headHandle ?? 0)}, ${escNum(input.tailHandle ?? 0)}, TIMESTAMP ${esc(now)})`);
+  }
+
+  return {
+    id, shotId: input.shotId, projectId: input.projectId,
+    sequenceId: input.sequenceId, versionLabel: input.versionLabel,
+    versionNumber, parentVersionId: input.parentVersionId ?? null,
+    status: input.status, mediaType: input.mediaType,
+    codec: null, resolutionW: null, resolutionH: null,
+    frameRate: null, frameRangeStart: null, frameRangeEnd: null,
+    headHandle: input.headHandle ?? null, tailHandle: input.tailHandle ?? null,
+    pixelAspectRatio: null, displayWindow: null, dataWindow: null,
+    compressionType: null, colorSpace: null, bitDepth: null,
+    channelCount: null, fileSizeBytes: null, md5Checksum: null,
+    vastElementHandle: null, vastPath: null,
+    createdBy: input.createdBy, createdAt: now,
+    publishedAt: null, notes: input.notes ?? null,
+    taskId: input.taskId ?? null, reviewStatus
+  };
+}
+
+export async function updateShotStatusSql(client: TrinoClient, shotId: string, status: ShotStatus, ctx: WriteContext): Promise<Shot | null> {
+  const shot = await queryShotById(client, shotId);
+  if (!shot) return null;
+  const now = nowIso(ctx);
+  await client.query(`UPDATE ${S}.shots SET status = ${esc(status)}, updated_at = TIMESTAMP ${esc(now)} WHERE id = ${esc(shotId)}`);
+  return { ...shot, status, updatedAt: now };
+}
+
+export async function publishVersionSql(client: TrinoClient, versionId: string, ctx: WriteContext): Promise<Version | null> {
+  const version = await queryVersionById(client, versionId);
+  if (!version) return null;
+  const now = nowIso(ctx);
+  await client.query(`UPDATE ${S}.versions SET status = 'published', published_at = TIMESTAMP ${esc(now)} WHERE id = ${esc(versionId)}`);
+  return { ...version, status: "published", publishedAt: now };
+}
+
+export async function updateVersionReviewStatusSql(client: TrinoClient, versionId: string, status: ReviewStatus, ctx: WriteContext): Promise<Version | null> {
+  const version = await queryVersionById(client, versionId);
+  if (!version) return null;
+  const now = nowIso(ctx);
+  // Upsert: delete + insert (VAST cannot UPDATE sort key columns)
+  await client.query(`DELETE FROM ${S}.version_review_status WHERE version_id = ${esc(versionId)}`);
+  await client.query(`INSERT INTO ${S}.version_review_status (version_id, review_status, updated_at) VALUES (${esc(versionId)}, ${esc(status)}, TIMESTAMP ${esc(now)})`);
+  return { ...version, reviewStatus: status };
+}
+
+export async function updateVersionTechnicalMetadataSql(client: TrinoClient, versionId: string, meta: Partial<import("../../domain/models.js").VfxMetadata>, ctx: WriteContext): Promise<Version | null> {
+  const version = await queryVersionById(client, versionId);
+  if (!version) return null;
+  const now = nowIso(ctx);
+  const sets: string[] = [`updated_at = TIMESTAMP ${esc(now)}`];
+  // Build dynamic SET clause — Trino does not support partial updates easily
+  // but we avoid the sort-key limitation by only updating non-sort columns
+  if (meta.codec !== undefined) sets.push(`codec = ${esc(meta.codec ?? null)}`);
+  if (meta.resolution?.width !== undefined) sets.push(`resolution_w = ${escNum(meta.resolution.width)}`);
+  if (meta.resolution?.height !== undefined) sets.push(`resolution_h = ${escNum(meta.resolution.height)}`);
+  if (meta.frame_rate !== undefined) sets.push(`frame_rate = ${escNum(meta.frame_rate ?? null)}`);
+  if (meta.frame_range?.start !== undefined) sets.push(`frame_range_start = ${escNum(meta.frame_range.start)}`);
+  if (meta.frame_range?.end !== undefined) sets.push(`frame_range_end = ${escNum(meta.frame_range.end)}`);
+  if (meta.color_space !== undefined) sets.push(`color_space = ${esc(meta.color_space ?? null)}`);
+  if (meta.compression_type !== undefined) sets.push(`compression_type = ${esc(meta.compression_type ?? null)}`);
+  if (meta.bit_depth !== undefined) sets.push(`bit_depth = ${escNum(meta.bit_depth ?? null)}`);
+  if (meta.file_size_bytes !== undefined) sets.push(`file_size_bytes = ${escNum(meta.file_size_bytes ?? null)}`);
+  if (meta.md5_checksum !== undefined) sets.push(`md5_checksum = ${esc(meta.md5_checksum ?? null)}`);
+
+  if (sets.length > 1) {
+    await client.query(`UPDATE ${S}.versions SET ${sets.join(", ")} WHERE id = ${esc(versionId)}`);
+  }
+
+  return queryVersionById(client, versionId);
+}
+
+export async function insertVersionApproval(client: TrinoClient, input: CreateVersionApprovalInput, ctx: WriteContext): Promise<VersionApproval> {
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.version_approvals (id, version_id, shot_id, project_id, action, performed_by, role, note, at) VALUES (${esc(id)}, ${esc(input.versionId)}, ${esc(input.shotId)}, ${esc(input.projectId)}, ${esc(input.action)}, ${esc(input.performedBy)}, ${esc(input.role)}, ${esc(input.note)}, TIMESTAMP ${esc(now)})`);
+  return {
+    id, versionId: input.versionId, shotId: input.shotId,
+    projectId: input.projectId, action: input.action,
+    performedBy: input.performedBy, role: input.role ?? null,
+    note: input.note ?? null, at: now
+  };
+}
+
+export async function insertEpisode(client: TrinoClient, input: CreateEpisodeInput, ctx: WriteContext): Promise<Episode> {
+  const project = await queryProjectById(client, input.projectId);
+  if (!project) throw new ReferentialIntegrityError(`Project ${input.projectId} not found`);
+
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.episodes (id, project_id, code, name, status, sequence_count, created_at, updated_at) VALUES (${esc(id)}, ${esc(input.projectId)}, ${esc(input.code)}, ${esc(input.name)}, ${esc(input.status)}, 0, TIMESTAMP ${esc(now)}, TIMESTAMP ${esc(now)})`);
+  return {
+    id, projectId: input.projectId, code: input.code,
+    name: input.name ?? null, status: input.status,
+    sequenceCount: 0, createdAt: now, updatedAt: now
+  };
+}
+
+export async function insertTask(client: TrinoClient, input: CreateTaskInput, ctx: WriteContext): Promise<Task> {
+  // Determine next task number for this shot
+  const existing = await queryTasksByShot(client, input.shotId);
+  const taskNumber = existing.length + 1;
+
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.tasks (id, shot_id, project_id, sequence_id, code, type, status, assignee, due_date, task_number, notes, created_at, updated_at) VALUES (${esc(id)}, ${esc(input.shotId)}, ${esc(input.projectId)}, ${esc(input.sequenceId)}, ${esc(input.code)}, ${esc(input.type)}, ${esc(input.status)}, ${esc(input.assignee)}, ${escTimestamp(input.dueDate)}, ${escNum(taskNumber)}, ${esc(input.notes)}, TIMESTAMP ${esc(now)}, TIMESTAMP ${esc(now)})`);
+  return {
+    id, shotId: input.shotId, projectId: input.projectId,
+    sequenceId: input.sequenceId, code: input.code,
+    type: input.type, status: input.status,
+    assignee: input.assignee ?? null, dueDate: input.dueDate ?? null,
+    taskNumber, notes: input.notes ?? null,
+    createdAt: now, updatedAt: now
+  };
+}
+
+export async function updateTaskStatusSql(client: TrinoClient, taskId: string, status: TaskStatus, ctx: WriteContext): Promise<Task | null> {
+  const task = await queryTaskById(client, taskId);
+  if (!task) return null;
+  const now = nowIso(ctx);
+  await client.query(`UPDATE ${S}.tasks SET status = ${esc(status)}, updated_at = TIMESTAMP ${esc(now)} WHERE id = ${esc(taskId)}`);
+  return { ...task, status, updatedAt: now };
+}
+
+export async function insertMaterial(client: TrinoClient, input: CreateMaterialInput, ctx: WriteContext): Promise<Material> {
+  const project = await queryProjectById(client, input.projectId);
+  if (!project) throw new ReferentialIntegrityError(`Project ${input.projectId} not found`);
+
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.materials (id, project_id, name, description, status, created_by, created_at, updated_at) VALUES (${esc(id)}, ${esc(input.projectId)}, ${esc(input.name)}, ${esc(input.description)}, ${esc(input.status)}, ${esc(input.createdBy)}, TIMESTAMP ${esc(now)}, TIMESTAMP ${esc(now)})`);
+  return {
+    id, projectId: input.projectId, name: input.name,
+    description: input.description ?? null, status: input.status,
+    createdBy: input.createdBy, createdAt: now, updatedAt: now
+  };
+}
+
+export async function insertMaterialVersion(client: TrinoClient, input: CreateMaterialVersionInput, ctx: WriteContext): Promise<MaterialVersion> {
+  // Determine next version number
+  const existing = await queryMaterialVersionsByMaterial(client, input.materialId);
+  const versionNumber = existing.length > 0 ? existing[0].versionNumber + 1 : 1;
+
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  const renderCtx = input.renderContexts ? `ARRAY[${input.renderContexts.map((s) => esc(s)).join(",")}]` : "NULL";
+  const lookN = input.lookNames ? `ARRAY[${input.lookNames.map((s) => esc(s)).join(",")}]` : "NULL";
+
+  await client.query(`INSERT INTO ${S}.material_versions (id, material_id, version_number, version_label, parent_version_id, status, source_path, content_hash, usd_material_path, render_contexts, colorspace_config, mtlx_spec_version, look_names, vast_element_handle, vast_path, created_by, created_at, published_at) VALUES (${esc(id)}, ${esc(input.materialId)}, ${escNum(versionNumber)}, ${esc(input.versionLabel)}, ${esc(input.parentVersionId)}, ${esc(input.status)}, ${esc(input.sourcePath)}, ${esc(input.contentHash)}, ${esc(input.usdMaterialPath)}, ${renderCtx}, ${esc(input.colorspaceConfig)}, ${esc(input.mtlxSpecVersion)}, ${lookN}, NULL, NULL, ${esc(input.createdBy)}, TIMESTAMP ${esc(now)}, NULL)`);
+
+  return {
+    id, materialId: input.materialId, versionNumber,
+    versionLabel: input.versionLabel,
+    parentVersionId: input.parentVersionId ?? null,
+    status: input.status, sourcePath: input.sourcePath,
+    contentHash: input.contentHash,
+    usdMaterialPath: input.usdMaterialPath ?? null,
+    renderContexts: input.renderContexts ?? [],
+    colorspaceConfig: input.colorspaceConfig ?? null,
+    mtlxSpecVersion: input.mtlxSpecVersion ?? null,
+    lookNames: input.lookNames ?? [],
+    vastElementHandle: null, vastPath: null,
+    createdBy: input.createdBy, createdAt: now, publishedAt: null
+  };
+}
+
+export async function insertLookVariant(client: TrinoClient, input: CreateLookVariantInput, ctx: WriteContext): Promise<LookVariant> {
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.look_variants (id, material_version_id, look_name, description, material_assigns, created_at) VALUES (${esc(id)}, ${esc(input.materialVersionId)}, ${esc(input.lookName)}, ${esc(input.description)}, ${esc(input.materialAssigns)}, TIMESTAMP ${esc(now)})`);
+  return {
+    id, materialVersionId: input.materialVersionId,
+    lookName: input.lookName, description: input.description ?? null,
+    materialAssigns: input.materialAssigns ?? null, createdAt: now
+  };
+}
+
+export async function insertVersionMaterialBinding(client: TrinoClient, input: CreateVersionMaterialBindingInput, ctx: WriteContext): Promise<VersionMaterialBinding> {
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.version_material_bindings (id, look_variant_id, version_id, bound_by, bound_at) VALUES (${esc(id)}, ${esc(input.lookVariantId)}, ${esc(input.versionId)}, ${esc(input.boundBy)}, TIMESTAMP ${esc(now)})`);
+  return {
+    id, lookVariantId: input.lookVariantId,
+    versionId: input.versionId, boundBy: input.boundBy, boundAt: now
+  };
+}
+
+export async function insertMaterialDependency(client: TrinoClient, input: CreateMaterialDependencyInput, ctx: WriteContext): Promise<MaterialDependency> {
+  const id = randomUUID();
+  const now = nowIso(ctx);
+  await client.query(`INSERT INTO ${S}.material_dependencies (id, material_version_id, texture_path, content_hash, texture_type, colorspace, dependency_depth, created_at) VALUES (${esc(id)}, ${esc(input.materialVersionId)}, ${esc(input.texturePath)}, ${esc(input.contentHash)}, ${esc(input.textureType)}, ${esc(input.colorspace)}, ${escNum(input.dependencyDepth)}, TIMESTAMP ${esc(now)})`);
+  return {
+    id, materialVersionId: input.materialVersionId,
+    texturePath: input.texturePath, contentHash: input.contentHash,
+    textureType: input.textureType ?? null, colorspace: input.colorspace ?? null,
+    dependencyDepth: input.dependencyDepth, createdAt: now
+  };
 }

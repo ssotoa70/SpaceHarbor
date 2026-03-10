@@ -8,7 +8,8 @@
     "start": "tsx src/server.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "test:contracts": "node --import tsx --test test/*contract*.test.ts test/*v1-contract*.test.ts",
-    "db:install": "tsx src/db/installer.ts"
+    "db:install": "tsx src/db/installer.ts",
+    "test:integration": "docker compose -f docker-compose.test.yml up -d --wait && TRINO_INTEGRATION=true node --import tsx --test test/integration/*.test.ts; docker compose -f docker-compose.test.yml down"
   },
   "dependencies": {
     "@fastify/swagger": "^9.7.0",
