@@ -1,75 +1,26 @@
 /**
  * Migration 001: VFX Hierarchy Schema
  *
- * Creates the Project → Sequence → Shot → Version → VersionApproval hierarchy
+ * Creates the Project -> Sequence -> Shot -> Version -> VersionApproval hierarchy
  * in VAST Database (assetharbor/production schema).
  *
- * Run with: npx tsx src/db/migrations/001_vfx_hierarchy.ts
- *
- * Required env vars:
- *   VAST_TRINO_ENDPOINT   — e.g. https://trino.vast.example.com:8443
- *   VAST_ACCESS_KEY       — S3 access key (used as Trino user)
- *   VAST_SECRET_KEY       — S3 secret key (used as Trino password)
+ * Run standalone: npx tsx src/db/migrations/001_vfx_hierarchy.ts
  */
 
-const TRINO_ENDPOINT = process.env.VAST_TRINO_ENDPOINT;
-const ACCESS_KEY = process.env.VAST_ACCESS_KEY ?? "";
-const SECRET_KEY = process.env.VAST_SECRET_KEY ?? "";
-const SCHEMA = `vast."assetharbor/production"`;
+import type { Migration } from "./types.js";
+import { TrinoClient } from "../trino-client.js";
 
-if (!TRINO_ENDPOINT) {
-  console.error("ERROR: VAST_TRINO_ENDPOINT is not set");
-  process.exit(1);
-}
+const S = 'vast."assetharbor/production"';
 
-// ---------------------------------------------------------------------------
-// Trino REST client (minimal — no external deps)
-// ---------------------------------------------------------------------------
+export const migration: Migration = {
+  version: 1,
+  description: "initial VFX hierarchy schema",
+  statements: [
+    // Ensure schema exists first
+    `CREATE SCHEMA IF NOT EXISTS ${S}`,
 
-async function trinoQuery(sql: string): Promise<void> {
-  const url = `${TRINO_ENDPOINT}/v1/statement`;
-  const auth = Buffer.from(`${ACCESS_KEY}:${SECRET_KEY}`).toString("base64");
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Basic ${auth}`,
-      "X-Trino-Catalog": "vast",
-      "X-Trino-Schema": "assetharbor/production"
-    },
-    body: sql
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Trino query failed (${response.status}): ${body}`);
-  }
-
-  // Follow nextUri until query completes
-  let data: Record<string, unknown> = (await response.json()) as Record<string, unknown>;
-  while (data.nextUri) {
-    const next = await fetch(data.nextUri as string, {
-      headers: {
-        Authorization: `Basic ${auth}`
-      }
-    });
-    data = (await next.json()) as Record<string, unknown>;
-    if ((data as { error?: unknown }).error) {
-      const err = (data as { error: { message: string } }).error;
-      throw new Error(`Trino error: ${err.message}`);
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// CREATE TABLE statements
-// ---------------------------------------------------------------------------
-
-const DDL_STATEMENTS: Array<{ name: string; sql: string }> = [
-  {
-    name: "projects",
-    sql: `CREATE TABLE IF NOT EXISTS ${SCHEMA}.projects (
+    // Core VFX hierarchy tables
+    `CREATE TABLE IF NOT EXISTS ${S}.projects (
   id              VARCHAR(36)   NOT NULL,
   code            VARCHAR(64)   NOT NULL,
   name            VARCHAR(255)  NOT NULL,
@@ -84,11 +35,9 @@ const DDL_STATEMENTS: Array<{ name: string; sql: string }> = [
   owner           VARCHAR(100),
   created_at      TIMESTAMP(6)  NOT NULL,
   updated_at      TIMESTAMP(6)  NOT NULL
-)`
-  },
-  {
-    name: "sequences",
-    sql: `CREATE TABLE IF NOT EXISTS ${SCHEMA}.sequences (
+)`,
+
+    `CREATE TABLE IF NOT EXISTS ${S}.sequences (
   id                VARCHAR(36)   NOT NULL,
   project_id        VARCHAR(36)   NOT NULL,
   code              VARCHAR(64)   NOT NULL,
@@ -100,11 +49,9 @@ const DDL_STATEMENTS: Array<{ name: string; sql: string }> = [
   frame_range_end   INTEGER,
   created_at        TIMESTAMP(6)  NOT NULL,
   updated_at        TIMESTAMP(6)  NOT NULL
-)`
-  },
-  {
-    name: "shots",
-    sql: `CREATE TABLE IF NOT EXISTS ${SCHEMA}.shots (
+)`,
+
+    `CREATE TABLE IF NOT EXISTS ${S}.shots (
   id                VARCHAR(36)   NOT NULL,
   project_id        VARCHAR(36)   NOT NULL,
   sequence_id       VARCHAR(36)   NOT NULL,
@@ -123,11 +70,9 @@ const DDL_STATEMENTS: Array<{ name: string; sql: string }> = [
   latest_version_id VARCHAR(36),
   created_at        TIMESTAMP(6)  NOT NULL,
   updated_at        TIMESTAMP(6)  NOT NULL
-)`
-  },
-  {
-    name: "versions",
-    sql: `CREATE TABLE IF NOT EXISTS ${SCHEMA}.versions (
+)`,
+
+    `CREATE TABLE IF NOT EXISTS ${S}.versions (
   id                  VARCHAR(36)   NOT NULL,
   shot_id             VARCHAR(36)   NOT NULL,
   project_id          VARCHAR(36)   NOT NULL,
@@ -158,21 +103,17 @@ const DDL_STATEMENTS: Array<{ name: string; sql: string }> = [
   created_at          TIMESTAMP(6)  NOT NULL,
   published_at        TIMESTAMP(6),
   notes               VARCHAR(2000)
-)`
-  },
-  {
-    name: "version_assets",
-    sql: `CREATE TABLE IF NOT EXISTS ${SCHEMA}.version_assets (
+)`,
+
+    `CREATE TABLE IF NOT EXISTS ${S}.version_assets (
   id         VARCHAR(36)   NOT NULL,
   version_id VARCHAR(36)   NOT NULL,
   asset_id   VARCHAR(36)   NOT NULL,
   role       VARCHAR(32)   NOT NULL,
   created_at TIMESTAMP(6)  NOT NULL
-)`
-  },
-  {
-    name: "version_approvals",
-    sql: `CREATE TABLE IF NOT EXISTS ${SCHEMA}.version_approvals (
+)`,
+
+    `CREATE TABLE IF NOT EXISTS ${S}.version_approvals (
   id           VARCHAR(36)   NOT NULL,
   version_id   VARCHAR(36)   NOT NULL,
   shot_id      VARCHAR(36)   NOT NULL,
@@ -182,103 +123,58 @@ const DDL_STATEMENTS: Array<{ name: string; sql: string }> = [
   role         VARCHAR(64),
   note         VARCHAR(2000),
   at           TIMESTAMP(6)  NOT NULL
-)`
-  },
-  {
-    name: "schema_version",
-    sql: `CREATE TABLE IF NOT EXISTS ${SCHEMA}.schema_version (
+)`,
+
+    `CREATE TABLE IF NOT EXISTS ${S}.schema_version (
   version     INTEGER       NOT NULL,
   applied_at  TIMESTAMP(6)  NOT NULL,
   description VARCHAR(255)  NOT NULL
-)`
-  }
-];
+)`,
+
+    // Sort keys (non-fatal if they fail)
+    `ALTER TABLE ${S}.shots SET PROPERTIES sorted_by = ARRAY['project_id', 'sequence_id']`,
+    `ALTER TABLE ${S}.versions SET PROPERTIES sorted_by = ARRAY['shot_id', 'version_number']`,
+
+    // Version record
+    `INSERT INTO ${S}.schema_version (version, applied_at, description) VALUES (1, CURRENT_TIMESTAMP, 'initial VFX hierarchy schema')`
+  ]
+};
 
 // ---------------------------------------------------------------------------
-// Sort key configuration (run after table creation)
-// Caveat: requires 512k+ rows to activate; no-op on small datasets
-// ---------------------------------------------------------------------------
-
-const SORT_KEY_STATEMENTS: Array<{ table: string; columns: string[] }> = [
-  { table: "shots", columns: ["project_id", "sequence_id"] },
-  { table: "versions", columns: ["shot_id", "version_number"] }
-];
-
-// ---------------------------------------------------------------------------
-// Migration runner
+// Standalone execution
 // ---------------------------------------------------------------------------
 
 async function run(): Promise<void> {
-  const created: string[] = [];
-  const skipped: string[] = [];
-  const failed: string[] = [];
-
-  console.log("=== Migration 001: VFX Hierarchy Schema ===");
-  console.log(`Target: ${TRINO_ENDPOINT}`);
-  console.log(`Schema: ${SCHEMA}`);
-  console.log("");
-
-  // Create tables
-  for (const { name, sql } of DDL_STATEMENTS) {
-    process.stdout.write(`  Creating ${name}... `);
-    try {
-      await trinoQuery(sql);
-      created.push(name);
-      console.log("✓");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.toLowerCase().includes("already exists")) {
-        skipped.push(name);
-        console.log("(already exists, skipped)");
-      } else {
-        failed.push(name);
-        console.log(`✗ ${msg}`);
-      }
-    }
-  }
-
-  // Set sort keys
-  console.log("");
-  for (const { table, columns } of SORT_KEY_STATEMENTS) {
-    const colList = columns.map((c) => `'${c}'`).join(", ");
-    const sql = `ALTER TABLE ${SCHEMA}.${table} SET PROPERTIES sorted_by = ARRAY[${colList}]`;
-    process.stdout.write(`  Setting sort key on ${table} [${columns.join(", ")}]... `);
-    try {
-      await trinoQuery(sql);
-      console.log("✓");
-    } catch (err) {
-      // Non-fatal: sort keys cannot be reset if already set
-      const msg = err instanceof Error ? err.message : String(err);
-      console.log(`(skipped: ${msg.split("\n")[0]})`);
-    }
-  }
-
-  // Insert schema_version row
-  console.log("");
-  process.stdout.write("  Inserting schema_version row... ");
-  try {
-    await trinoQuery(
-      `INSERT INTO ${SCHEMA}.schema_version (version, applied_at, description) VALUES (1, CURRENT_TIMESTAMP, 'initial VFX hierarchy schema')`
-    );
-    console.log("✓");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.log(`(skipped: ${msg.split("\n")[0]})`);
-  }
-
-  // Summary
-  console.log("");
-  console.log("=== Summary ===");
-  if (created.length > 0) console.log(`  Created:  ${created.join(", ")}`);
-  if (skipped.length > 0) console.log(`  Skipped:  ${skipped.join(", ")}`);
-  if (failed.length > 0) {
-    console.log(`  Failed:   ${failed.join(", ")}`);
+  const endpoint = process.env.VAST_TRINO_ENDPOINT;
+  if (!endpoint) {
+    console.error("ERROR: VAST_TRINO_ENDPOINT is not set");
     process.exit(1);
   }
-  console.log("  Done.");
+
+  const client = new TrinoClient({
+    endpoint,
+    accessKey: process.env.VAST_ACCESS_KEY ?? "",
+    secretKey: process.env.VAST_SECRET_KEY ?? ""
+  });
+
+  console.log(`=== Migration ${migration.version}: ${migration.description} ===`);
+  for (const sql of migration.statements) {
+    const label = sql.trim().slice(0, 60).replace(/\n/g, " ");
+    process.stdout.write(`  ${label}... `);
+    try {
+      await client.query(sql);
+      console.log("done");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`(${msg.split("\n")[0]})`);
+    }
+  }
+  console.log("Migration 001 complete.");
 }
 
-run().catch((err) => {
-  console.error("Migration failed:", err);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/.*\//, ""))) {
+  run().catch((err) => {
+    console.error("Migration failed:", err);
+    process.exit(1);
+  });
+}
