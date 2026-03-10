@@ -7,7 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "test": "node --import tsx --test test/*.test.ts",
-    "test:contracts": "node --import tsx --test test/*contract*.test.ts test/*v1-contract*.test.ts"
+    "test:contracts": "node --import tsx --test test/*contract*.test.ts test/*v1-contract*.test.ts",
+    "db:install": "tsx src/db/installer.ts"
   },
   "dependencies": {
     "@fastify/swagger": "^9.7.0",
