@@ -325,7 +325,6 @@ test("VastPersistenceAdapter: uses trinoClient when databaseUrl is set", () =>
           stats: { state: "FINISHED" }
         });
       }
-      // health/info checks
       if (_url.includes("/v1/info")) {
         return jsonResponse({ nodeVersion: { version: "442" } });
       }
@@ -346,3 +345,185 @@ test("VastPersistenceAdapter: uses trinoClient when databaseUrl is set", () =>
       assert.equal(project.code, "PROJ");
     }
   ));
+
+// ---------------------------------------------------------------------------
+// WRITE operation tests
+// ---------------------------------------------------------------------------
+
+test("insertProject: generates INSERT SQL and returns project", () => {
+  const capturedSqls: string[] = [];
+
+  return withMockFetch(
+    async (_url, init) => {
+      const body = typeof init?.body === "string" ? init.body : "";
+      capturedSqls.push(body);
+      return jsonResponse({ stats: { state: "FINISHED" } });
+    },
+    async () => {
+      const client = new TrinoClient({ endpoint: "http://trino:8080", accessKey: "a", secretKey: "b" });
+      const project = await tq.insertProject(client, {
+        code: "PROJ",
+        name: "Test Project",
+        type: "feature",
+        status: "active",
+        frameRate: 24.0,
+        owner: "jdoe"
+      }, { correlationId: "c1" });
+
+      assert.equal(project.code, "PROJ");
+      assert.equal(project.name, "Test Project");
+      assert.equal(project.type, "feature");
+      assert.equal(project.owner, "jdoe");
+      assert.ok(project.id); // UUID generated
+      assert.ok(capturedSqls.some((s) => s.includes("INSERT INTO") && s.includes("projects")));
+    }
+  );
+});
+
+test("insertSequence: throws ReferentialIntegrityError when project missing", () =>
+  withMockFetch(
+    async () => {
+      // Return empty for project lookup
+      return jsonResponse({ columns: PROJECT_COLUMNS, data: [], stats: { state: "FINISHED" } });
+    },
+    async () => {
+      const client = new TrinoClient({ endpoint: "http://trino:8080", accessKey: "a", secretKey: "b" });
+      await assert.rejects(
+        () => tq.insertSequence(client, {
+          projectId: "nonexistent",
+          code: "SQ010",
+          status: "active"
+        }, { correlationId: "c1" }),
+        (err: unknown) => {
+          assert.ok(err instanceof Error);
+          assert.ok(err.message.includes("not found"));
+          return true;
+        }
+      );
+    }
+  ));
+
+test("insertVersion: auto-increments version number", () => {
+  let callCount = 0;
+
+  return withMockFetch(
+    async (_url, init) => {
+      callCount++;
+      const body = typeof init?.body === "string" ? init.body : "";
+
+      // First call: queryVersionsByShot (return existing version)
+      if (body.includes("SELECT") && body.includes("versions") && body.includes("shot_id")) {
+        return jsonResponse({
+          columns: VERSION_COLUMNS,
+          data: [[
+            "v-existing", "s1", "p1", "sq1", "v001", 3, null,
+            "draft", "exr_sequence", null, null, null,
+            null, null, null, null, null, null,
+            null, null, null, null, null, null,
+            null, null, "artist1",
+            "2026-01-01", null, null,
+            "wip", null, null
+          ]],
+          stats: { state: "FINISHED" }
+        });
+      }
+
+      // INSERT operations
+      return jsonResponse({ stats: { state: "FINISHED" } });
+    },
+    async () => {
+      const client = new TrinoClient({ endpoint: "http://trino:8080", accessKey: "a", secretKey: "b" });
+      const version = await tq.insertVersion(client, {
+        shotId: "s1",
+        projectId: "p1",
+        sequenceId: "sq1",
+        versionLabel: "v004",
+        status: "draft",
+        mediaType: "exr_sequence",
+        createdBy: "artist1",
+        reviewStatus: "internal_review",
+        headHandle: 8,
+        tailHandle: 8
+      }, { correlationId: "c1" });
+
+      assert.equal(version.versionNumber, 4); // 3 + 1
+      assert.equal(version.reviewStatus, "internal_review");
+      assert.equal(version.headHandle, 8);
+    }
+  );
+});
+
+test("updateShotStatusSql: updates status and returns shot", () =>
+  withMockFetch(
+    async (_url, init) => {
+      const body = typeof init?.body === "string" ? init.body : "";
+
+      // SELECT for shot lookup
+      if (body.includes("SELECT") && body.includes("shots") && body.includes("WHERE id")) {
+        const SHOT_COLUMNS = [
+          { name: "id", type: "varchar" }, { name: "project_id", type: "varchar" },
+          { name: "sequence_id", type: "varchar" }, { name: "code", type: "varchar" },
+          { name: "name", type: "varchar" }, { name: "status", type: "varchar" },
+          { name: "frame_range_start", type: "integer" }, { name: "frame_range_end", type: "integer" },
+          { name: "frame_count", type: "integer" }, { name: "frame_rate", type: "double" },
+          { name: "vendor", type: "varchar" }, { name: "lead", type: "varchar" },
+          { name: "priority", type: "varchar" }, { name: "due_date", type: "timestamp" },
+          { name: "notes", type: "varchar" }, { name: "latest_version_id", type: "varchar" },
+          { name: "created_at", type: "timestamp" }, { name: "updated_at", type: "timestamp" }
+        ];
+        return jsonResponse({
+          columns: SHOT_COLUMNS,
+          data: [["s1", "p1", "sq1", "SH010", null, "active", 1001, 1100, 100, 24.0, null, null, null, null, null, null, "2026-01-01", "2026-01-01"]],
+          stats: { state: "FINISHED" }
+        });
+      }
+
+      // UPDATE
+      return jsonResponse({ stats: { state: "FINISHED" } });
+    },
+    async () => {
+      const client = new TrinoClient({ endpoint: "http://trino:8080", accessKey: "a", secretKey: "b" });
+      const shot = await tq.updateShotStatusSql(client, "s1", "locked", { correlationId: "c1" });
+      assert.ok(shot);
+      assert.equal(shot.status, "locked");
+    }
+  ));
+
+test("updateVersionReviewStatusSql: uses DELETE+INSERT pattern", () => {
+  const capturedSqls: string[] = [];
+
+  return withMockFetch(
+    async (_url, init) => {
+      const body = typeof init?.body === "string" ? init.body : "";
+      capturedSqls.push(body);
+
+      // Version lookup
+      if (body.includes("SELECT") && body.includes("versions") && body.includes("WHERE v.id")) {
+        return jsonResponse({
+          columns: VERSION_COLUMNS,
+          data: [[
+            "v1", "s1", "p1", "sq1", "v001", 1, null,
+            "draft", "exr_sequence", null, null, null,
+            null, null, null, null, null, null,
+            null, null, null, null, null, null,
+            null, null, "artist1",
+            "2026-01-01", null, null,
+            "wip", null, null
+          ]],
+          stats: { state: "FINISHED" }
+        });
+      }
+
+      return jsonResponse({ stats: { state: "FINISHED" } });
+    },
+    async () => {
+      const client = new TrinoClient({ endpoint: "http://trino:8080", accessKey: "a", secretKey: "b" });
+      const version = await tq.updateVersionReviewStatusSql(client, "v1", "approved", { correlationId: "c1" });
+      assert.ok(version);
+      assert.equal(version.reviewStatus, "approved");
+      // Verify DELETE+INSERT pattern
+      assert.ok(capturedSqls.some((s) => s.includes("DELETE FROM") && s.includes("version_review_status")));
+      assert.ok(capturedSqls.some((s) => s.includes("INSERT INTO") && s.includes("version_review_status") && s.includes("approved")));
+    }
+  );
+});

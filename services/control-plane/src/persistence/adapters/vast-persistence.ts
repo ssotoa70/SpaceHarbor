@@ -381,7 +381,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   // ---------------------------------------------------------------------------
 
   async createProject(input: CreateProjectInput, ctx: WriteContext): Promise<Project> {
-    return this.localFallback.createProject(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createProject(input, ctx);
+    return tq.insertProject(this.trinoClient, input, ctx);
   }
 
   async getProjectById(id: string): Promise<Project | null> {
@@ -395,7 +396,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async createSequence(input: CreateSequenceInput, ctx: WriteContext): Promise<Sequence> {
-    return this.localFallback.createSequence(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createSequence(input, ctx);
+    return tq.insertSequence(this.trinoClient, input, ctx);
   }
 
   async getSequenceById(id: string): Promise<Sequence | null> {
@@ -409,7 +411,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async createShot(input: CreateShotInput, ctx: WriteContext): Promise<Shot> {
-    return this.localFallback.createShot(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createShot(input, ctx);
+    return tq.insertShot(this.trinoClient, input, ctx);
   }
 
   async getShotById(id: string): Promise<Shot | null> {
@@ -423,11 +426,13 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async updateShotStatus(shotId: string, status: ShotStatus, ctx: WriteContext): Promise<Shot | null> {
-    return this.localFallback.updateShotStatus(shotId, status, ctx);
+    if (!this.trinoClient) return this.localFallback.updateShotStatus(shotId, status, ctx);
+    return tq.updateShotStatusSql(this.trinoClient, shotId, status, ctx);
   }
 
   async createVersion(input: CreateVersionInput, ctx: WriteContext): Promise<Version> {
-    return this.localFallback.createVersion(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createVersion(input, ctx);
+    return tq.insertVersion(this.trinoClient, input, ctx);
   }
 
   async getVersionById(id: string): Promise<Version | null> {
@@ -441,11 +446,13 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async publishVersion(versionId: string, ctx: WriteContext): Promise<Version | null> {
-    return this.localFallback.publishVersion(versionId, ctx);
+    if (!this.trinoClient) return this.localFallback.publishVersion(versionId, ctx);
+    return tq.publishVersionSql(this.trinoClient, versionId, ctx);
   }
 
   async updateVersionReviewStatus(versionId: string, status: ReviewStatus, ctx: WriteContext): Promise<Version | null> {
-    return this.localFallback.updateVersionReviewStatus(versionId, status, ctx);
+    if (!this.trinoClient) return this.localFallback.updateVersionReviewStatus(versionId, status, ctx);
+    return tq.updateVersionReviewStatusSql(this.trinoClient, versionId, status, ctx);
   }
 
   async updateVersionTechnicalMetadata(
@@ -453,14 +460,16 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     meta: Partial<VfxMetadata>,
     ctx: WriteContext
   ): Promise<Version | null> {
-    return this.localFallback.updateVersionTechnicalMetadata(versionId, meta, ctx);
+    if (!this.trinoClient) return this.localFallback.updateVersionTechnicalMetadata(versionId, meta, ctx);
+    return tq.updateVersionTechnicalMetadataSql(this.trinoClient, versionId, meta, ctx);
   }
 
   async createVersionApproval(
     input: CreateVersionApprovalInput,
     ctx: WriteContext
   ): Promise<VersionApproval> {
-    return this.localFallback.createVersionApproval(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createVersionApproval(input, ctx);
+    return tq.insertVersionApproval(this.trinoClient, input, ctx);
   }
 
   async listApprovalsByVersion(versionId: string): Promise<VersionApproval[]> {
@@ -470,7 +479,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   // Episodes
   async createEpisode(input: CreateEpisodeInput, ctx: WriteContext): Promise<Episode> {
-    return this.localFallback.createEpisode(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createEpisode(input, ctx);
+    return tq.insertEpisode(this.trinoClient, input, ctx);
   }
 
   async getEpisodeById(id: string): Promise<Episode | null> {
@@ -485,7 +495,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
 
   // Tasks
   async createTask(input: CreateTaskInput, ctx: WriteContext): Promise<Task> {
-    return this.localFallback.createTask(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createTask(input, ctx);
+    return tq.insertTask(this.trinoClient, input, ctx);
   }
 
   async getTaskById(id: string): Promise<Task | null> {
@@ -499,12 +510,14 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async updateTaskStatus(taskId: string, status: TaskStatus, ctx: WriteContext): Promise<Task | null> {
-    return this.localFallback.updateTaskStatus(taskId, status, ctx);
+    if (!this.trinoClient) return this.localFallback.updateTaskStatus(taskId, status, ctx);
+    return tq.updateTaskStatusSql(this.trinoClient, taskId, status, ctx);
   }
 
   // Materials
   async createMaterial(input: CreateMaterialInput, ctx: WriteContext): Promise<Material> {
-    return this.localFallback.createMaterial(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createMaterial(input, ctx);
+    return tq.insertMaterial(this.trinoClient, input, ctx);
   }
 
   async getMaterialById(id: string): Promise<Material | null> {
@@ -518,7 +531,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async createMaterialVersion(input: CreateMaterialVersionInput, ctx: WriteContext): Promise<MaterialVersion> {
-    return this.localFallback.createMaterialVersion(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createMaterialVersion(input, ctx);
+    return tq.insertMaterialVersion(this.trinoClient, input, ctx);
   }
 
   async getMaterialVersionById(id: string): Promise<MaterialVersion | null> {
@@ -537,7 +551,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async createLookVariant(input: CreateLookVariantInput, ctx: WriteContext): Promise<LookVariant> {
-    return this.localFallback.createLookVariant(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createLookVariant(input, ctx);
+    return tq.insertLookVariant(this.trinoClient, input, ctx);
   }
 
   async listLookVariantsByMaterialVersion(materialVersionId: string): Promise<LookVariant[]> {
@@ -546,7 +561,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async createVersionMaterialBinding(input: CreateVersionMaterialBindingInput, ctx: WriteContext): Promise<VersionMaterialBinding> {
-    return this.localFallback.createVersionMaterialBinding(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createVersionMaterialBinding(input, ctx);
+    return tq.insertVersionMaterialBinding(this.trinoClient, input, ctx);
   }
 
   async listBindingsByLookVariant(lookVariantId: string): Promise<VersionMaterialBinding[]> {
@@ -560,7 +576,8 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async createMaterialDependency(input: CreateMaterialDependencyInput, ctx: WriteContext): Promise<MaterialDependency> {
-    return this.localFallback.createMaterialDependency(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createMaterialDependency(input, ctx);
+    return tq.insertMaterialDependency(this.trinoClient, input, ctx);
   }
 
   async listDependenciesByMaterialVersion(materialVersionId: string): Promise<MaterialDependency[]> {
