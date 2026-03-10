@@ -39,7 +39,11 @@ import type {
   VersionStatus,
   VfxMetadata,
   WorkflowJob,
-  WorkflowStatus
+  WorkflowStatus,
+  Timeline,
+  TimelineStatus,
+  TimelineClip,
+  ClipConformStatus
 } from "../domain/models.js";
 
 // ---------------------------------------------------------------------------
@@ -201,6 +205,29 @@ export interface CreateMaterialDependencyInput {
 }
 
 // ---------------------------------------------------------------------------
+// Timeline / OTIO input types
+// ---------------------------------------------------------------------------
+
+export interface CreateTimelineInput {
+  name: string;
+  projectId: string;
+  frameRate: number;
+  durationFrames: number;
+  sourceUri: string;
+}
+
+export interface CreateTimelineClipInput {
+  timelineId: string;
+  trackName: string;
+  clipName: string;
+  sourceUri: string | null;
+  inFrame: number;
+  outFrame: number;
+  durationFrames: number;
+  shotName?: string;
+}
+
+// ---------------------------------------------------------------------------
 // VFX Hierarchy adapter interface (subset implemented by all adapters)
 // ---------------------------------------------------------------------------
 
@@ -277,6 +304,20 @@ export interface VfxHierarchyAdapter {
 
   // Cascade-delete safety check
   countBindingsForMaterial(materialId: string): Promise<number>;
+
+  // Timelines (OTIO)
+  createTimeline(input: CreateTimelineInput, ctx: WriteContext): Promise<Timeline>;
+  getTimelineById(id: string): Promise<Timeline | null>;
+  listTimelinesByProject(projectId: string): Promise<Timeline[]>;
+  updateTimelineStatus(id: string, status: TimelineStatus, ctx: WriteContext): Promise<Timeline | null>;
+  createTimelineClip(input: CreateTimelineClipInput, ctx: WriteContext): Promise<TimelineClip>;
+  listClipsByTimeline(timelineId: string): Promise<TimelineClip[]>;
+  updateClipConformStatus(
+    clipId: string,
+    status: ClipConformStatus,
+    shotId?: string,
+    assetId?: string
+  ): Promise<void>;
 }
 
 export type PersistenceBackend = "local" | "vast";

@@ -1,7 +1,7 @@
 import type { WorkflowStatus } from "../domain/models.js";
 import type { PersistenceAdapter, WriteContext } from "../persistence/types.js";
 import { canTransitionWorkflowStatus } from "../workflow/transitions.js";
-import type { NormalizedAssetEvent, ProxyGeneratedEvent } from "./types.js";
+import type { NormalizedAssetEvent, NormalizedVastEvent, ProxyGeneratedEvent } from "./types.js";
 
 export function processProxyGeneratedEvent(
   event: ProxyGeneratedEvent,
@@ -197,4 +197,66 @@ export function processAssetEvent(
     duplicate: false,
     status
   };
+}
+
+/**
+ * Process a VAST DataEngine function completion event.
+ * Routes metadata updates to the appropriate asset fields based on function_id.
+ */
+export function processVastFunctionCompletion(
+  persistence: PersistenceAdapter,
+  event: NormalizedVastEvent,
+  functionId: string,
+  context: WriteContext,
+): { accepted: boolean; functionId: string; action: string } {
+  if (persistence.hasProcessedEvent(event.eventId)) {
+    return { accepted: true, functionId, action: "duplicate" };
+  }
+
+  const metadata = event.metadata ?? {};
+
+  switch (functionId) {
+    case "exr_inspector": {
+      // Update asset VFX metadata with EXR inspection results
+      const asset = persistence.getAssetById(metadata.asset_id as string ?? "");
+      if (asset) {
+        persistence.updateAsset(
+          asset.id,
+          { metadata: { ...(asset.metadata ?? {}), ...metadata } },
+          context,
+        );
+      }
+      persistence.markProcessedEvent(event.eventId);
+      return { accepted: true, functionId, action: "metadata_updated" };
+    }
+
+    case "mtlx_parser": {
+      // MaterialX parse results — metadata stored for downstream
+      persistence.markProcessedEvent(event.eventId);
+      return { accepted: true, functionId, action: "mtlx_parsed" };
+    }
+
+    case "otio_parser": {
+      // OTIO timeline parse results — metadata stored for downstream
+      persistence.markProcessedEvent(event.eventId);
+      return { accepted: true, functionId, action: "otio_parsed" };
+    }
+
+    case "oiio_proxy_generator": {
+      // Proxy generation — already handled by processProxyGeneratedEvent
+      persistence.markProcessedEvent(event.eventId);
+      return { accepted: true, functionId, action: "proxy_generated" };
+    }
+
+    case "scanner": {
+      // Scanner — already handled by ingest route
+      persistence.markProcessedEvent(event.eventId);
+      return { accepted: true, functionId, action: "scan_completed" };
+    }
+
+    default: {
+      persistence.markProcessedEvent(event.eventId);
+      return { accepted: true, functionId, action: "unknown_function" };
+    }
+  }
 }

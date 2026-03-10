@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { AuditEvent, Episode, LookVariant, Material, MaterialDependency, MaterialVersion, Project, ProjectStatus, ReviewStatus, Sequence, Shot, ShotStatus, Task, TaskStatus, Version, VersionApproval, VersionMaterialBinding, VfxMetadata } from "../../domain/models.js";
+import type { AuditEvent, ClipConformStatus, Episode, LookVariant, Material, MaterialDependency, MaterialVersion, Project, ProjectStatus, ReviewStatus, Sequence, Shot, ShotStatus, Task, TaskStatus, Timeline, TimelineClip, TimelineStatus, Version, VersionApproval, VersionMaterialBinding, VfxMetadata } from "../../domain/models.js";
 import type { OutboundNotifier } from "../../integrations/outbound/notifier.js";
 import type { OutboundConfig } from "../../integrations/outbound/types.js";
 import type { AuditSignal } from "../../domain/models.js";
@@ -30,6 +30,8 @@ import type {
   WriteContext
 } from "../types.js";
 import type { VastWorkflowClient } from "../vast/workflow-client.js";
+import { TrinoClient } from "../../db/trino-client.js";
+import * as tq from "./vast-trino-queries.js";
 
 interface VastConfig {
   databaseUrl: string | undefined;
@@ -48,6 +50,7 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   private readonly fallbackAuditEvents: AuditEvent[] = [];
   private readonly fetchFn: FetchLike;
   private readonly workflowClient?: Partial<VastWorkflowClient>;
+  private readonly trinoClient: TrinoClient | null;
 
   constructor(
     private readonly config: VastConfig,
@@ -59,6 +62,18 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     this.fetchFn = fetchFn ?? globalThis.fetch;
     this.workflowClient = workflowClient;
     this.localFallback = new LocalPersistenceAdapter(outboundConfig, outboundNotifier);
+
+    // Initialize Trino client if database URL is configured
+    if (this.config.databaseUrl) {
+      const url = new URL(this.config.databaseUrl);
+      this.trinoClient = new TrinoClient({
+        endpoint: `${url.protocol}//${url.host}`,
+        accessKey: url.username || process.env.VAST_ACCESS_KEY || "",
+        secretKey: url.password || process.env.VAST_SECRET_KEY || ""
+      });
+    } else {
+      this.trinoClient = null;
+    }
 
     if (this.config.strict) {
       const missing: string[] = [];
@@ -362,67 +377,82 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   // ---------------------------------------------------------------------------
-  // VFX Hierarchy — delegate to localFallback (VAST Trino implementation pending)
+  // VFX Hierarchy — Trino SQL with localFallback when no TrinoClient
   // ---------------------------------------------------------------------------
 
   async createProject(input: CreateProjectInput, ctx: WriteContext): Promise<Project> {
-    return this.localFallback.createProject(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createProject(input, ctx);
+    return tq.insertProject(this.trinoClient, input, ctx);
   }
 
   async getProjectById(id: string): Promise<Project | null> {
-    return this.localFallback.getProjectById(id);
+    if (!this.trinoClient) return this.localFallback.getProjectById(id);
+    return tq.queryProjectById(this.trinoClient, id);
   }
 
   async listProjects(status?: ProjectStatus): Promise<Project[]> {
-    return this.localFallback.listProjects(status);
+    if (!this.trinoClient) return this.localFallback.listProjects(status);
+    return tq.queryProjects(this.trinoClient, status);
   }
 
   async createSequence(input: CreateSequenceInput, ctx: WriteContext): Promise<Sequence> {
-    return this.localFallback.createSequence(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createSequence(input, ctx);
+    return tq.insertSequence(this.trinoClient, input, ctx);
   }
 
   async getSequenceById(id: string): Promise<Sequence | null> {
-    return this.localFallback.getSequenceById(id);
+    if (!this.trinoClient) return this.localFallback.getSequenceById(id);
+    return tq.querySequenceById(this.trinoClient, id);
   }
 
   async listSequencesByProject(projectId: string): Promise<Sequence[]> {
-    return this.localFallback.listSequencesByProject(projectId);
+    if (!this.trinoClient) return this.localFallback.listSequencesByProject(projectId);
+    return tq.querySequencesByProject(this.trinoClient, projectId);
   }
 
   async createShot(input: CreateShotInput, ctx: WriteContext): Promise<Shot> {
-    return this.localFallback.createShot(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createShot(input, ctx);
+    return tq.insertShot(this.trinoClient, input, ctx);
   }
 
   async getShotById(id: string): Promise<Shot | null> {
-    return this.localFallback.getShotById(id);
+    if (!this.trinoClient) return this.localFallback.getShotById(id);
+    return tq.queryShotById(this.trinoClient, id);
   }
 
   async listShotsBySequence(sequenceId: string): Promise<Shot[]> {
-    return this.localFallback.listShotsBySequence(sequenceId);
+    if (!this.trinoClient) return this.localFallback.listShotsBySequence(sequenceId);
+    return tq.queryShotsBySequence(this.trinoClient, sequenceId);
   }
 
   async updateShotStatus(shotId: string, status: ShotStatus, ctx: WriteContext): Promise<Shot | null> {
-    return this.localFallback.updateShotStatus(shotId, status, ctx);
+    if (!this.trinoClient) return this.localFallback.updateShotStatus(shotId, status, ctx);
+    return tq.updateShotStatusSql(this.trinoClient, shotId, status, ctx);
   }
 
   async createVersion(input: CreateVersionInput, ctx: WriteContext): Promise<Version> {
-    return this.localFallback.createVersion(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createVersion(input, ctx);
+    return tq.insertVersion(this.trinoClient, input, ctx);
   }
 
   async getVersionById(id: string): Promise<Version | null> {
-    return this.localFallback.getVersionById(id);
+    if (!this.trinoClient) return this.localFallback.getVersionById(id);
+    return tq.queryVersionById(this.trinoClient, id);
   }
 
   async listVersionsByShot(shotId: string): Promise<Version[]> {
-    return this.localFallback.listVersionsByShot(shotId);
+    if (!this.trinoClient) return this.localFallback.listVersionsByShot(shotId);
+    return tq.queryVersionsByShot(this.trinoClient, shotId);
   }
 
   async publishVersion(versionId: string, ctx: WriteContext): Promise<Version | null> {
-    return this.localFallback.publishVersion(versionId, ctx);
+    if (!this.trinoClient) return this.localFallback.publishVersion(versionId, ctx);
+    return tq.publishVersionSql(this.trinoClient, versionId, ctx);
   }
 
   async updateVersionReviewStatus(versionId: string, status: ReviewStatus, ctx: WriteContext): Promise<Version | null> {
-    return this.localFallback.updateVersionReviewStatus(versionId, status, ctx);
+    if (!this.trinoClient) return this.localFallback.updateVersionReviewStatus(versionId, status, ctx);
+    return tq.updateVersionReviewStatusSql(this.trinoClient, versionId, status, ctx);
   }
 
   async updateVersionTechnicalMetadata(
@@ -430,108 +460,156 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     meta: Partial<VfxMetadata>,
     ctx: WriteContext
   ): Promise<Version | null> {
-    return this.localFallback.updateVersionTechnicalMetadata(versionId, meta, ctx);
+    if (!this.trinoClient) return this.localFallback.updateVersionTechnicalMetadata(versionId, meta, ctx);
+    return tq.updateVersionTechnicalMetadataSql(this.trinoClient, versionId, meta, ctx);
   }
 
   async createVersionApproval(
     input: CreateVersionApprovalInput,
     ctx: WriteContext
   ): Promise<VersionApproval> {
-    return this.localFallback.createVersionApproval(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createVersionApproval(input, ctx);
+    return tq.insertVersionApproval(this.trinoClient, input, ctx);
   }
 
   async listApprovalsByVersion(versionId: string): Promise<VersionApproval[]> {
-    return this.localFallback.listApprovalsByVersion(versionId);
+    if (!this.trinoClient) return this.localFallback.listApprovalsByVersion(versionId);
+    return tq.queryApprovalsByVersion(this.trinoClient, versionId);
   }
 
-  // Episode stubs (SERGIO-136)
+  // Episodes
   async createEpisode(input: CreateEpisodeInput, ctx: WriteContext): Promise<Episode> {
-    return this.localFallback.createEpisode(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createEpisode(input, ctx);
+    return tq.insertEpisode(this.trinoClient, input, ctx);
   }
 
   async getEpisodeById(id: string): Promise<Episode | null> {
-    return this.localFallback.getEpisodeById(id);
+    if (!this.trinoClient) return this.localFallback.getEpisodeById(id);
+    return tq.queryEpisodeById(this.trinoClient, id);
   }
 
   async listEpisodesByProject(projectId: string): Promise<Episode[]> {
-    return this.localFallback.listEpisodesByProject(projectId);
+    if (!this.trinoClient) return this.localFallback.listEpisodesByProject(projectId);
+    return tq.queryEpisodesByProject(this.trinoClient, projectId);
   }
 
-  // Task stubs (SERGIO-136)
+  // Tasks
   async createTask(input: CreateTaskInput, ctx: WriteContext): Promise<Task> {
-    return this.localFallback.createTask(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createTask(input, ctx);
+    return tq.insertTask(this.trinoClient, input, ctx);
   }
 
   async getTaskById(id: string): Promise<Task | null> {
-    return this.localFallback.getTaskById(id);
+    if (!this.trinoClient) return this.localFallback.getTaskById(id);
+    return tq.queryTaskById(this.trinoClient, id);
   }
 
   async listTasksByShot(shotId: string): Promise<Task[]> {
-    return this.localFallback.listTasksByShot(shotId);
+    if (!this.trinoClient) return this.localFallback.listTasksByShot(shotId);
+    return tq.queryTasksByShot(this.trinoClient, shotId);
   }
 
   async updateTaskStatus(taskId: string, status: TaskStatus, ctx: WriteContext): Promise<Task | null> {
-    return this.localFallback.updateTaskStatus(taskId, status, ctx);
+    if (!this.trinoClient) return this.localFallback.updateTaskStatus(taskId, status, ctx);
+    return tq.updateTaskStatusSql(this.trinoClient, taskId, status, ctx);
   }
 
-  // MaterialX stubs — delegate to localFallback
+  // Materials
   async createMaterial(input: CreateMaterialInput, ctx: WriteContext): Promise<Material> {
-    return this.localFallback.createMaterial(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createMaterial(input, ctx);
+    return tq.insertMaterial(this.trinoClient, input, ctx);
   }
 
   async getMaterialById(id: string): Promise<Material | null> {
-    return this.localFallback.getMaterialById(id);
+    if (!this.trinoClient) return this.localFallback.getMaterialById(id);
+    return tq.queryMaterialById(this.trinoClient, id);
   }
 
   async listMaterialsByProject(projectId: string): Promise<Material[]> {
-    return this.localFallback.listMaterialsByProject(projectId);
+    if (!this.trinoClient) return this.localFallback.listMaterialsByProject(projectId);
+    return tq.queryMaterialsByProject(this.trinoClient, projectId);
   }
 
   async createMaterialVersion(input: CreateMaterialVersionInput, ctx: WriteContext): Promise<MaterialVersion> {
-    return this.localFallback.createMaterialVersion(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createMaterialVersion(input, ctx);
+    return tq.insertMaterialVersion(this.trinoClient, input, ctx);
   }
 
   async getMaterialVersionById(id: string): Promise<MaterialVersion | null> {
-    return this.localFallback.getMaterialVersionById(id);
+    if (!this.trinoClient) return this.localFallback.getMaterialVersionById(id);
+    return tq.queryMaterialVersionById(this.trinoClient, id);
   }
 
   async listMaterialVersionsByMaterial(materialId: string): Promise<MaterialVersion[]> {
-    return this.localFallback.listMaterialVersionsByMaterial(materialId);
+    if (!this.trinoClient) return this.localFallback.listMaterialVersionsByMaterial(materialId);
+    return tq.queryMaterialVersionsByMaterial(this.trinoClient, materialId);
   }
 
   async findMaterialVersionBySourcePathAndHash(sourcePath: string, contentHash: string): Promise<MaterialVersion | null> {
-    return this.localFallback.findMaterialVersionBySourcePathAndHash(sourcePath, contentHash);
+    if (!this.trinoClient) return this.localFallback.findMaterialVersionBySourcePathAndHash(sourcePath, contentHash);
+    return tq.queryMaterialVersionBySourcePathAndHash(this.trinoClient, sourcePath, contentHash);
   }
 
   async createLookVariant(input: CreateLookVariantInput, ctx: WriteContext): Promise<LookVariant> {
-    return this.localFallback.createLookVariant(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createLookVariant(input, ctx);
+    return tq.insertLookVariant(this.trinoClient, input, ctx);
   }
 
   async listLookVariantsByMaterialVersion(materialVersionId: string): Promise<LookVariant[]> {
-    return this.localFallback.listLookVariantsByMaterialVersion(materialVersionId);
+    if (!this.trinoClient) return this.localFallback.listLookVariantsByMaterialVersion(materialVersionId);
+    return tq.queryLookVariantsByMaterialVersion(this.trinoClient, materialVersionId);
   }
 
   async createVersionMaterialBinding(input: CreateVersionMaterialBindingInput, ctx: WriteContext): Promise<VersionMaterialBinding> {
-    return this.localFallback.createVersionMaterialBinding(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createVersionMaterialBinding(input, ctx);
+    return tq.insertVersionMaterialBinding(this.trinoClient, input, ctx);
   }
 
   async listBindingsByLookVariant(lookVariantId: string): Promise<VersionMaterialBinding[]> {
-    return this.localFallback.listBindingsByLookVariant(lookVariantId);
+    if (!this.trinoClient) return this.localFallback.listBindingsByLookVariant(lookVariantId);
+    return tq.queryBindingsByLookVariant(this.trinoClient, lookVariantId);
   }
 
   async listBindingsByVersion(versionId: string): Promise<VersionMaterialBinding[]> {
-    return this.localFallback.listBindingsByVersion(versionId);
+    if (!this.trinoClient) return this.localFallback.listBindingsByVersion(versionId);
+    return tq.queryBindingsByVersion(this.trinoClient, versionId);
   }
 
   async createMaterialDependency(input: CreateMaterialDependencyInput, ctx: WriteContext): Promise<MaterialDependency> {
-    return this.localFallback.createMaterialDependency(input, ctx);
+    if (!this.trinoClient) return this.localFallback.createMaterialDependency(input, ctx);
+    return tq.insertMaterialDependency(this.trinoClient, input, ctx);
   }
 
   async listDependenciesByMaterialVersion(materialVersionId: string): Promise<MaterialDependency[]> {
-    return this.localFallback.listDependenciesByMaterialVersion(materialVersionId);
+    if (!this.trinoClient) return this.localFallback.listDependenciesByMaterialVersion(materialVersionId);
+    return tq.queryDependenciesByMaterialVersion(this.trinoClient, materialVersionId);
   }
 
   async countBindingsForMaterial(materialId: string): Promise<number> {
-    return this.localFallback.countBindingsForMaterial(materialId);
+    if (!this.trinoClient) return this.localFallback.countBindingsForMaterial(materialId);
+    return tq.queryCountBindingsForMaterial(this.trinoClient, materialId);
+  }
+
+  // Timelines (OTIO) — delegate to local
+  async createTimeline(input: import("../types.js").CreateTimelineInput, ctx: import("../types.js").WriteContext): Promise<Timeline> {
+    return this.localFallback.createTimeline(input, ctx);
+  }
+  async getTimelineById(id: string): Promise<Timeline | null> {
+    return this.localFallback.getTimelineById(id);
+  }
+  async listTimelinesByProject(projectId: string): Promise<Timeline[]> {
+    return this.localFallback.listTimelinesByProject(projectId);
+  }
+  async updateTimelineStatus(id: string, status: TimelineStatus, ctx: import("../types.js").WriteContext): Promise<Timeline | null> {
+    return this.localFallback.updateTimelineStatus(id, status, ctx);
+  }
+  async createTimelineClip(input: import("../types.js").CreateTimelineClipInput, ctx: import("../types.js").WriteContext): Promise<TimelineClip> {
+    return this.localFallback.createTimelineClip(input, ctx);
+  }
+  async listClipsByTimeline(timelineId: string): Promise<TimelineClip[]> {
+    return this.localFallback.listClipsByTimeline(timelineId);
+  }
+  async updateClipConformStatus(clipId: string, status: ClipConformStatus, shotId?: string, assetId?: string): Promise<void> {
+    return this.localFallback.updateClipConformStatus(clipId, status, shotId, assetId);
   }
 }

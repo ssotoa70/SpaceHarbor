@@ -463,3 +463,35 @@ export interface MaterialDependency {
   dependencyDepth: number;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Timeline / OTIO domain types
+// ---------------------------------------------------------------------------
+
+export type TimelineStatus = "ingested" | "conforming" | "conformed" | "failed";
+export type ClipConformStatus = "pending" | "matched" | "unmatched";
+
+export interface Timeline {
+  id: string;
+  name: string;
+  projectId: string;
+  frameRate: number;
+  durationFrames: number;
+  status: TimelineStatus;
+  sourceUri: string;
+  createdAt: string;
+}
+
+export interface TimelineClip {
+  id: string;
+  timelineId: string;
+  trackName: string;
+  clipName: string;
+  sourceUri: string | null;
+  inFrame: number;
+  outFrame: number;
+  durationFrames: number;
+  shotId: string | null;
+  assetId: string | null;
+  conformStatus: ClipConformStatus;
+}

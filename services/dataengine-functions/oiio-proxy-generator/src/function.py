@@ -20,6 +20,7 @@ import logging
 from src.oiio_processor import OiioProcessor
 from src.ocio_transform import OcioTransform
 from src.publisher import publish_proxy_generated
+from src.exr_inspector import extract_exr_metadata, ExrInspectorError
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger("oiio-proxy-generator")
@@ -40,6 +41,15 @@ def main() -> int:
     dev_mode = os.environ.get("DEV_MODE", "false").lower() == "true"
     processor = OiioProcessor()
     transform = OcioTransform(config_path=os.environ.get("OCIO_CONFIG_PATH"), dev_mode=dev_mode)
+
+    # Step 0: Extract EXR metadata if applicable
+    exr_metadata = None
+    if source_path.lower().endswith(".exr"):
+        try:
+            exr_metadata = extract_exr_metadata(source_path)
+            log.info(f"EXR metadata extracted: {exr_metadata.get('resolution')}")
+        except ExrInspectorError as e:
+            log.warning(f"Failed to extract EXR metadata: {e}")
 
     # Step 1: OCIO — color transform to sRGB for thumbnail
     transformed_for_thumb = transform.apply(source_path, target_colorspace="sRGB")

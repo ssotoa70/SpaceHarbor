@@ -1,0 +1,2 @@
+opentimelineio>=0.16.0
+confluent-kafka>=2.4.0
