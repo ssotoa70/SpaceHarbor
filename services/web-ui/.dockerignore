@@ -1,0 +1,38 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# Dependencies (reinstalled in container)
+node_modules
+
+# Build artifacts
+dist/
+.tsbuildinfo
+coverage/
+
+# Note: src/ is NOT excluded because the multi-stage build
+# needs it in the build stage (COPY . .) to run npm run build.
+# The final nginx stage only copies dist/ from the build stage.
+
+# Test files
+tests/
+test/
+.pytest_cache
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+
+# Docker / CI
+docker-compose*.yml
+Dockerfile
+Makefile
+
+# Docs
+*.md

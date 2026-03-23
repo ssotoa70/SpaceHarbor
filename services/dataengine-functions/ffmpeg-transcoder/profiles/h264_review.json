@@ -1,0 +1,15 @@
+{
+  "name": "h264_review",
+  "description": "H.264 client review — LGPL-safe via OpenH264 (Cisco BSD license)",
+  "codec": "libopenh264",
+  "container": "mp4",
+  "pixel_format": "yuv420p",
+  "codec_params": {
+    "b:v": "8M"
+  },
+  "default_resolution": "1920x1080",
+  "audio_codec": "aac",
+  "audio_params": {
+    "b:a": "192k"
+  }
+}

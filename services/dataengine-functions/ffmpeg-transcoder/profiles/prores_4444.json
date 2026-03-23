@@ -1,0 +1,14 @@
+{
+  "name": "prores_4444",
+  "description": "Apple ProRes 4444 — VFX plates with alpha channel support",
+  "codec": "prores_ks",
+  "container": "mov",
+  "pixel_format": "yuva444p10le",
+  "codec_params": {
+    "profile:v": "4",
+    "vendor": "apl0"
+  },
+  "default_resolution": null,
+  "audio_codec": "pcm_s24le",
+  "audio_params": {}
+}

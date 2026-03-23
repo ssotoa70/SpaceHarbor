@@ -1,0 +1,38 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# Dependencies (reinstalled in container)
+node_modules
+
+# Build artifacts
+dist/
+.tsbuildinfo
+coverage/
+
+# Python artifacts (if any)
+__pycache__
+*.pyc
+
+# Test files
+tests/
+test/
+.pytest_cache
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+
+# Docker / CI
+docker-compose*.yml
+Dockerfile
+Makefile
+
+# Docs
+*.md

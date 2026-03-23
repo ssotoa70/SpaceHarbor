@@ -1,0 +1,13 @@
+{
+  "name": "dnxhr_hqx",
+  "description": "Avid DNxHR HQX — 10-bit high quality for Avid editorial",
+  "codec": "dnxhd",
+  "container": "mxf",
+  "pixel_format": "yuv422p10le",
+  "codec_params": {
+    "profile:v": "dnxhr_hqx"
+  },
+  "default_resolution": null,
+  "audio_codec": "pcm_s24le",
+  "audio_params": {}
+}

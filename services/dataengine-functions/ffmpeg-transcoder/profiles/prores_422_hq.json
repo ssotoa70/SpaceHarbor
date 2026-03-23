@@ -1,0 +1,14 @@
+{
+  "name": "prores_422_hq",
+  "description": "Apple ProRes 422 HQ — dailies and editorial delivery",
+  "codec": "prores_ks",
+  "container": "mov",
+  "pixel_format": "yuv422p10le",
+  "codec_params": {
+    "profile:v": "3",
+    "vendor": "apl0"
+  },
+  "default_resolution": null,
+  "audio_codec": "pcm_s24le",
+  "audio_params": {}
+}

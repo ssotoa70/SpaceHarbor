@@ -1,0 +1,21 @@
+{
+  "name": "spaceharbor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SpaceHarbor MVP monorepo",
+  "scripts": {
+    "check:workspace": "bash scripts/check-worktree.sh",
+    "test:compose": "node --test tests/compose/*.test.js",
+    "test:docs": "node --test tests/docs/*.test.js",
+    "test:control-plane": "npm --prefix services/control-plane test",
+    "test:contracts": "npm --prefix services/control-plane run test:contracts",
+    "test:worker": "PYTHONPATH=services/media-worker python3 -m pytest services/media-worker/tests -q",
+    "test:web-ui": "npm --prefix services/web-ui test",
+    "test:scanner": "cd services/scanner-function && python3 -m pytest tests/ -q",
+    "test:openassetio": "cd services/openassetio-manager && python3 -m pytest tests/ -q",
+    "test:dataengine": "cd services/dataengine-functions/oiio-proxy-generator && python3 -m pytest tests/ -q",
+    "test:exr-inspector": "cd services/dataengine-functions/exr-inspector && python3 -m pytest tests/ -q",
+    "lint:docs": "node scripts/ci/check-docs-consistency.js",
+    "test:all": "npm run test:compose && npm run test:docs && npm run test:contracts && npm run test:control-plane && npm run test:worker && npm run test:web-ui && npm run test:scanner"
+  }
+}

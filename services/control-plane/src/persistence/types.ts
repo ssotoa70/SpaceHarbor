@@ -1,0 +1,792 @@
+import type {
+  AnnotationHookMetadata,
+  AnnotationType,
+  ApprovalAction,
+  ApprovalAuditEntry,
+  Asset,
+  AssetDependency,
+  AssetPriority,
+  AssetQueueRow,
+  AuditEvent,
+  ClipConformStatus,
+  CommentAnnotation,
+  CommentStatus,
+  DependencyStrength,
+  DependencyType,
+  DlqItem,
+  Episode,
+  EpisodeStatus,
+  IncidentCoordination,
+  IncidentGuidedActions,
+  IncidentHandoff,
+  IncidentHandoffState,
+  IncidentNote,
+  IngestResult,
+  LookVariant,
+  Material,
+  MaterialDependency,
+  MaterialStatus,
+  MaterialVersion,
+  MediaType,
+  OutboxItem,
+  Project,
+  ProjectStatus,
+  ProjectType,
+  ReviewComment,
+  ReviewSession,
+  ReviewSessionStatus,
+  ReviewSessionType,
+  ReviewSessionSubmission,
+  ReviewStatus,
+  Sequence,
+  SequenceStatus,
+  Shot,
+  ShotAssetUsage,
+  ShotStatus,
+  SubmissionStatus,
+  Task,
+  TaskStatus,
+  TaskType,
+  TextureType,
+  Timeline,
+  TimelineChangeSet,
+  TimelineClip,
+  TimelineStatus,
+  UsageType,
+  Version,
+  AssetProvenance,
+  LineageRelationshipType,
+  VersionApproval,
+  Collection,
+  CollectionItem,
+  DailiesReportEntry,
+  Playlist,
+  PlaylistItem,
+  PlaylistItemDecision,
+  VersionComparison,
+  VersionLineage,
+  VersionMaterialBinding,
+  VersionStatus,
+  VfxMetadata,
+  WorkflowJob,
+  WorkflowStatus,
+  StorageMetric,
+  StorageTier,
+  RenderFarmMetric,
+  DownstreamUsageCount,
+} from "../domain/models.js";
+import type { DccAuditEntry } from "../types/dcc.js";
+
+// ---------------------------------------------------------------------------
+// VFX Hierarchy error classes
+// ---------------------------------------------------------------------------
+
+export class ReferentialIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReferentialIntegrityError";
+  }
+}
+
+export class ImmutabilityViolationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ImmutabilityViolationError";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VFX Hierarchy input types
+// ---------------------------------------------------------------------------
+
+export interface CreateProjectInput {
+  code: string;
+  name: string;
+  type: ProjectType;
+  status: ProjectStatus;
+  frameRate?: number;
+  colorSpace?: string;
+  resolutionW?: number;
+  resolutionH?: number;
+  startDate?: string;
+  deliveryDate?: string;
+  owner?: string;
+}
+
+export interface CreateSequenceInput {
+  projectId: string;
+  code: string;
+  episode?: string;
+  episodeId?: string;
+  name?: string;
+  status: SequenceStatus;
+  frameRangeStart?: number;
+  frameRangeEnd?: number;
+}
+
+export interface CreateShotInput {
+  projectId: string;
+  sequenceId: string;
+  code: string;
+  name?: string;
+  status: ShotStatus;
+  frameRangeStart: number;
+  frameRangeEnd: number;
+  frameCount: number;
+  frameRate?: number;
+  vendor?: string;
+  lead?: string;
+  priority?: AssetPriority;
+  dueDate?: string;
+  notes?: string;
+}
+
+export interface CreateVersionInput {
+  shotId: string;
+  projectId: string;
+  sequenceId: string;
+  versionLabel: string;
+  parentVersionId?: string;
+  status: VersionStatus;
+  mediaType: MediaType;
+  createdBy: string;
+  notes?: string;
+  taskId?: string;
+  reviewStatus?: ReviewStatus;
+  headHandle?: number;
+  tailHandle?: number;
+}
+
+export interface CreateEpisodeInput {
+  projectId: string;
+  code: string;
+  name?: string;
+  status: EpisodeStatus;
+}
+
+export interface CreateTaskInput {
+  shotId: string;
+  projectId: string;
+  sequenceId: string;
+  code: string;
+  type: TaskType;
+  status: TaskStatus;
+  assignee?: string;
+  dueDate?: string;
+  notes?: string;
+}
+
+export interface CreateVersionApprovalInput {
+  versionId: string;
+  shotId: string;
+  projectId: string;
+  action: ApprovalAction;
+  performedBy: string;
+  role?: string;
+  note?: string;
+}
+
+// ---------------------------------------------------------------------------
+// MaterialX input types
+// ---------------------------------------------------------------------------
+
+export interface CreateMaterialInput {
+  projectId: string;
+  name: string;
+  description?: string;
+  status: MaterialStatus;
+  createdBy: string;
+}
+
+export interface CreateMaterialVersionInput {
+  materialId: string;
+  versionLabel: string;
+  parentVersionId?: string;
+  status: VersionStatus;
+  sourcePath: string;
+  contentHash: string;
+  usdMaterialPath?: string;
+  renderContexts?: string[];
+  colorspaceConfig?: string;
+  mtlxSpecVersion?: string;
+  lookNames?: string[];
+  createdBy: string;
+}
+
+export interface CreateLookVariantInput {
+  materialVersionId: string;
+  lookName: string;
+  description?: string;
+  materialAssigns?: string;
+}
+
+export interface CreateVersionMaterialBindingInput {
+  lookVariantId: string;
+  versionId: string;
+  boundBy: string;
+}
+
+export interface CreateMaterialDependencyInput {
+  materialVersionId: string;
+  texturePath: string;
+  contentHash: string;
+  textureType?: TextureType;
+  colorspace?: string;
+  dependencyDepth: number;
+}
+
+// ---------------------------------------------------------------------------
+// Timeline / OTIO input types
+// ---------------------------------------------------------------------------
+
+export interface CreateTimelineInput {
+  name: string;
+  projectId: string;
+  frameRate: number;
+  durationFrames: number;
+  sourceUri: string;
+}
+
+export interface CreateTimelineClipInput {
+  timelineId: string;
+  trackName: string;
+  clipName: string;
+  sourceUri: string | null;
+  inFrame: number;
+  outFrame: number;
+  durationFrames: number;
+  shotName?: string;
+  vfxCutIn?: number;
+  vfxCutOut?: number;
+  handleHead?: number;
+  handleTail?: number;
+  deliveryIn?: number;
+  deliveryOut?: number;
+  sourceTimecode?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Review Session input types
+// ---------------------------------------------------------------------------
+
+export interface CreateReviewSessionInput {
+  projectId: string;
+  department?: string;
+  sessionDate: string;
+  sessionType: ReviewSessionType;
+  supervisorId?: string;
+}
+
+export interface AddSubmissionInput {
+  sessionId: string;
+  assetId: string;
+  versionId?: string;
+  submissionOrder?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Review Comment input types (Phase B)
+// ---------------------------------------------------------------------------
+
+export interface CreateReviewCommentInput {
+  sessionId?: string;
+  submissionId?: string;
+  versionId?: string;
+  parentCommentId?: string;
+  authorId: string;
+  authorRole?: string;
+  body: string;
+  frameNumber?: number;
+  timecode?: string;
+  annotationType?: AnnotationType;
+}
+
+export interface CreateCommentAnnotationInput {
+  commentId: string;
+  annotationData: string;  // JSON: drawing coordinates
+  frameNumber: number;
+}
+
+export interface CreateVersionComparisonInput {
+  versionAId: string;
+  versionBId: string;
+  comparisonType: string;
+  diffMetadata?: string;
+  pixelDiffPercentage?: number;
+  frameDiffCount?: number;
+  resolutionMatch: boolean;
+  colorspaceMatch: boolean;
+  createdBy: string;
+}
+
+// ---------------------------------------------------------------------------
+// Asset Provenance & Lineage input types (Phase C)
+// ---------------------------------------------------------------------------
+
+export interface CreateProvenanceInput {
+  versionId: string;
+  creator?: string;
+  softwareUsed?: string;
+  softwareVersion?: string;
+  renderJobId?: string;
+  pipelineStage?: string;
+  vastStoragePath?: string;
+  vastElementHandle?: string;
+  sourceHost?: string;
+  sourceProcessId?: string;
+}
+
+export interface CreateLineageEdgeInput {
+  ancestorVersionId: string;
+  descendantVersionId: string;
+  relationshipType: LineageRelationshipType;
+  depth: number;
+}
+
+// ---------------------------------------------------------------------------
+// Dependency Intelligence input types (Phase C.4)
+// ---------------------------------------------------------------------------
+
+export interface CreateDependencyInput {
+  sourceEntityType: string;
+  sourceEntityId: string;
+  targetEntityType: string;
+  targetEntityId: string;
+  dependencyType: DependencyType;
+  dependencyStrength: DependencyStrength;
+  discoveredBy?: string;
+}
+
+export interface CreateShotAssetUsageInput {
+  shotId: string;
+  versionId: string;
+  usageType: UsageType;
+  layerName?: string;
+  isActive?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Capacity Planning input types (Phase C.7)
+// ---------------------------------------------------------------------------
+
+export interface CreateStorageMetricInput {
+  entityType: string;
+  entityId: string;
+  totalBytes: number;
+  fileCount: number;
+  proxyBytes?: number;
+  thumbnailBytes?: number;
+  storageTier?: StorageTier;
+}
+
+export interface CreateRenderFarmMetricInput {
+  projectId: string;
+  shotId?: string;
+  versionId?: string;
+  renderEngine?: string;
+  renderTimeSeconds?: number;
+  coreHours?: number;
+  peakMemoryGb?: number;
+  frameCount?: number;
+  submittedAt?: string;
+}
+
+export interface UpsertDownstreamUsageCountInput {
+  entityType: string;
+  entityId: string;
+  directDependents: number;
+  transitiveDependents: number;
+  shotCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// Collection input types (Phase B.6)
+// ---------------------------------------------------------------------------
+
+export interface CreateCollectionInput {
+  projectId: string;
+  name: string;
+  description?: string;
+  collectionType: "playlist" | "selection" | "deliverable";
+  ownerId: string;
+}
+
+export interface AddCollectionItemInput {
+  collectionId: string;
+  entityType: "asset" | "version" | "shot" | "material";
+  entityId: string;
+  sortOrder?: number;
+  addedBy: string;
+  notes?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Playlist / Dailies input types (Phase B.7)
+// ---------------------------------------------------------------------------
+
+export interface CreatePlaylistInput {
+  projectId: string;
+  name: string;
+  description?: string;
+  createdBy: string;
+  sessionDate: string;
+}
+
+export interface AddPlaylistItemInput {
+  playlistId: string;
+  shotId: string;
+  versionId: string;
+  sortOrder?: number;
+  addedBy: string;
+  notes?: string;
+}
+
+export interface UpdatePlaylistItemDecisionInput {
+  decision: PlaylistItemDecision;
+  decidedBy: string;
+}
+
+// ---------------------------------------------------------------------------
+// VFX Hierarchy adapter interface (subset implemented by all adapters)
+// ---------------------------------------------------------------------------
+
+export interface VfxHierarchyAdapter {
+  // Projects
+  createProject(input: CreateProjectInput, ctx: WriteContext): Promise<Project>;
+  getProjectById(id: string): Promise<Project | null>;
+  listProjects(status?: ProjectStatus): Promise<Project[]>;
+
+  // Sequences
+  createSequence(input: CreateSequenceInput, ctx: WriteContext): Promise<Sequence>;
+  getSequenceById(id: string): Promise<Sequence | null>;
+  listSequencesByProject(projectId: string): Promise<Sequence[]>;
+
+  // Shots
+  createShot(input: CreateShotInput, ctx: WriteContext): Promise<Shot>;
+  getShotById(id: string): Promise<Shot | null>;
+  listShotsBySequence(sequenceId: string): Promise<Shot[]>;
+  updateShotStatus(shotId: string, status: ShotStatus, ctx: WriteContext): Promise<Shot | null>;
+
+  // Versions
+  createVersion(input: CreateVersionInput, ctx: WriteContext): Promise<Version>;
+  getVersionById(id: string): Promise<Version | null>;
+  listVersionsByShot(shotId: string): Promise<Version[]>;
+  publishVersion(versionId: string, ctx: WriteContext): Promise<Version | null>;
+  updateVersionReviewStatus(versionId: string, status: ReviewStatus, ctx: WriteContext): Promise<Version | null>;
+  updateVersionTechnicalMetadata(
+    versionId: string,
+    meta: Partial<VfxMetadata>,
+    ctx: WriteContext
+  ): Promise<Version | null>;
+
+  // Approvals
+  createVersionApproval(
+    input: CreateVersionApprovalInput,
+    ctx: WriteContext
+  ): Promise<VersionApproval>;
+  listApprovalsByVersion(versionId: string): Promise<VersionApproval[]>;
+
+  // Episodes (SERGIO-136)
+  createEpisode(input: CreateEpisodeInput, ctx: WriteContext): Promise<Episode>;
+  getEpisodeById(id: string): Promise<Episode | null>;
+  listEpisodesByProject(projectId: string): Promise<Episode[]>;
+
+  // Tasks (SERGIO-136)
+  createTask(input: CreateTaskInput, ctx: WriteContext): Promise<Task>;
+  getTaskById(id: string): Promise<Task | null>;
+  listTasksByShot(shotId: string): Promise<Task[]>;
+  listTasksByAssignee(assignee: string, statusFilter?: string): Promise<Task[]>;
+  updateTaskStatus(taskId: string, status: TaskStatus, ctx: WriteContext): Promise<Task | null>;
+
+  // Materials (MaterialX)
+  createMaterial(input: CreateMaterialInput, ctx: WriteContext): Promise<Material>;
+  getMaterialById(id: string): Promise<Material | null>;
+  listMaterialsByProject(projectId: string): Promise<Material[]>;
+
+  // Material Versions
+  createMaterialVersion(input: CreateMaterialVersionInput, ctx: WriteContext): Promise<MaterialVersion>;
+  getMaterialVersionById(id: string): Promise<MaterialVersion | null>;
+  listMaterialVersionsByMaterial(materialId: string): Promise<MaterialVersion[]>;
+  findMaterialVersionBySourcePathAndHash(sourcePath: string, contentHash: string): Promise<MaterialVersion | null>;
+
+  // Look Variants
+  createLookVariant(input: CreateLookVariantInput, ctx: WriteContext): Promise<LookVariant>;
+  listLookVariantsByMaterialVersion(materialVersionId: string): Promise<LookVariant[]>;
+
+  // Version-Material Bindings ("Where Used?")
+  createVersionMaterialBinding(input: CreateVersionMaterialBindingInput, ctx: WriteContext): Promise<VersionMaterialBinding>;
+  listBindingsByLookVariant(lookVariantId: string): Promise<VersionMaterialBinding[]>;
+  listBindingsByVersion(versionId: string): Promise<VersionMaterialBinding[]>;
+
+  // Material Dependencies
+  createMaterialDependency(input: CreateMaterialDependencyInput, ctx: WriteContext): Promise<MaterialDependency>;
+  listDependenciesByMaterialVersion(materialVersionId: string): Promise<MaterialDependency[]>;
+
+  // Cascade-delete safety check
+  countBindingsForMaterial(materialId: string): Promise<number>;
+
+  // Timelines (OTIO)
+  createTimeline(input: CreateTimelineInput, ctx: WriteContext): Promise<Timeline>;
+  getTimelineById(id: string): Promise<Timeline | null>;
+  listTimelinesByProject(projectId: string): Promise<Timeline[]>;
+  updateTimelineStatus(id: string, status: TimelineStatus, ctx: WriteContext): Promise<Timeline | null>;
+  createTimelineClip(input: CreateTimelineClipInput, ctx: WriteContext): Promise<TimelineClip>;
+  listClipsByTimeline(timelineId: string): Promise<TimelineClip[]>;
+  updateClipConformStatus(
+    clipId: string,
+    status: ClipConformStatus,
+    shotId?: string,
+    assetId?: string
+  ): Promise<void>;
+  findTimelineByProjectAndName(projectId: string, name: string): Promise<Timeline | null>;
+  storeTimelineChanges(changeSet: TimelineChangeSet): Promise<void>;
+  getTimelineChanges(timelineId: string): Promise<TimelineChangeSet | null>;
+
+  // Review Comments (Phase B)
+  createReviewComment(input: CreateReviewCommentInput, ctx: WriteContext): Promise<ReviewComment>;
+  getReviewCommentById(id: string): Promise<ReviewComment | null>;
+  listCommentsBySession(sessionId: string): Promise<ReviewComment[]>;
+  listCommentsBySubmission(submissionId: string): Promise<ReviewComment[]>;
+  listReplies(parentCommentId: string): Promise<ReviewComment[]>;
+  updateCommentStatus(id: string, status: CommentStatus, ctx: WriteContext): Promise<ReviewComment | null>;
+  resolveComment(id: string, ctx: WriteContext): Promise<ReviewComment | null>;
+
+  // Comment Annotations (Phase B)
+  createCommentAnnotation(input: CreateCommentAnnotationInput, ctx: WriteContext): Promise<CommentAnnotation>;
+  listAnnotationsByComment(commentId: string): Promise<CommentAnnotation[]>;
+
+  // Version Comparisons (Phase B)
+  createVersionComparison(input: CreateVersionComparisonInput, ctx: WriteContext): Promise<VersionComparison>;
+  getVersionComparisonById(id: string): Promise<VersionComparison | null>;
+  listComparisonsByVersion(versionId: string): Promise<VersionComparison[]>;
+
+  // Asset Provenance (Phase C)
+  createProvenance(input: CreateProvenanceInput, ctx: WriteContext): Promise<AssetProvenance>;
+  getProvenanceByVersion(versionId: string): Promise<AssetProvenance[]>;
+
+  // Version Lineage (Phase C)
+  createLineageEdge(input: CreateLineageEdgeInput, ctx: WriteContext): Promise<VersionLineage>;
+  getAncestors(versionId: string, maxDepth?: number): Promise<VersionLineage[]>;
+  getDescendants(versionId: string, maxDepth?: number): Promise<VersionLineage[]>;
+  getVersionTree(shotId: string): Promise<VersionLineage[]>;
+
+  // Dependency Intelligence (Phase C.4)
+  createDependency(input: CreateDependencyInput, ctx: WriteContext): Promise<AssetDependency>;
+  getDependenciesBySource(entityType: string, entityId: string): Promise<AssetDependency[]>;
+  getDependenciesByTarget(entityType: string, entityId: string): Promise<AssetDependency[]>;
+  getReverseDependencies(entityType: string, entityId: string): Promise<AssetDependency[]>;
+  getDependencyGraphForMaterial(materialId: string): Promise<AssetDependency[]>;
+
+  // Shot Asset Usage (Phase C.4)
+  createShotAssetUsage(input: CreateShotAssetUsageInput, ctx: WriteContext): Promise<ShotAssetUsage>;
+  getShotUsage(shotId: string): Promise<ShotAssetUsage[]>;
+  getVersionUsageAcrossShots(versionId: string): Promise<ShotAssetUsage[]>;
+
+  // Collections (Phase B.6)
+  createCollection(input: CreateCollectionInput, ctx: WriteContext): Promise<Collection>;
+  getCollectionById(id: string): Promise<Collection | null>;
+  listCollectionsByProject(projectId: string): Promise<Collection[]>;
+  addCollectionItem(input: AddCollectionItemInput, ctx: WriteContext): Promise<CollectionItem>;
+  removeCollectionItem(collectionId: string, itemId: string): Promise<boolean>;
+  listCollectionItems(collectionId: string): Promise<CollectionItem[]>;
+
+  // Playlists / Dailies (Phase B.7)
+  createPlaylist(input: CreatePlaylistInput, ctx: WriteContext): Promise<Playlist>;
+  getPlaylistById(id: string): Promise<Playlist | null>;
+  listPlaylistsByProject(projectId: string): Promise<Playlist[]>;
+  addPlaylistItem(input: AddPlaylistItemInput, ctx: WriteContext): Promise<PlaylistItem>;
+  updatePlaylistItemDecision(itemId: string, input: UpdatePlaylistItemDecisionInput, ctx: WriteContext): Promise<PlaylistItem | null>;
+  updatePlaylistItems(playlistId: string, items: Array<{ id: string; sortOrder?: number; notes?: string }>, ctx: WriteContext): Promise<PlaylistItem[]>;
+  listPlaylistItems(playlistId: string): Promise<PlaylistItem[]>;
+  getPlaylistReport(playlistId: string): Promise<DailiesReportEntry[]>;
+
+  // Capacity Planning (Phase C.7)
+  createStorageMetric(input: CreateStorageMetricInput, ctx: WriteContext): Promise<StorageMetric>;
+  getStorageMetricsByEntity(entityType: string, entityId: string): Promise<StorageMetric[]>;
+  getLatestStorageMetric(entityType: string, entityId: string): Promise<StorageMetric | null>;
+  getStorageSummaryByProject(projectId: string): Promise<StorageMetric[]>;
+  createRenderFarmMetric(input: CreateRenderFarmMetricInput, ctx: WriteContext): Promise<RenderFarmMetric>;
+  getRenderMetricsByProject(projectId: string, from?: string, to?: string): Promise<RenderFarmMetric[]>;
+  getRenderMetricsByShot(shotId: string): Promise<RenderFarmMetric[]>;
+  upsertDownstreamUsageCount(input: UpsertDownstreamUsageCountInput, ctx: WriteContext): Promise<DownstreamUsageCount>;
+  getDownstreamUsageCount(entityType: string, entityId: string): Promise<DownstreamUsageCount | null>;
+}
+
+export type PersistenceBackend = "local" | "vast";
+
+export interface IngestInput {
+  title: string;
+  sourceUri: string;
+  annotationHook?: AnnotationHookMetadata | null;
+  // Optional — provided by ScannerFunction (VAST DataEngine trigger)
+  shotId?: string;
+  projectId?: string;
+  versionLabel?: string;
+  fileSizeBytes?: number;
+  md5Checksum?: string;
+  createdBy?: string;
+}
+
+export interface WriteContext {
+  correlationId: string;
+  now?: string;
+}
+
+export interface FailureResult {
+  accepted: boolean;
+  status?: WorkflowStatus;
+  movedToDlq?: boolean;
+  retryScheduled?: boolean;
+  message?: string;
+}
+
+export interface WorkflowStats {
+  assets: {
+    total: number;
+  };
+  jobs: {
+    total: number;
+    pending: number;
+    processing: number;
+    completed: number;
+    failed: number;
+    needsReplay: number;
+  };
+  queue: {
+    pending: number;
+    leased: number;
+  };
+  outbox: {
+    pending: number;
+    published: number;
+  };
+  dlq: {
+    total: number;
+  };
+  degradedMode: {
+    fallbackEvents: number;
+  };
+  outbound: {
+    attempts: number;
+    success: number;
+    failure: number;
+    byTarget: {
+      slack: { attempts: number; success: number; failure: number };
+      teams: { attempts: number; success: number; failure: number };
+      production: { attempts: number; success: number; failure: number };
+    };
+  };
+}
+
+export interface IncidentGuidedActionsUpdate {
+  acknowledged: boolean;
+  owner: string;
+  escalated: boolean;
+  nextUpdateEta: string | null;
+}
+
+export interface IncidentNoteInput {
+  message: string;
+  correlationId: string;
+  author: string;
+}
+
+export interface IncidentHandoffUpdate {
+  state: IncidentHandoffState;
+  fromOwner: string;
+  toOwner: string;
+  summary: string;
+}
+
+export interface AuditRetentionPreview {
+  eligibleCount: number;
+  oldestEligibleAt: string | null;
+  newestEligibleAt: string | null;
+}
+
+export interface AuditRetentionApplyResult {
+  deletedCount: number;
+  remainingCount: number;
+}
+
+export interface PersistenceAdapter extends VfxHierarchyAdapter {
+  readonly backend: PersistenceBackend;
+  reset(): void;
+  createIngestAsset(input: IngestInput, context: WriteContext): Promise<IngestResult>;
+  getAssetById(assetId: string): Promise<Asset | null>;
+  updateAsset(
+    assetId: string,
+    updates: Partial<Pick<Asset, "metadata" | "version" | "integrity">>,
+    context: WriteContext
+  ): Promise<Asset | null>;
+  setJobStatus(
+    jobId: string,
+    status: WorkflowStatus,
+    lastError: string | null | undefined,
+    context: WriteContext
+  ): Promise<WorkflowJob | null>;
+  updateJobStatus(
+    jobId: string,
+    expectedStatus: WorkflowStatus,
+    newStatus: WorkflowStatus,
+    context: WriteContext
+  ): Promise<boolean>;
+  getJobById(jobId: string): Promise<WorkflowJob | null>;
+  getPendingJobs(): Promise<WorkflowJob[]>;
+  claimNextJob(workerId: string, leaseSeconds: number, context: WriteContext): Promise<WorkflowJob | null>;
+  heartbeatJob(jobId: string, workerId: string, leaseSeconds: number, context: WriteContext): Promise<WorkflowJob | null>;
+  reapStaleLeases(nowIso: string): Promise<number>;
+  handleJobFailure(jobId: string, error: string, context: WriteContext): Promise<FailureResult>;
+  replayJob(jobId: string, context: WriteContext): Promise<WorkflowJob | null>;
+  getDlqItems(): Promise<DlqItem[]>;
+  getDlqItem(jobId: string): Promise<DlqItem | null>;
+  purgeDlqItems(beforeIso: string): Promise<number>;
+  getOutboxItems(): Promise<OutboxItem[]>;
+  publishOutbox(context: WriteContext): Promise<number>;
+  getWorkflowStats(nowIso?: string): Promise<WorkflowStats>;
+  listAssetQueueRows(): Promise<AssetQueueRow[]>;
+  getAuditEvents(): Promise<AuditEvent[]>;
+  previewAuditRetention(cutoffIso: string): Promise<AuditRetentionPreview>;
+  applyAuditRetention(cutoffIso: string, maxDeletePerRun?: number): Promise<AuditRetentionApplyResult>;
+  getIncidentCoordination(): Promise<IncidentCoordination>;
+  updateIncidentGuidedActions(update: IncidentGuidedActionsUpdate, context: WriteContext): Promise<IncidentGuidedActions>;
+  addIncidentNote(input: IncidentNoteInput, context: WriteContext): Promise<IncidentNote>;
+  updateIncidentHandoff(update: IncidentHandoffUpdate, context: WriteContext): Promise<IncidentHandoff>;
+  // Approval audit log
+  appendApprovalAuditEntry(entry: ApprovalAuditEntry): Promise<void>;
+  getApprovalAuditLog(): Promise<ApprovalAuditEntry[]>;
+  getApprovalAuditLogByAssetId(assetId: string): Promise<ApprovalAuditEntry[]>;
+  resetApprovalAuditLog(): Promise<void>;
+
+  // DCC audit trail
+  appendDccAuditEntry(entry: DccAuditEntry): Promise<void>;
+  getDccAuditTrail(): Promise<readonly DccAuditEntry[]>;
+  clearDccAuditTrail(): Promise<void>;
+
+  hasProcessedEvent(eventId: string): Promise<boolean>;
+  markProcessedEvent(eventId: string): Promise<void>;
+
+  /**
+   * Atomically check whether an event has been processed and mark it in one
+   * operation, closing the TOCTOU race window (CWE-367 / M13).
+   *
+   * Returns `true` if the event was newly marked (i.e. it had NOT been
+   * processed before). Returns `false` if the event was already marked
+   * (duplicate).
+   *
+   * For in-memory adapters this is a single synchronous check-and-set on
+   * the backing Map. For distributed / SQL-backed adapters this MUST use
+   * a database-level atomic primitive (e.g. INSERT … ON CONFLICT DO NOTHING
+   * with a UNIQUE constraint, or an equivalent compare-and-swap).
+   */
+  markIfNotProcessed(eventId: string): Promise<boolean>;
+
+  // Review Sessions (dailies-oriented)
+  createReviewSession(input: CreateReviewSessionInput, ctx: WriteContext): Promise<ReviewSession>;
+  getReviewSessionById(id: string): Promise<ReviewSession | null>;
+  listReviewSessions(filters?: { projectId?: string; status?: ReviewSessionStatus; department?: string }): Promise<ReviewSession[]>;
+  updateReviewSessionStatus(id: string, fromStatus: ReviewSessionStatus, toStatus: ReviewSessionStatus, ctx: WriteContext): Promise<ReviewSession | null>;
+  addSubmission(input: AddSubmissionInput, ctx: WriteContext): Promise<ReviewSessionSubmission>;
+  listSubmissionsBySession(sessionId: string): Promise<ReviewSessionSubmission[]>;
+  updateSubmissionStatus(id: string, fromStatus: SubmissionStatus, toStatus: SubmissionStatus, ctx: WriteContext): Promise<ReviewSessionSubmission | null>;
+}

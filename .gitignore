@@ -1,0 +1,25 @@
+.DS_Store
+node_modules/
+services/control-plane/node_modules/
+services/web-ui/node_modules/
+/.pytest_cache/
+**/__pycache__/
+**/.pytest_cache/
+.env
+dist/
+coverage/
+
+# Stale tsc output — canonical source is services/control-plane/src/ (runtime: tsx)
+services/control-plane/src/**/*.js
+services/control-plane/test/**/*.js
+services/control-plane/domain/
+services/control-plane/http/
+services/control-plane/persistence/
+services/control-plane/routes/
+services/control-plane/types/
+.worktrees/
+*.session-transcript.txt
+2026-*.txt
+deploy.log
+.claude/
+.env.local

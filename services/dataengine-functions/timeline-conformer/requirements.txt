@@ -1,0 +1,2 @@
+confluent-kafka>=2.4.0,<2.9
+requests>=2.31.0,<3

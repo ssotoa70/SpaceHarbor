@@ -1,0 +1,2 @@
+MaterialX>=1.38.8
+confluent-kafka==2.6.1

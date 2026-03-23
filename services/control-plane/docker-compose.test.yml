@@ -1,0 +1,18 @@
+# Trino integration test environment
+# Usage: docker compose -f docker-compose.test.yml up -d --wait
+#
+# Provides a memory-backed "vast" catalog so migration DDL and adapter SQL
+# can execute against real Trino without a VAST cluster.
+services:
+  trino:
+    image: trinodb/trino:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./test/integration/vast.properties:/etc/trino/catalog/vast.properties:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/v1/info"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s

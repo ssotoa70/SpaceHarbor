@@ -1,0 +1,13 @@
+{
+  "name": "dnxhr_sq",
+  "description": "Avid DNxHR SQ — standard quality editorial for Avid 1080p",
+  "codec": "dnxhd",
+  "container": "mxf",
+  "pixel_format": "yuv422p",
+  "codec_params": {
+    "profile:v": "dnxhr_sq"
+  },
+  "default_resolution": "1920x1080",
+  "audio_codec": "pcm_s24le",
+  "audio_params": {}
+}

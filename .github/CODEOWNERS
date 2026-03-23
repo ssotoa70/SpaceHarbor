@@ -1,0 +1,27 @@
+# SpaceHarbor Code Owners
+# Each line is a file pattern followed by one or more owners.
+# Order matters: later rules override earlier ones.
+
+# Global owner
+* @ssotoa70
+
+# Control plane (TypeScript backend)
+/services/control-plane/ @ssotoa70
+
+# Web UI (React/Vite)
+/services/web-ui/ @ssotoa70
+
+# Python DataEngine functions
+/services/scanner-function/ @ssotoa70
+/services/dataengine-functions/ @ssotoa70
+/services/openassetio-manager/ @ssotoa70
+
+# Media worker (Python, dev-only)
+/services/media-worker/ @ssotoa70
+
+# Infrastructure and CI
+/.github/ @ssotoa70
+/docker-compose.yml @ssotoa70
+
+# Documentation
+/docs/ @ssotoa70

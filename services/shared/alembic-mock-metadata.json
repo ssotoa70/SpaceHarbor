@@ -1,0 +1,22 @@
+{
+  "codec": "alembic",
+  "schema_type": "PolyMesh",
+  "archive_type": "Ogawa",
+  "object_count": 156,
+  "mesh_count": 89,
+  "curve_count": 12,
+  "point_count": 3245000,
+  "has_normals": true,
+  "has_uvs": true,
+  "has_velocity": true,
+  "is_constant": false,
+  "frame_range": { "first": 1001, "last": 1120 },
+  "frame_rate": 24.0,
+  "time_sampling_count": 2,
+  "bounding_box": {
+    "min": [-1.5, 0.0, -1.2],
+    "max": [1.5, 3.8, 1.2]
+  },
+  "file_size_bytes": 245760000,
+  "checksum": "f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3"
+}

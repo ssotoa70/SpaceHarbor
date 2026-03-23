@@ -1,0 +1,17 @@
+# Development overrides — auto-loaded by docker compose alongside docker-compose.yml
+# Adds source volume mounts for hot-reload during development.
+# To skip: docker compose -f docker-compose.yml up (without override)
+
+services:
+  control-plane:
+    volumes:
+      - ./services/control-plane/src:/app/src:cached
+      - ./services/control-plane/test:/app/test:cached
+      - /app/node_modules  # Preserve container's node_modules
+    environment:
+      NODE_ENV: development
+
+  web-ui:
+    volumes:
+      - ./services/web-ui/src:/app/src:cached
+      - ./services/web-ui/nginx.conf:/etc/nginx/conf.d/default.conf:ro

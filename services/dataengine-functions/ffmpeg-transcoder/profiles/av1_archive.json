@@ -1,0 +1,16 @@
+{
+  "name": "av1_archive",
+  "description": "AV1 compressed archive — modern efficient codec via SVT-AV1 (BSD license)",
+  "codec": "libsvtav1",
+  "container": "mp4",
+  "pixel_format": "yuv420p10le",
+  "codec_params": {
+    "preset": "6",
+    "crf": "30"
+  },
+  "default_resolution": null,
+  "audio_codec": "aac",
+  "audio_params": {
+    "b:a": "192k"
+  }
+}

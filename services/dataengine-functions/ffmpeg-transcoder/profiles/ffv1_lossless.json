@@ -1,0 +1,14 @@
+{
+  "name": "ffv1_lossless",
+  "description": "FFV1 pixel-exact lossless archive — open standard, bit-perfect preservation",
+  "codec": "ffv1",
+  "container": "matroska",
+  "pixel_format": "yuv444p16le",
+  "codec_params": {
+    "level": "3",
+    "slicecrc": "1"
+  },
+  "default_resolution": null,
+  "audio_codec": "flac",
+  "audio_params": {}
+}

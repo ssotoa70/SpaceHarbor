@@ -1,0 +1,695 @@
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { withPrefix } from "../http/routes.js";
+import {
+  errorEnvelopeSchema,
+  platformSettingsResponseSchema,
+  savePlatformSettingsBodySchema,
+  connectionTestResponseSchema,
+  schemaDeployResponseSchema,
+  schemaStatusResponseSchema,
+} from "../http/schemas.js";
+import { TrinoClient } from "../db/trino-client.js";
+import { migrations } from "../db/migrations/index.js";
+import { resolveIamFlags } from "../iam/feature-flags.js";
+import { isValidApiKey, resolveValidApiKeys } from "../iam/auth-plugin.js";
+import { PERMISSIONS } from "../iam/types.js";
+
+/**
+ * Enforce admin:system_config permission when IAM is enabled, or require an API
+ * key when IAM is disabled. Platform settings are always sensitive — they expose
+ * service endpoints, credentials masks, and allow schema migrations.
+ *
+ * Returns true if the request was denied (reply already sent).
+ */
+function denyUnlessAdmin(request: FastifyRequest, reply: FastifyReply): boolean {
+  const iamFlags = resolveIamFlags();
+
+  if (iamFlags.iamEnabled) {
+    // IAM path: check admin:system_config permission on the attached context.
+    const ctx = (request as any).iamContext as { permissions?: Set<string> } | undefined;
+    if (ctx?.permissions && !ctx.permissions.has(PERMISSIONS.ADMIN_SYSTEM_CONFIG)) {
+      reply.status(403).send({
+        code: "FORBIDDEN",
+        message: `${PERMISSIONS.ADMIN_SYSTEM_CONFIG} permission required`,
+        requestId: request.id,
+        details: null,
+      });
+      return true;
+    }
+    return false;
+  }
+
+  // IAM disabled path: require API key when one is configured.
+  const validKeys = resolveValidApiKeys();
+  if (validKeys.length === 0) {
+    // No API keys configured — dev/single-user mode. Log a warning and allow,
+    // but do not silently expose settings in any environment that claims to be
+    // production (the startup gate in app.ts already blocks that case).
+    request.log.warn(
+      "Platform settings accessed without authentication (no IAM, no API key). " +
+      "Configure SPACEHARBOR_API_KEY or enable IAM before deploying to production."
+    );
+    return false;
+  }
+
+  const providedKey = request.headers["x-api-key"];
+  if (!providedKey || typeof providedKey !== "string") {
+    reply.status(401).send({
+      code: "UNAUTHORIZED",
+      message: "API key required for platform settings",
+      requestId: request.id,
+      details: null,
+    });
+    return true;
+  }
+
+  if (!isValidApiKey(providedKey)) {
+    reply.status(403).send({
+      code: "FORBIDDEN",
+      message: "invalid API key",
+      requestId: request.id,
+      details: null,
+    });
+    return true;
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface PlatformSettings {
+  vastDatabase: {
+    configured: boolean;
+    endpoint: string | null;
+    status: "connected" | "disconnected" | "error";
+    tablesDeployed: boolean;
+    vmsVip: string | null;
+    cnodeVips: string | null;
+    accessKeyId: string | null;
+  };
+  vastEventBroker: {
+    configured: boolean;
+    brokerUrl: string | null;
+    topic: string | null;
+    status: "connected" | "disconnected" | "not_configured";
+  };
+  vastDataEngine: {
+    configured: boolean;
+    url: string | null;
+    status: "connected" | "disconnected" | "not_configured";
+    tenant: string | null;
+  };
+  authentication: {
+    mode: "local" | "oidc";
+    oidcIssuer: string | null;
+    jwksUri: string | null;
+    iamEnabled: boolean;
+    shadowMode: boolean;
+    rolloutRing: string;
+  };
+  storage: {
+    s3Endpoint: string | null;
+    s3Bucket: string | null;
+    configured: boolean;
+  };
+  scim: {
+    configured: boolean;
+    enabled: boolean;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// In-memory operational settings store
+//
+// Persists operational fields that are NOT available via environment variables
+// (vmsVip, cnodeVips, accessKeyId, DataEngine tenant, S3 secretAccessKeys).
+// Secret fields are stored here and NEVER serialised into GET response bodies.
+// ---------------------------------------------------------------------------
+
+interface S3EndpointStored {
+  id: string;
+  label: string;
+  endpoint: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string; // write-only; never returned to clients
+  region: string;
+  useSsl: boolean;
+  pathStyle: boolean;
+}
+
+interface OperationalSettings {
+  vastDatabase: {
+    vmsVip: string | null;
+    cnodeVips: string | null;
+    accessKeyId: string | null;
+  };
+  vastDataEngine: {
+    tenant: string | null;
+  };
+  storage: {
+    endpoints: S3EndpointStored[];
+  };
+}
+
+/** Module-level store. Survives the request lifecycle; resets on process restart. */
+const operationalStore: OperationalSettings = {
+  vastDatabase: { vmsVip: null, cnodeVips: null, accessKeyId: null },
+  vastDataEngine: { tenant: null },
+  storage: { endpoints: [] },
+};
+
+export interface ConnectionTestResult {
+  service: string;
+  status: "ok" | "error";
+  message: string;
+}
+
+export interface SchemaDeployResult {
+  status: "ok" | "error";
+  migrationsApplied: number;
+  message: string;
+}
+
+export interface SchemaStatus {
+  currentVersion: number;
+  availableMigrations: number;
+  upToDate: boolean;
+  pending: { version: number; description: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Mask a string after the first 20 characters. */
+function maskEndpoint(value: string | undefined | null): string | null {
+  if (!value) return null;
+  if (value.length <= 20) return value;
+  return value.slice(0, 20) + "***";
+}
+
+/** Build a TrinoClient from env vars, or null if not configured. */
+function buildTrinoFromEnv(): TrinoClient | null {
+  const dbUrl = process.env.VAST_DATABASE_URL;
+  if (!dbUrl) return null;
+  try {
+    const url = new URL(dbUrl);
+    return new TrinoClient({
+      endpoint: `${url.protocol}//${url.host}`,
+      accessKey: url.username || process.env.VAST_ACCESS_KEY || "",
+      secretKey: url.password || process.env.VAST_SECRET_KEY || "",
+    });
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Route registration
+// ---------------------------------------------------------------------------
+
+export async function registerPlatformSettingsRoutes(
+  app: FastifyInstance,
+  prefixes: string[],
+): Promise<void> {
+  for (const prefix of prefixes) {
+    const opPrefix = prefix.replace(/\W/g, "") || "root";
+
+    // ── GET /platform/settings ──────────────────────────────────────────
+    app.get(
+      withPrefix(prefix, "/platform/settings"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}GetPlatformSettings`,
+          summary: "Get current platform configuration",
+          description: "Returns the current service connection status and configuration for all platform services (VAST Database, Event Broker, DataEngine, S3, IAM, SCIM). Requires admin:system_config permission.",
+          response: { 200: platformSettingsResponseSchema, 403: errorEnvelopeSchema },
+        },
+      },
+      async (_request, reply) => {
+        if (denyUnlessAdmin(_request, reply)) return;
+        const iamFlags = resolveIamFlags();
+
+        // VAST Database
+        const dbUrl = process.env.VAST_DATABASE_URL;
+        const dbConfigured = !!dbUrl;
+        let dbStatus: PlatformSettings["vastDatabase"]["status"] = "disconnected";
+        let tablesDeployed = false;
+
+        if (dbConfigured) {
+          const trino = buildTrinoFromEnv();
+          if (trino) {
+            try {
+              const health = await trino.healthCheck();
+              dbStatus = health.reachable ? "connected" : "disconnected";
+
+              if (health.reachable) {
+                try {
+                  const schema = process.env.VAST_SCHEMA ?? "spaceharbor/production";
+                  await trino.query(`SELECT MAX(version) AS v FROM vast."${schema}".schema_version`);
+                  tablesDeployed = true;
+                } catch {
+                  // schema_version table doesn't exist
+                }
+              }
+            } catch {
+              dbStatus = "error";
+            }
+          }
+        }
+
+        // VAST Event Broker
+        const brokerUrl = process.env.VAST_EVENT_BROKER_URL ?? null;
+        const brokerTopic = process.env.VAST_EVENT_BROKER_TOPIC ?? "spaceharbor.dataengine.completed";
+        const brokerConfigured = !!brokerUrl;
+
+        // VAST DataEngine
+        const dataEngineUrl = process.env.VAST_DATA_ENGINE_URL ?? null;
+        const deConfigured = !!dataEngineUrl;
+
+        // S3 / Object Storage
+        const s3Endpoint = process.env.SPACEHARBOR_S3_ENDPOINT ?? process.env.AWS_S3_ENDPOINT ?? null;
+        const s3Bucket = process.env.SPACEHARBOR_S3_BUCKET ?? process.env.AWS_S3_BUCKET ?? null;
+        const s3Configured = !!(s3Endpoint && s3Bucket);
+
+        // Authentication
+        const oidcIssuer = process.env.SPACEHARBOR_OIDC_ISSUER ?? null;
+        const jwksUri = process.env.SPACEHARBOR_OIDC_JWKS_URI ?? null;
+        const authMode = jwksUri ? "oidc" : "local";
+
+        // SCIM
+        const scimEnabled = iamFlags.enableScimSync;
+        const scimConfigured = scimEnabled && !!process.env.SPACEHARBOR_SCIM_TOKEN;
+
+        // Build S3 endpoints for response — strip secretAccessKey (never returned)
+        const s3EndpointsForResponse = operationalStore.storage.endpoints.map(
+          ({ secretAccessKey: _omit, ...rest }) => rest,
+        );
+
+        const settings: PlatformSettings = {
+          vastDatabase: {
+            configured: dbConfigured,
+            endpoint: maskEndpoint(dbUrl),
+            status: dbConfigured ? dbStatus : "disconnected",
+            tablesDeployed,
+            vmsVip: operationalStore.vastDatabase.vmsVip,
+            cnodeVips: operationalStore.vastDatabase.cnodeVips,
+            accessKeyId: operationalStore.vastDatabase.accessKeyId,
+          },
+          vastEventBroker: {
+            configured: brokerConfigured,
+            brokerUrl: maskEndpoint(brokerUrl),
+            topic: brokerConfigured ? brokerTopic : null,
+            status: brokerConfigured ? "connected" : "not_configured",
+          },
+          vastDataEngine: {
+            configured: deConfigured,
+            url: maskEndpoint(dataEngineUrl),
+            status: deConfigured ? "connected" : "not_configured",
+            tenant: operationalStore.vastDataEngine.tenant,
+          },
+          authentication: {
+            mode: authMode,
+            oidcIssuer: maskEndpoint(oidcIssuer),
+            jwksUri: maskEndpoint(jwksUri),
+            iamEnabled: iamFlags.iamEnabled,
+            shadowMode: iamFlags.shadowMode,
+            rolloutRing: iamFlags.rolloutRing,
+          },
+          storage: {
+            s3Endpoint: maskEndpoint(s3Endpoint),
+            s3Bucket: s3Bucket,
+            configured: s3Configured,
+            endpoints: s3EndpointsForResponse,
+          } as any, // storage.endpoints lives outside the base PlatformSettings type
+          scim: {
+            configured: scimConfigured,
+            enabled: scimEnabled,
+          },
+        };
+
+        return reply.send(settings);
+      },
+    );
+
+    // ── PUT /platform/settings ─────────────────────────────────────────
+    app.put<{ Body: Record<string, unknown> }>(
+      withPrefix(prefix, "/platform/settings"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}SavePlatformSettings`,
+          summary: "Update platform configuration",
+          description: "Persists updated service connection parameters. Supports partial updates — only the sections included in the body are modified. S3 storage supports multiple endpoint configurations. Requires admin:system_config permission.",
+          body: savePlatformSettingsBodySchema,
+          response: {
+            200: platformSettingsResponseSchema,
+            400: errorEnvelopeSchema,
+          },
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+
+        const body = request.body as Record<string, unknown>;
+        request.log.info({ update: body }, "Platform settings update requested");
+
+        // Persist VAST Database operational fields
+        const dbBody = body["vastDatabase"] as Record<string, unknown> | undefined;
+        if (dbBody) {
+          if (typeof dbBody["vmsVip"] === "string" || dbBody["vmsVip"] === null) {
+            operationalStore.vastDatabase.vmsVip = (dbBody["vmsVip"] as string | null) || null;
+          }
+          if (typeof dbBody["cnodeVips"] === "string" || dbBody["cnodeVips"] === null) {
+            operationalStore.vastDatabase.cnodeVips = (dbBody["cnodeVips"] as string | null) || null;
+          }
+          if (typeof dbBody["accessKeyId"] === "string" || dbBody["accessKeyId"] === null) {
+            operationalStore.vastDatabase.accessKeyId = (dbBody["accessKeyId"] as string | null) || null;
+          }
+        }
+
+        // Persist VAST DataEngine operational fields
+        const deBody = body["vastDataEngine"] as Record<string, unknown> | undefined;
+        if (deBody) {
+          if (typeof deBody["tenant"] === "string" || deBody["tenant"] === null) {
+            operationalStore.vastDataEngine.tenant = (deBody["tenant"] as string | null) || null;
+          }
+        }
+
+        // Persist S3 endpoints (merge secretAccessKey: keep existing value if not provided)
+        const storageBody = body["storage"] as Record<string, unknown> | undefined;
+        if (storageBody && Array.isArray(storageBody["endpoints"])) {
+          const incoming = storageBody["endpoints"] as Array<Record<string, unknown>>;
+          operationalStore.storage.endpoints = incoming.map((ep) => {
+            const existing = operationalStore.storage.endpoints.find((e) => e.id === ep["id"]);
+            return {
+              id: String(ep["id"] ?? ""),
+              label: String(ep["label"] ?? ""),
+              endpoint: String(ep["endpoint"] ?? ""),
+              bucket: String(ep["bucket"] ?? ""),
+              accessKeyId: String(ep["accessKeyId"] ?? ""),
+              // Use new value if provided; fall back to previously stored secret
+              secretAccessKey:
+                typeof ep["secretAccessKey"] === "string" && ep["secretAccessKey"] !== ""
+                  ? ep["secretAccessKey"]
+                  : (existing?.secretAccessKey ?? ""),
+              region: String(ep["region"] ?? "us-east-1"),
+              useSsl: ep["useSsl"] !== false,
+              pathStyle: ep["pathStyle"] !== false,
+            } satisfies S3EndpointStored;
+          });
+        }
+
+        // Re-read current settings to return fresh state
+        const iamFlags = resolveIamFlags();
+        const dbUrl = process.env.VAST_DATABASE_URL;
+        const brokerUrl = process.env.VAST_EVENT_BROKER_URL ?? null;
+        const brokerTopic = process.env.VAST_EVENT_BROKER_TOPIC ?? "spaceharbor.dataengine.completed";
+        const dataEngineUrl = process.env.VAST_DATA_ENGINE_URL ?? null;
+        const s3Endpoint = process.env.SPACEHARBOR_S3_ENDPOINT ?? process.env.AWS_S3_ENDPOINT ?? null;
+        const s3Bucket = process.env.SPACEHARBOR_S3_BUCKET ?? process.env.AWS_S3_BUCKET ?? null;
+        const oidcIssuer = process.env.SPACEHARBOR_OIDC_ISSUER ?? null;
+        const jwksUri = process.env.SPACEHARBOR_OIDC_JWKS_URI ?? null;
+
+        // Build S3 endpoint list for response — strip secretAccessKey
+        const s3EndpointsForResponse = operationalStore.storage.endpoints.map(
+          ({ secretAccessKey: _omit, ...rest }) => rest,
+        );
+
+        const settings: PlatformSettings = {
+          vastDatabase: {
+            configured: !!dbUrl,
+            endpoint: maskEndpoint(dbUrl),
+            status: dbUrl ? "connected" : "disconnected",
+            tablesDeployed: false,
+            vmsVip: operationalStore.vastDatabase.vmsVip,
+            cnodeVips: operationalStore.vastDatabase.cnodeVips,
+            accessKeyId: operationalStore.vastDatabase.accessKeyId,
+          },
+          vastEventBroker: {
+            configured: !!brokerUrl,
+            brokerUrl: maskEndpoint(brokerUrl),
+            topic: brokerUrl ? brokerTopic : null,
+            status: brokerUrl ? "connected" : "not_configured",
+          },
+          vastDataEngine: {
+            configured: !!dataEngineUrl,
+            url: maskEndpoint(dataEngineUrl),
+            status: dataEngineUrl ? "connected" : "not_configured",
+            tenant: operationalStore.vastDataEngine.tenant,
+          },
+          authentication: {
+            mode: jwksUri ? "oidc" : "local",
+            oidcIssuer: maskEndpoint(oidcIssuer),
+            jwksUri: maskEndpoint(jwksUri),
+            iamEnabled: iamFlags.iamEnabled,
+            shadowMode: iamFlags.shadowMode,
+            rolloutRing: iamFlags.rolloutRing,
+          },
+          storage: {
+            s3Endpoint: maskEndpoint(s3Endpoint),
+            s3Bucket: s3Bucket,
+            configured: !!(s3Endpoint && s3Bucket),
+            endpoints: s3EndpointsForResponse,
+          } as any, // storage.endpoints lives outside the base PlatformSettings type
+          scim: {
+            configured: iamFlags.enableScimSync && !!process.env.SPACEHARBOR_SCIM_TOKEN,
+            enabled: iamFlags.enableScimSync,
+          },
+        };
+
+        return reply.send(settings);
+      },
+    );
+
+    // ── POST /platform/settings/test-connection ─────────────────────────
+    app.post<{
+      Body: { service: "vast_database" | "event_broker" | "data_engine" | "s3" };
+    }>(
+      withPrefix(prefix, "/platform/settings/test-connection"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}TestServiceConnection`,
+          summary: "Test connectivity to a platform service",
+          description: "Attempts to connect to the specified service and returns the result. For S3, tests ListBuckets via path-style SigV4. For Trino, runs SELECT 1. Requires admin:system_config permission.",
+          body: {
+            type: "object",
+            required: ["service"],
+            properties: {
+              service: {
+                type: "string",
+                enum: ["vast_database", "event_broker", "data_engine", "s3"],
+              },
+            },
+          },
+          response: {
+            200: connectionTestResponseSchema,
+            400: errorEnvelopeSchema,
+          },
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        const { service } = request.body;
+
+        if (service === "vast_database") {
+          const trino = buildTrinoFromEnv();
+          if (!trino) {
+            return reply.send({
+              service,
+              status: "error",
+              message: "VAST_DATABASE_URL is not configured",
+            } satisfies ConnectionTestResult);
+          }
+
+          try {
+            await trino.query("SELECT 1");
+            return reply.send({
+              service,
+              status: "ok",
+              message: "Trino connection successful",
+            } satisfies ConnectionTestResult);
+          } catch (err) {
+            return reply.send({
+              service,
+              status: "error",
+              message: `Trino connection failed: ${err instanceof Error ? err.message : String(err)}`,
+            } satisfies ConnectionTestResult);
+          }
+        }
+
+        if (service === "event_broker") {
+          const brokerUrl = process.env.VAST_EVENT_BROKER_URL;
+          return reply.send({
+            service,
+            status: brokerUrl ? "ok" : "error",
+            message: brokerUrl
+              ? "Event broker URL is configured"
+              : "VAST_EVENT_BROKER_URL is not configured",
+          } satisfies ConnectionTestResult);
+        }
+
+        if (service === "data_engine") {
+          const deUrl = process.env.VAST_DATA_ENGINE_URL;
+          return reply.send({
+            service,
+            status: deUrl ? "ok" : "error",
+            message: deUrl
+              ? "DataEngine URL is configured"
+              : "VAST_DATA_ENGINE_URL is not configured",
+          } satisfies ConnectionTestResult);
+        }
+
+        if (service === "s3") {
+          const s3Endpoint = process.env.SPACEHARBOR_S3_ENDPOINT ?? process.env.AWS_S3_ENDPOINT;
+          const s3Bucket = process.env.SPACEHARBOR_S3_BUCKET ?? process.env.AWS_S3_BUCKET;
+          const ok = !!(s3Endpoint && s3Bucket);
+          return reply.send({
+            service,
+            status: ok ? "ok" : "error",
+            message: ok
+              ? "S3 endpoint and bucket are configured"
+              : "S3 endpoint or bucket is not configured",
+          } satisfies ConnectionTestResult);
+        }
+
+        return reply.status(400).send({
+          code: "BAD_REQUEST",
+          message: `Unknown service: ${service}`,
+          requestId: request.id,
+          details: null,
+        });
+      },
+    );
+
+    // ── POST /platform/settings/deploy-schema ───────────────────────────
+    app.post(
+      withPrefix(prefix, "/platform/settings/deploy-schema"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}DeploySchema`,
+          summary: "Run database schema migrations",
+          description: "Applies pending Trino/VAST DataBase migrations. Requires admin:system_config permission. This action cannot be undone.",
+          response: {
+            200: schemaDeployResponseSchema,
+            503: errorEnvelopeSchema,
+          },
+        },
+      },
+      async (_request, reply) => {
+        if (denyUnlessAdmin(_request, reply)) return;
+        const trino = buildTrinoFromEnv();
+        if (!trino) {
+          return reply.status(503).send({
+            code: "SERVICE_UNAVAILABLE",
+            message: "No Trino client available (VAST_DATABASE_URL not configured)",
+            requestId: _request.id,
+            details: null,
+          });
+        }
+
+        try {
+          const schema = process.env.VAST_SCHEMA ?? "spaceharbor/production";
+
+          // Determine current version
+          let currentVersion = 0;
+          try {
+            const result = await trino.query(
+              `SELECT MAX(version) AS max_ver FROM vast."${schema}".schema_version`,
+            );
+            if (result.data.length > 0 && result.data[0][0] != null) {
+              currentVersion = result.data[0][0] as number;
+            }
+          } catch {
+            // Table doesn't exist yet
+          }
+
+          const pending = migrations.filter((m) => m.version > currentVersion);
+          if (pending.length === 0) {
+            return reply.send({
+              status: "ok",
+              migrationsApplied: 0,
+              message: "Schema is already up to date",
+            } satisfies SchemaDeployResult);
+          }
+
+          // Apply pending migrations
+          let applied = 0;
+          for (const mig of pending) {
+            for (const sql of mig.statements) {
+              await trino.query(sql);
+            }
+            applied++;
+          }
+
+          return reply.send({
+            status: "ok",
+            migrationsApplied: applied,
+            message: `Applied ${applied} migration(s). Schema is now at version ${pending[pending.length - 1].version}.`,
+          } satisfies SchemaDeployResult);
+        } catch (err) {
+          return reply.send({
+            status: "error",
+            migrationsApplied: 0,
+            message: `Migration failed: ${err instanceof Error ? err.message : String(err)}`,
+          } satisfies SchemaDeployResult);
+        }
+      },
+    );
+
+    // ── GET /platform/settings/schema-status ────────────────────────────
+    app.get(
+      withPrefix(prefix, "/platform/settings/schema-status"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}GetSchemaStatus`,
+          summary: "Get database schema migration status",
+          description: "Returns the current schema version, available migrations, and any pending migrations.",
+          response: {
+            200: schemaStatusResponseSchema,
+          },
+        },
+      },
+      async (_request, reply) => {
+        if (denyUnlessAdmin(_request, reply)) return;
+        const trino = buildTrinoFromEnv();
+        const totalMigrations = migrations.length;
+
+        let currentVersion = 0;
+
+        if (trino) {
+          try {
+            const schema = process.env.VAST_SCHEMA ?? "spaceharbor/production";
+            const result = await trino.query(
+              `SELECT MAX(version) AS max_ver FROM vast."${schema}".schema_version`,
+            );
+            if (result.data.length > 0 && result.data[0][0] != null) {
+              currentVersion = result.data[0][0] as number;
+            }
+          } catch {
+            // Table doesn't exist
+          }
+        }
+
+        const pending = migrations
+          .filter((m) => m.version > currentVersion)
+          .map((m) => ({ version: m.version, description: m.description }));
+
+        return reply.send({
+          currentVersion,
+          availableMigrations: totalMigrations,
+          upToDate: pending.length === 0,
+          pending,
+        } satisfies SchemaStatus);
+      },
+    );
+  }
+}

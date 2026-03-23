@@ -1,0 +1,27 @@
+{
+  "name": "@spaceharbor/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:contracts": "node --import tsx --test test/*contract*.test.ts test/*v1-contract*.test.ts",
+    "db:install": "tsx src/db/installer.ts",
+    "test:integration": "docker compose -f docker-compose.test.yml up -d --wait && TRINO_INTEGRATION=true node --import tsx --test test/integration/*.test.ts; docker compose -f docker-compose.test.yml down"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1008.0",
+    "@aws-sdk/s3-request-presigner": "^3.1008.0",
+    "@confluentinc/kafka-javascript": "^1.0.0",
+    "@fastify/swagger": "^9.7.0",
+    "@fastify/swagger-ui": "^5.2.5",
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

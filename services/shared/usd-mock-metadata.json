@@ -1,0 +1,20 @@
+{
+  "codec": "usd",
+  "format_variant": "usdc",
+  "stage_up_axis": "Y",
+  "meters_per_unit": 0.01,
+  "default_prim": "/World/Characters/Hero",
+  "sublayers": [
+    "/assets/characters/hero/model.usd",
+    "/assets/characters/hero/lookdev.usd"
+  ],
+  "prim_count": 12450,
+  "mesh_count": 342,
+  "material_count": 28,
+  "texture_references": 64,
+  "has_animation": true,
+  "frame_range": { "first": 1001, "last": 1120 },
+  "frame_rate": 24.0,
+  "file_size_bytes": 89456320,
+  "checksum": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+}

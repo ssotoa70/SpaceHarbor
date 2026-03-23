@@ -1,0 +1,211 @@
+services:
+  control-plane:
+    build:
+      context: ./services/control-plane
+    container_name: spaceharbor-control-plane
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 8080
+      SPACEHARBOR_PERSISTENCE_BACKEND: ${SPACEHARBOR_PERSISTENCE_BACKEND:-local}
+      SPACEHARBOR_VAST_STRICT: ${SPACEHARBOR_VAST_STRICT:-false}
+      SPACEHARBOR_API_KEY: ${SPACEHARBOR_API_KEY:-}
+      # Per-service credentials: control-plane accepts ALL service keys (A2 remediation)
+      SPACEHARBOR_API_KEYS: ${SPACEHARBOR_API_KEY_CONTROL_PLANE:-},${SPACEHARBOR_API_KEY_MEDIA_WORKER:-},${SPACEHARBOR_API_KEY_SCANNER:-},${SPACEHARBOR_API_KEY_OPENASSETIO:-}
+      VAST_DATABASE_URL: ${VAST_DATABASE_URL:-}
+      VAST_EVENT_BROKER_URL: ${VAST_EVENT_BROKER_URL:-}
+      VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL:-}
+      VAST_API_TOKEN: ${VAST_API_TOKEN:-}
+      VAST_ACCESS_KEY: ${VAST_ACCESS_KEY:-}
+      VAST_SECRET_KEY: ${VAST_SECRET_KEY:-}
+      VAST_EVENT_BROKER_SASL_USERNAME: ${VAST_EVENT_BROKER_SASL_USERNAME:-}
+      VAST_EVENT_BROKER_SASL_PASSWORD: ${VAST_EVENT_BROKER_SASL_PASSWORD:-}
+      VAST_EVENT_BROKER_SASL_MECHANISM: ${VAST_EVENT_BROKER_SASL_MECHANISM:-PLAIN}
+      SPACEHARBOR_WEBHOOK_SLACK_URL: ${SPACEHARBOR_WEBHOOK_SLACK_URL:-}
+      SPACEHARBOR_WEBHOOK_TEAMS_URL: ${SPACEHARBOR_WEBHOOK_TEAMS_URL:-}
+      SPACEHARBOR_WEBHOOK_PRODUCTION_URL: ${SPACEHARBOR_WEBHOOK_PRODUCTION_URL:-}
+      SPACEHARBOR_WEBHOOK_SIGNING_SECRET: ${SPACEHARBOR_WEBHOOK_SIGNING_SECRET:-}
+      SPACEHARBOR_WEBHOOK_STRICT_MODE: ${SPACEHARBOR_WEBHOOK_STRICT_MODE:-false}
+      SPACEHARBOR_IAM_ENABLED: ${SPACEHARBOR_IAM_ENABLED:-true}
+      SPACEHARBOR_JWT_SECRET: ${SPACEHARBOR_JWT_SECRET:?Set SPACEHARBOR_JWT_SECRET in .env — do not use defaults in production}
+      SPACEHARBOR_ADMIN_EMAIL: ${SPACEHARBOR_ADMIN_EMAIL:?Set SPACEHARBOR_ADMIN_EMAIL in .env}
+      SPACEHARBOR_ADMIN_PASSWORD: ${SPACEHARBOR_ADMIN_PASSWORD:?Set SPACEHARBOR_ADMIN_PASSWORD in .env — do not use defaults in production}
+      SPACEHARBOR_LEASE_REAPING_ENABLED: ${SPACEHARBOR_LEASE_REAPING_ENABLED:-true}
+      SPACEHARBOR_LEASE_REAPING_INTERVAL_SECONDS: ${SPACEHARBOR_LEASE_REAPING_INTERVAL_SECONDS:-30}
+      SPACEHARBOR_MAX_JOB_ATTEMPTS: ${SPACEHARBOR_MAX_JOB_ATTEMPTS:-3}
+    ports:
+      - "8080:8080"
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+
+  media-worker:
+    profiles: ["dev"]
+    build:
+      context: ./services/media-worker
+    container_name: spaceharbor-media-worker
+    environment:
+      CONTROL_PLANE_URL: http://control-plane:8080
+      # Per-service credential: media-worker authenticates with its own key
+      CONTROL_PLANE_API_KEY: ${SPACEHARBOR_API_KEY_MEDIA_WORKER:-${CONTROL_PLANE_API_KEY:-}}
+      VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL:-}
+      VAST_API_TOKEN: ${VAST_API_TOKEN:-}
+    networks:
+      - backend
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ps aux | grep '[p]ython.*main.py' > /dev/null || exit 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+
+  openassetio-manager:
+    build:
+      context: services/openassetio-manager
+      dockerfile: Dockerfile
+    container_name: spaceharbor-openassetio-manager
+    ports:
+      - "8001:8001"
+    environment:
+      DEV_MODE: ${OPENASSETIO_DEV_MODE:-true}
+      TRINO_HOST: ${TRINO_HOST:-vastdb}
+      TRINO_PORT: ${TRINO_PORT:-8080}
+      SPACEHARBOR_CONTROL_PLANE_URL: http://control-plane:8080
+      # Per-service credential: openassetio authenticates with its own key
+      SPACEHARBOR_API_KEY: ${SPACEHARBOR_API_KEY_OPENASSETIO:-}
+    networks:
+      - backend
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  exr-inspector:
+    profiles: ["dataengine"]
+    build:
+      context: ./services/dataengine-functions
+      dockerfile: exr-inspector/Dockerfile
+    container_name: spaceharbor-exr-inspector
+    environment:
+      VAST_SOURCE_PATH: ${VAST_SOURCE_PATH:-}
+      VAST_ASSET_ID: ${VAST_ASSET_ID:-}
+      KAFKA_BROKER: ${KAFKA_BROKER:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    networks:
+      - backend
+    restart: "no"
+
+  ffmpeg-transcoder:
+    profiles: ["dataengine"]
+    build:
+      context: ./services/dataengine-functions
+      dockerfile: ffmpeg-transcoder/Dockerfile
+    container_name: spaceharbor-ffmpeg-transcoder
+    environment:
+      VAST_SOURCE_PATH: ${VAST_SOURCE_PATH:-}
+      VAST_ASSET_ID: ${VAST_ASSET_ID:-}
+      VAST_OUTPUT_PATH: ${VAST_OUTPUT_PATH:-}
+      TRANSCODE_PROFILE: ${TRANSCODE_PROFILE:-h264_review}
+      KAFKA_BROKER: ${KAFKA_BROKER:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    networks:
+      - backend
+    restart: "no"
+
+  web-ui:
+    build:
+      context: ./services/web-ui
+    container_name: spaceharbor-web-ui
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+      # NOTE: API keys must NOT use VITE_ prefix (exposes to client).
+      # Use server-side BFF proxy or OAuth for frontend auth.
+    ports:
+      - "4173:8080"
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/log/nginx
+      - /var/run
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+networks:
+  frontend:
+    driver: bridge
+    name: spaceharbor-frontend
+  backend:
+    driver: bridge
+    name: spaceharbor-backend
