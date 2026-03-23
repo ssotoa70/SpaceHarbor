@@ -28,13 +28,13 @@ SpaceHarbor is a media asset management platform built on the [VAST Data Platfor
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/assets/step-01-gallery-real-data.png" alt="Asset Browser" width="700">
-  <br><em>Asset Browser with real media assets</em>
+  <img src="docs/screenshots/settings/step-01-settings-full.png" alt="Platform Settings" width="700">
+  <br><em>Platform Settings — VAST Database, Event Broker, DataEngine, S3</em>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/pipeline/step-01-dataengine-real-api.png" alt="DataEngine Pipeline" width="700">
-  <br><em>DataEngine Function Library and Pipeline</em>
+  <img src="docs/screenshots/admin/step-01-analytics.png" alt="Analytics Dashboard" width="700">
+  <br><em>Analytics Dashboard</em>
 </p>
 
 ## Architecture
