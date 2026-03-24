@@ -208,7 +208,7 @@ function checkEnvVarDocumentation() {
     "KAFKA_",
     "DEV_MODE",
     "OCIO_CONFIG_PATH",
-    "TRINO_INTEGRATION",
+    "VAST_DB_INTEGRATION",
     "PORT",
     "HOST",
   ];

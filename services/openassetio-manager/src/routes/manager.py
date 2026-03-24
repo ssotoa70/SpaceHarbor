@@ -15,6 +15,10 @@ if not _dev_mode and not os.getenv("SPACEHARBOR_CONTROL_PLANE_URL"):
         "for production mode."
     )
 
+if os.getenv("TRINO_HOST") and not os.getenv("VAST_DB_HOST"):
+    import warnings
+    warnings.warn("TRINO_HOST/TRINO_PORT are deprecated. Use VAST_DB_HOST/VAST_DB_PORT instead.", DeprecationWarning, stacklevel=1)
+
 _resolver = VastResolver(
     trino_host=os.getenv("VAST_DB_HOST", os.getenv("TRINO_HOST", "localhost")),
     trino_port=int(os.getenv("VAST_DB_PORT", os.getenv("TRINO_PORT", "8080"))),
