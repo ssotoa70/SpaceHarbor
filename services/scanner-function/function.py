@@ -22,10 +22,15 @@ def handler(ctx: Any, event: dict) -> dict:
     ctx: DataEngine execution context.
     event: S3 ElementCreated event (one file = one invocation).
     """
+    endpoint = os.environ.get("VAST_DB_ENDPOINT") or os.environ.get("VAST_TRINO_ENDPOINT")
+    if os.environ.get("VAST_TRINO_ENDPOINT") and not os.environ.get("VAST_DB_ENDPOINT"):
+        print("DEPRECATED: VAST_TRINO_ENDPOINT will be removed in a future release. Use VAST_DB_ENDPOINT instead.")
+    if not endpoint:
+        raise RuntimeError("VAST_DB_ENDPOINT is not set")
     trino = TrinoClient(
-        os.environ["VAST_TRINO_ENDPOINT"],
-        username=os.environ.get("VAST_TRINO_USERNAME"),
-        password=os.environ.get("VAST_TRINO_PASSWORD"),
+        endpoint,
+        username=os.environ.get("VAST_DB_USERNAME", os.environ.get("VAST_TRINO_USERNAME")),
+        password=os.environ.get("VAST_DB_PASSWORD", os.environ.get("VAST_TRINO_PASSWORD")),
     )
     ingest = IngestClient(
         os.environ["SPACEHARBOR_CONTROL_PLANE_URL"],

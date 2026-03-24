@@ -541,7 +541,7 @@ def generate_env(config: DeployConfig) -> str:
         lines.append(f"VAST_DATAENGINE_URL={creds.dataengine_url}")
         lines.append(f"VAST_API_TOKEN={creds.api_token}")
         # VAST S3-compatible auth (used by docker-compose and installer)
-        lines.append(f"VAST_TRINO_ENDPOINT={creds.trino_endpoint}")
+        lines.append(f"VAST_DB_ENDPOINT={creds.trino_endpoint}")
         lines.append(f"VAST_ACCESS_KEY={creds.access_key}")
         lines.append(f"VAST_SECRET_KEY={creds.secret_key}")
         # SASL credentials for Event Broker (Kafka)
@@ -607,8 +607,8 @@ def run_migrations(config: DeployConfig) -> bool:
 
     # Build a child-process environment with secrets injected as env vars
     child_env = {**os.environ}
-    child_env["VAST_TRINO_USERNAME"] = creds.access_key
-    child_env["VAST_TRINO_PASSWORD"] = creds.secret_key
+    child_env["VAST_DB_USERNAME"] = creds.access_key
+    child_env["VAST_DB_PASSWORD"] = creds.secret_key
 
     print(f"  Running installer: {dim(str(INSTALLER_PATH))}")
     log.info(f"Running CLI installer: {INSTALLER_PATH}")
@@ -806,7 +806,7 @@ def config_from_env_and_file(args: argparse.Namespace) -> DeployConfig:
         cfg.mode = extra.get("mode", cfg.mode)
 
     creds = cfg.credentials
-    creds.trino_endpoint = extra.get("trino_endpoint", os.environ.get("VAST_TRINO_ENDPOINT", ""))
+    creds.trino_endpoint = extra.get("trino_endpoint", os.environ.get("VAST_DB_ENDPOINT", os.environ.get("VAST_TRINO_ENDPOINT", "")))
     creds.access_key = extra.get("access_key", os.environ.get("VAST_ACCESS_KEY", ""))
     creds.secret_key = extra.get("secret_key", os.environ.get("VAST_SECRET_KEY", ""))
     creds.event_broker_url = extra.get("event_broker_url", os.environ.get("VAST_EVENT_BROKER_URL", ""))
@@ -947,7 +947,7 @@ class Deployer:
             creds = self.config.credentials
             missing = []
             if not creds.trino_endpoint:
-                missing.append("VAST_TRINO_ENDPOINT")
+                missing.append("VAST_DB_ENDPOINT")
             if not creds.access_key:
                 missing.append("VAST_ACCESS_KEY")
             if not creds.secret_key:

@@ -117,9 +117,12 @@ export const migration: Migration = {
 // ---------------------------------------------------------------------------
 
 async function run(): Promise<void> {
-  const endpoint = process.env.VAST_TRINO_ENDPOINT;
+  const endpoint = process.env.VAST_DB_ENDPOINT ?? process.env.VAST_TRINO_ENDPOINT;
+  if (process.env.VAST_TRINO_ENDPOINT && !process.env.VAST_DB_ENDPOINT) {
+    console.warn("DEPRECATED: VAST_TRINO_ENDPOINT will be removed in a future release. Use VAST_DB_ENDPOINT instead.");
+  }
   if (!endpoint) {
-    console.error("ERROR: VAST_TRINO_ENDPOINT is not set");
+    console.error("ERROR: VAST_DB_ENDPOINT is not set");
     process.exit(1);
   }
 

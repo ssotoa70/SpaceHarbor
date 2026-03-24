@@ -3,7 +3,7 @@
  *
  * Tests the Project → Sequence → Shot → Version → Approval hierarchy.
  * Runs against LocalPersistenceAdapter (always) and MockVastAdapter (always).
- * VastDbAdapter tests are integration-only — skipped unless VAST_TRINO_ENDPOINT is set.
+ * VastDbAdapter tests are integration-only — skipped unless VAST_DB_ENDPOINT is set.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

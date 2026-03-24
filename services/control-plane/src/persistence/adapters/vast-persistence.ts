@@ -83,6 +83,10 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     if (this.config.databaseUrl) {
       const url = new URL(this.config.databaseUrl);
       // Prefer separate env vars over URL-embedded credentials (prevents credential leakage)
+      // VAST_TRINO_* are deprecated — prefer VAST_DB_* canonical names.
+      if ((process.env.VAST_TRINO_USERNAME || process.env.VAST_TRINO_PASSWORD) && !(process.env.VAST_DB_USERNAME || process.env.VAST_DB_PASSWORD)) {
+        console.warn("DEPRECATED: VAST_TRINO_USERNAME/PASSWORD will be removed. Use VAST_DB_USERNAME/PASSWORD instead.");
+      }
       const accessKey = process.env.VAST_DB_USERNAME || process.env.VAST_TRINO_USERNAME || process.env.VAST_ACCESS_KEY || "";
       const secretKey = process.env.VAST_DB_PASSWORD || process.env.VAST_TRINO_PASSWORD || process.env.VAST_SECRET_KEY || "";
       this.trinoClient = new TrinoClient({

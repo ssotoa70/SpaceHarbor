@@ -236,9 +236,16 @@ async function main(): Promise<void> {
 
   // Support environment variable fallbacks so callers don't need to pass
   // secrets as CLI arguments (which are visible in `ps aux`).
+  // VAST_TRINO_* are deprecated — prefer VAST_DB_* canonical names.
   if (!args.trinoEndpoint) args.trinoEndpoint = process.env.VAST_DB_ENDPOINT ?? process.env.VAST_TRINO_ENDPOINT ?? "";
   if (!args.accessKey) args.accessKey = process.env.VAST_DB_USERNAME ?? process.env.VAST_TRINO_USERNAME ?? process.env.VAST_ACCESS_KEY ?? "";
   if (!args.secretKey) args.secretKey = process.env.VAST_DB_PASSWORD ?? process.env.VAST_TRINO_PASSWORD ?? process.env.VAST_SECRET_KEY ?? "";
+  if (process.env.VAST_TRINO_ENDPOINT && !process.env.VAST_DB_ENDPOINT) {
+    console.warn("DEPRECATED: VAST_TRINO_ENDPOINT will be removed in a future release. Use VAST_DB_ENDPOINT instead.");
+  }
+  if ((process.env.VAST_TRINO_USERNAME || process.env.VAST_TRINO_PASSWORD) && !(process.env.VAST_DB_USERNAME || process.env.VAST_DB_PASSWORD)) {
+    console.warn("DEPRECATED: VAST_TRINO_USERNAME/PASSWORD will be removed. Use VAST_DB_USERNAME/PASSWORD instead.");
+  }
 
   const missing: string[] = [];
   if (!args.trinoEndpoint) missing.push("--trino-endpoint or VAST_DB_ENDPOINT");
