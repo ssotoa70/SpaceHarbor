@@ -233,6 +233,26 @@ function checkEnvVarDocumentation() {
     "KAFKA_TOPIC",           // DataEngine function runtime (per-function topic override)
     "KAFKA_COMPLETION_TOPIC", // DataEngine function runtime (completion topic override)
     "KAFKA_FLUSH_TIMEOUT",   // DataEngine function runtime tuning
+
+    // Advanced/internal vars documented in Wiki Configuration Reference only.
+    // These are intentionally omitted from .env.example to keep it clean.
+    "SPACEHARBOR_IDENTITY_ENFORCEMENT", // Legacy auth — superseded by IAM module
+    "SPACEHARBOR_API_KEY_MAX_AGE_DAYS", // Advanced: API key rotation tuning (default: 365)
+    "SPACEHARBOR_SERVICE_TOKEN",        // Internal: service-to-service auth token
+    "SPACEHARBOR_IAM_DEFAULT_ROLE",     // Advanced: JIT-provisioned user default role (default: viewer)
+    "SPACEHARBOR_IAM_GROUP_ROLE_MAP",   // Advanced: OIDC group-to-role JSON mapping
+    "SPACEHARBOR_DEFAULT_PROJECT",      // Advanced: default project for JIT users (default: "default")
+    "SPACEHARBOR_BASE_URL",             // Auto-inferred from request; only for device auth flow
+    "SPACEHARBOR_EVENT_DEDUP_SIZE",     // Local persistence only (default: 10000)
+    "SPACEHARBOR_EVENT_DEDUP_TTL_HOURS", // Local persistence only (default: 24)
+    "SPACEHARBOR_MEDIA_BASE_DIR",       // DataEngine runtime: media volume mount (default: /data/media)
+    "SPACEHARBOR_LUT_BASE_DIR",         // DataEngine runtime: LUT files path (default: /data/luts)
+    "SPACEHARBOR_NFS_VIP",              // Storage protocol: NFS server VIP (rare)
+    "SPACEHARBOR_SMB_SERVER",           // Storage protocol: SMB/CIFS server (rare)
+    "VAST_CATALOG_TABLE",               // VAST internal: catalog table ref (default: vast_catalog.default.catalog)
+    "VAST_S3_BUCKET",                   // Storage-metrics-collector specific (default: spaceharbor-media)
+    "VAST_S3_ENDPOINT",                 // Storage-metrics-collector specific
+    "VAST_SCHEMA",                      // VAST internal: SQL schema path (default: spaceharbor/production)
   ]);
 
   // Collect source directories (exclude test files and node_modules)
