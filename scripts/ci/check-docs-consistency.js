@@ -5,6 +5,7 @@
  * Documentation consistency linter that verifies:
  *   1. All registered route groups have corresponding entries in docs/api-contracts.md.
  *   2. All SPACEHARBOR_* and VAST_* env vars referenced in source appear in .env.example.
+ *   3. No forbidden terminology (Trino as primary term) in user-facing files.
  *
  * Usage: node scripts/ci/check-docs-consistency.js
  * Exit 1 if any violations found.
@@ -43,7 +44,12 @@ function checkRouteDocumentation() {
   console.log("=== Check 1: Route documentation in api-contracts.md ===\n");
 
   const appSource = readFile("services/control-plane/src/app.ts");
-  const contractsDoc = readFile("docs/api-contracts.md");
+  const contractsPath = path.join(root, "docs/api-contracts.md");
+  if (!fs.existsSync(contractsPath)) {
+    console.log("  [skip] docs/api-contracts.md not found (moved to Wiki)\n");
+    return;
+  }
+  const contractsDoc = fs.readFileSync(contractsPath, "utf8");
 
   // Parse register*Route(s) calls from app.ts
   const registerCalls = appSource.match(/register\w+(?:Route|Routes)\b/g) || [];
@@ -217,13 +223,16 @@ function checkEnvVarDocumentation() {
   // DataEngine function runtime vars (VAST_SOURCE_PATH, VAST_ASSET_ID, etc.)
   // are injected by the VAST DataEngine platform, not user-configured.
   const exemptVars = new Set([
-    "NODE_ENV",              // Standard Node.js environment variable
+    "NODE_ENV",              // Standard Node.js env var (also in .env.example)
     "VAST_SOURCE_PATH",      // DataEngine function runtime (injected by platform)
     "VAST_ASSET_ID",         // DataEngine function runtime (injected by platform)
+    "VAST_PROJECT_ID",       // DataEngine function runtime (injected by platform)
+    "VAST_SHOT_ID",          // DataEngine function runtime (injected by platform)
     "VAST_THUMB_PATH",       // DataEngine function runtime (injected by platform)
     "VAST_PROXY_PATH",       // DataEngine function runtime (injected by platform)
     "KAFKA_TOPIC",           // DataEngine function runtime (per-function topic override)
     "KAFKA_COMPLETION_TOPIC", // DataEngine function runtime (completion topic override)
+    "KAFKA_FLUSH_TIMEOUT",   // DataEngine function runtime tuning
   ]);
 
   // Collect source directories (exclude test files and node_modules)
@@ -304,10 +313,146 @@ function checkEnvVarDocumentation() {
   console.log("");
 }
 
+// ─── Check 3: Terminology regression (forbidden terms) ──────────────────────
+
+function checkTerminology() {
+  console.log("=== Check 3: Terminology regression (forbidden terms) ===\n");
+
+  // Patterns that indicate forbidden usage of "Trino" as a primary term.
+  // Allowed: "Trino-compatible", "via Trino", "VAST Connector for Trino",
+  //          deprecated alias comments, backward-compat fallback code.
+  const forbiddenPatterns = [
+    // "Trino" used as the primary product name (not as a protocol descriptor)
+    { regex: /\bTrino\s+DB\b/gi, label: "Trino DB" },
+    { regex: /\bTrino\s+Endpoint\b/gi, label: "Trino Endpoint" },
+    { regex: /\bTrino\s+client\b/gi, label: "Trino client" },
+    { regex: /\bTrino\s+persistence\b/gi, label: "Trino persistence" },
+    { regex: /\bTrino\s+REST\b/gi, label: "Trino REST" },
+    // "Trino" as standalone noun without qualifier (catches "uses Trino" but not "via Trino")
+    // Narrower: only flag when Trino appears as a standalone technology reference
+    { regex: /(?:uses?|with|from|to|against|on)\s+Trino(?!\s*[-‐–—]compatible)(?!\s+connector)\b/gi, label: "Trino as primary term" },
+  ];
+
+  // User-facing files to scan (docs, config comments, UI)
+  const userFacingGlobs = [
+    "README.md",
+    "CLAUDE.md",
+    "CHANGELOG.md",
+    "RELEASE.md",
+    "docs/**/*.md",
+    "services/control-plane/ARCHITECTURE.md",
+    "services/web-ui/ARCHITECTURE.md",
+    ".env.example",
+    ".env.onprem.example",
+    ".env.cloud.example",
+    "services/web-ui/src/**/*.tsx",
+    "services/web-ui/src/**/*.ts",
+  ];
+
+  // Files whitelisted for deprecated fallback references only.
+  // These files MAY contain "VAST_TRINO_*" in backward-compat code.
+  const whitelistedForLegacy = new Set([
+    "services/control-plane/src/db/installer.ts",
+    "services/control-plane/src/db/migrations",  // prefix match
+    "services/control-plane/src/persistence/adapters/vast-persistence.ts",
+    "services/scanner-function/function.py",
+    "services/openassetio-manager/src/routes/manager.py",
+    "scripts/deploy.py",
+    "services/control-plane/docker-compose.test.yml",
+    "THIRD_PARTY_NOTICES.md",
+  ]);
+
+  function isWhitelisted(relPath) {
+    return [...whitelistedForLegacy].some((w) => relPath.startsWith(w));
+  }
+
+  // Collect files to scan
+  const filesToScan = [];
+  for (const glob of userFacingGlobs) {
+    if (glob.includes("**")) {
+      // Recursive pattern — extract base dir and extension
+      const parts = glob.split("**");
+      const baseDir = parts[0].replace(/\/$/, "");
+      const extMatch = parts[1]?.match(/\*(\.\w+)$/);
+      const ext = extMatch ? extMatch[1] : ".md";
+      const absBase = path.join(root, baseDir);
+      if (fs.existsSync(absBase)) {
+        filesToScan.push(...collectFiles(absBase, ext));
+      }
+    } else {
+      const absPath = path.join(root, glob);
+      if (fs.existsSync(absPath)) {
+        filesToScan.push(absPath);
+      }
+    }
+  }
+
+  console.log(`  Scanning ${filesToScan.length} user-facing files`);
+
+  let violations = 0;
+
+  for (const filePath of filesToScan) {
+    const relPath = path.relative(root, filePath);
+    if (isWhitelisted(relPath)) continue;
+
+    const content = fs.readFileSync(filePath, "utf8");
+    const lines = content.split("\n");
+
+    for (const { regex, label } of forbiddenPatterns) {
+      regex.lastIndex = 0;
+      let match;
+      while ((match = regex.exec(content)) !== null) {
+        // Find line number
+        const upToMatch = content.slice(0, match.index);
+        const lineNum = (upToMatch.match(/\n/g) || []).length + 1;
+        const lineText = lines[lineNum - 1]?.trim() || "";
+
+        // Skip if the line is a deprecation notice or comment about backward compat
+        if (/deprecated|backward.?compat|legacy|fallback/i.test(lineText)) continue;
+        // Skip if line contains "Trino-compatible" or "via Trino" (allowed)
+        if (/Trino-compatible|via\s+Trino|Connector\s+for\s+Trino/i.test(lineText)) continue;
+
+        console.error(`  [ERROR] ${relPath}:${lineNum}: forbidden term "${label}"`);
+        console.error(`         ${lineText}`);
+        errors++;
+        violations++;
+      }
+    }
+  }
+
+  // Also check for new VAST_TRINO_* env var definitions (not in fallback code)
+  const envVarFiles = [".env.example", ".env.onprem.example", ".env.cloud.example"];
+  for (const envFile of envVarFiles) {
+    const absPath = path.join(root, envFile);
+    if (!fs.existsSync(absPath)) continue;
+
+    const content = fs.readFileSync(absPath, "utf8");
+    const lines = content.split("\n");
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Match active (uncommented) env var definitions with VAST_TRINO_ prefix
+      if (/^VAST_TRINO_\w+=/.test(line)) {
+        console.error(`  [ERROR] ${envFile}:${i + 1}: active VAST_TRINO_* definition (use VAST_DB_* instead)`);
+        console.error(`         ${line}`);
+        errors++;
+        violations++;
+      }
+    }
+  }
+
+  if (violations === 0) {
+    console.log("  [ok] No forbidden terminology found");
+  }
+
+  console.log("");
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 checkRouteDocumentation();
 checkEnvVarDocumentation();
+checkTerminology();
 
 if (errors > 0) {
   console.error(`\n${errors} documentation consistency error(s) found.`);
