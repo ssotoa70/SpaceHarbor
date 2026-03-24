@@ -60,7 +60,7 @@ Storage access via NFS, SMB, and S3 — configurable per deployment.
 ## Quick Start
 
 ```bash
-git clone https://github.com/xebyte/SpaceHarbor.git
+git clone https://github.com/ssotoa70/SpaceHarbor.git
 cd SpaceHarbor
 
 # Control plane
