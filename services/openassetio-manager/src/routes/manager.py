@@ -16,8 +16,8 @@ if not _dev_mode and not os.getenv("SPACEHARBOR_CONTROL_PLANE_URL"):
     )
 
 _resolver = VastResolver(
-    trino_host=os.getenv("TRINO_HOST", "localhost"),
-    trino_port=int(os.getenv("TRINO_PORT", "8080")),
+    trino_host=os.getenv("VAST_DB_HOST", os.getenv("TRINO_HOST", "localhost")),
+    trino_port=int(os.getenv("VAST_DB_PORT", os.getenv("TRINO_PORT", "8080"))),
     dev_mode=_dev_mode,
 )
 

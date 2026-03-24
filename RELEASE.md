@@ -100,4 +100,4 @@ The v0.2.0 release is ready to ship when all of the following are true:
 | Version | Date | Highlights |
 |---------|------|------------|
 | v0.2.0 | 2026-03-11 | Phase 3 UI Overhaul, Phase 8 IAM, Sprint A/B/C backlog |
-| v0.1.0 | 2026-03-10 | Audit baseline — P1 Trino persistence, P2 ASWF pipeline, CI/CD |
+| v0.1.0 | 2026-03-10 | Audit baseline — P1 VAST Database persistence, P2 ASWF pipeline, CI/CD |

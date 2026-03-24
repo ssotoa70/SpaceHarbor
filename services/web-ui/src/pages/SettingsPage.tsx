@@ -530,18 +530,18 @@ export function SettingsPage() {
       />
 
       <div className="grid gap-4">
-        {/* 1. VAST Database (Trino) */}
+        {/* 1. VAST Database */}
         <SectionCard
-          title="VAST Database (Trino)"
+          title="VAST Database"
           iconPath="M2 4c0-1.1 2.7-2 6-2s6 .9 6 2v8c0 1.1-2.7 2-6 2s-6-.9-6-2V4zM2 7c0 1.1 2.7 2 6 2s6-.9 6-2M2 10c0 1.1 2.7 2 6 2s6-.9 6-2"
           status={settings.vastDatabase.configured ? settings.vastDatabase.status : "not_configured"}
         >
           <div className="grid grid-cols-2 gap-3">
             <ConfigInput
-              label="Trino Coordinator URL"
+              label="Database Endpoint URL"
               value={dbEndpoint}
               onChange={(v) => { setDbEndpoint(v); markDirty(); }}
-              placeholder="http://trino-coordinator:8080"
+              placeholder="https://<VAST_VIP>:8443"
             />
             <ConfigInput
               label="VAST Endpoint (VMS VIP)"

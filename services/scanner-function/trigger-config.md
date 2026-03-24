@@ -66,7 +66,8 @@ one asset, and non-sentinel supported extensions are ingested per-file.
 
 | Variable | Description |
 |---|---|
-| `VAST_TRINO_ENDPOINT` | Trino REST API endpoint (e.g. `http://trino.vast.svc:8080`) |
+| `VAST_TRINO_ENDPOINT` | (Deprecated) Use `VAST_DATABASE_URL` instead. Trino REST API endpoint |
+| `VAST_DATABASE_URL` | VAST Database SQL endpoint (e.g. `http://vast-db.svc:8080`) |
 | `SPACEHARBOR_CONTROL_PLANE_URL` | Control-plane base URL (e.g. `http://control-plane:3000`) |
 | `SPACEHARBOR_API_KEY` | Optional API key for authenticated ingest endpoint |
 

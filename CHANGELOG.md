@@ -54,11 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-03-10
 
 ### Added
-- **Phase 1 — VAST Trino Persistence**
-  - Shared Trino REST client with `nextUri` polling and Basic auth
+- **Phase 1 — VAST Database Persistence**
+  - Shared VAST Database REST client with `nextUri` polling and S3 access key pair auth
   - CLI database installer with dry-run and version gating
-  - `VastPersistenceAdapter` with full Trino SQL read/write operations
-  - Trino integration test harness
+  - `VastPersistenceAdapter` with full VAST Database SQL read/write operations
+  - VAST Database integration test harness
 - **Phase 2 — ASWF Media Pipeline**
   - EXR metadata extraction via `oiiotool`
   - MaterialX domain models, persistence layer, migration, and sub-resource REST endpoints
@@ -88,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced `kafkajs` with `@confluentinc/kafka-javascript` behind `KafkaClient` interface
 
 ### Fixed
-- Scanner-function handler signature and Trino Basic auth
+- Scanner-function handler signature and VAST Database authentication
 - Docker-compose openassetio port 3000 to 8080
 - CI-compatible control-plane test glob
 

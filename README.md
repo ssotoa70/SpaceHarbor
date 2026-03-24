@@ -91,7 +91,7 @@ See the [Wiki](../../wiki) for full deployment and configuration guides.
 - **Control Plane:** Fastify, TypeScript, tsx runtime
 - **Web UI:** React 18, Vite, Tailwind CSS v4
 - **DataEngine Functions:** Python (OpenEXR, FFmpeg, OIIO, OpenTimelineIO, MaterialX)
-- **Persistence:** VAST Database (Trino), local in-memory for development
+- **Persistence:** VAST Database, local in-memory for development
 - **Events:** VAST Event Broker (Confluent Kafka)
 - **Deployment:** Docker Compose
 

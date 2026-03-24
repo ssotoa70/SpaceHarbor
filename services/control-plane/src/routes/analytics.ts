@@ -33,7 +33,7 @@ function parseTimeRange(query: Record<string, unknown>): { from: Date; to: Date;
   return { from: new Date(now.getTime() - ms[range]), to, label: range };
 }
 
-// ── Fallback data generators (when Trino unavailable) ──
+// ── Fallback data generators (when VAST Database unavailable) ──
 
 function fallbackAssetMetrics(range: string) {
   return {

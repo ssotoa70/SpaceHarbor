@@ -4,7 +4,7 @@
  * Provides read-only endpoints that query the VAST Catalog for storage truth:
  * unregistered files, orphan detection, storage breakdown, and element handle
  * resolution. All queries delegate to CatalogService which talks to VAST Catalog
- * virtual tables via Trino.
+ * virtual tables via VAST Database.
  */
 
 import type { FastifyInstance } from "fastify";

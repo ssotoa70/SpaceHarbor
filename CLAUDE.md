@@ -11,7 +11,7 @@
 - **Control-Plane:** Fastify (TypeScript, tsx runtime, no build step)
 - **Web-UI:** React 18 + Vite + TypeScript + Tailwind CSS v4
 - **Media Worker:** Python (asyncio, VAST client libraries)
-- **Persistence:** VAST Database (Trino), local in-memory fallback
+- **Persistence:** VAST Database (Trino-compatible SQL), local in-memory fallback
 - **Events:** VAST Event Broker (Kafka, Confluent client)
 - **Deployment:** Docker Compose (dev), Kubernetes (production)
 
@@ -58,7 +58,7 @@ services/
 │   │   ├── persistence/ # Adapter pattern for Local/VAST/Mock backends
 │   │   ├── iam/        # Auth, RBAC, feature flags
 │   │   ├── data-engine/ # Function registry + wrappers
-│   │   └── db/         # Trino client + SQL migration tools
+│   │   └── db/         # VAST Database client + SQL migration tools
 │   ├── test/           # Unit + integration tests
 │   ├── ARCHITECTURE.md # Detailed design guide
 │   └── package.json
@@ -116,7 +116,7 @@ See `services/web-ui/ARCHITECTURE.md` for detailed example.
 ```bash
 # Requires VAST_DATABASE_URL set
 cd services/control-plane
-npm run db:install   # Executes SQL migrations against Trino
+npm run db:install   # Executes SQL migrations against VAST Database
 ```
 
 ## Git Discipline

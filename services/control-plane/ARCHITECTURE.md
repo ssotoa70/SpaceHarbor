@@ -5,7 +5,7 @@
 SpaceHarbor's control-plane is a **Fastify server** that manages media asset workflows in VAST-native environments. It runs TypeScript directly via `tsx` (no build step) and provides:
 
 - **Asset lifecycle**: ingest, metadata extraction, job tracking, approval workflows
-- **VAST integration**: Trino (VAST Database), Kafka (Event Broker), DataEngine function invocation
+- **VAST integration**: VAST Database (via Trino), VAST Event Broker (Kafka), DataEngine function invocation
 - **IAM**: local auth, JWT/OIDC, API keys, SCIM, RBAC with shadow/enforcement modes
 - **Async persistence**: abstracted adapter pattern for local/mock/VAST backends
 - **Event-driven architecture**: inbound events from VAST Event Broker + HTTP webhooks
@@ -19,7 +19,7 @@ services/control-plane/src/
 ├── routes/                # 30+ route modules (assets, jobs, queue, etc.)
 ├── persistence/
 │   ├── adapters/          # LocalAdapter, VastAdapter, MockAdapter implementations
-│   ├── vast/              # VAST-specific clients (Trino, workflow ops)
+│   ├── vast/              # VAST-specific clients (VAST Database, workflow ops)
 │   ├── factory.ts         # createPersistenceAdapter() — factory pattern
 │   └── types.ts           # PersistenceAdapter interface
 ├── iam/                   # 15+ auth/authz modules
@@ -34,7 +34,7 @@ services/control-plane/src/
 │   ├── index.ts           # FunctionRegistry, built-in functions
 │   ├── exr-inspector.ts   # EXR metadata extraction
 │   └── oiio-proxy.ts      # OIIO thumbnail generation
-├── db/                    # VAST Database (Trino) client
+├── db/                    # VAST Database client
 │   ├── trino-client.ts    # REST API wrapper
 │   └── installer.ts       # Schema initialization (CLI)
 ├── http/                  # Middleware & utilities
@@ -119,7 +119,7 @@ SpaceHarbor abstracts all data storage behind a **PersistenceAdapter** interface
 // Adapter method
 async fetch(table: string, filters: Record<string, any>): Promise<any[]> {
   // LocalAdapter: query in-memory map
-  // VastAdapter: execute Trino SELECT + WHERE
+  // VastAdapter: execute VAST Database SELECT + WHERE
 }
 
 // Route usage
@@ -262,7 +262,7 @@ npm run test:integration
 | `SPACEHARBOR_PERSISTENCE_BACKEND` | local/vast | local |
 | `SPACEHARBOR_IAM_ENABLED` | Enable IAM system | false |
 | `SPACEHARBOR_IAM_SHADOW_MODE` | Enforce RBAC or log only | true |
-| `VAST_DATABASE_URL` | Trino endpoint for VastDB | (none) |
+| `VAST_DATABASE_URL` | VAST Database SQL endpoint | (none) |
 | `VAST_EVENT_BROKER_URL` | Kafka broker for events | (none) |
 | `SPACEHARBOR_JWT_SECRET` | Sign JWTs (required if IAM enabled) | dev-secret-change-me |
 | `SPACEHARBOR_ADMIN_EMAIL` | Bootstrap super_admin at startup | (none) |
