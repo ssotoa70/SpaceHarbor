@@ -7,13 +7,15 @@ RUN npm run build
 
 FROM nginx:alpine@sha256:f46cb72c7df02710e693e863a983ac42f6a9579058a59a35f1ae36c9958e4ce0
 
-# Create non-root user and configure nginx to run as non-root
+# Create non-root user and writable temp directories under /tmp
 RUN addgroup -S app && adduser -S app -G app \
-    && mkdir -p /var/cache/nginx /var/log/nginx /tmp/nginx \
-    && chown -R app:app /var/cache/nginx /var/log/nginx /tmp/nginx \
-    && chown -R app:app /usr/share/nginx/html \
-    && sed -i 's|pid\s*/run/nginx.pid;|pid /tmp/nginx/nginx.pid;|' /etc/nginx/nginx.conf \
+    && mkdir -p /tmp/nginx \
+    && chown -R app:app /tmp/nginx /usr/share/nginx/html \
     && chown -R app:app /etc/nginx/conf.d
+
+# Include non-root path overrides at the top of the main nginx.conf
+COPY --chown=app:app nginx-nonroot.conf /etc/nginx/nginx-nonroot.conf
+RUN sed -i '1s|^|include /etc/nginx/nginx-nonroot.conf;\n|' /etc/nginx/nginx.conf
 
 COPY --from=build --chown=app:app /app/dist /usr/share/nginx/html
 COPY --chown=app:app nginx.conf /etc/nginx/conf.d/default.conf
@@ -21,3 +23,5 @@ COPY --chown=app:app nginx.conf /etc/nginx/conf.d/default.conf
 USER app
 
 EXPOSE 8080
+
+CMD ["nginx", "-g", "daemon off;"]

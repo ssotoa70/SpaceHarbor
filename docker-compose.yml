@@ -42,7 +42,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 15s
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -104,8 +104,8 @@ services:
     ports:
       - "8001:8001"
     environment:
-      DEV_MODE: ${OPENASSETIO_DEV_MODE:-true}
-      TRINO_HOST: ${TRINO_HOST:-vastdb}
+      DEV_MODE: ${OPENASSETIO_DEV_MODE:-false}
+      TRINO_HOST: ${TRINO_HOST:-}
       TRINO_PORT: ${TRINO_PORT:-8080}
       SPACEHARBOR_CONTROL_PLANE_URL: http://control-plane:8080
       # Per-service credential: openassetio authenticates with its own key
@@ -120,11 +120,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 15s
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
     tmpfs:
       - /tmp
     deploy:
@@ -147,6 +149,18 @@ services:
     networks:
       - backend
     restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
 
   ffmpeg-transcoder:
     profiles: ["dataengine"]
@@ -164,6 +178,18 @@ services:
     networks:
       - backend
     restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4.0'
 
   web-ui:
     build:
@@ -193,9 +219,6 @@ services:
       - ALL
     tmpfs:
       - /tmp
-      - /var/cache/nginx
-      - /var/log/nginx
-      - /var/run
     deploy:
       resources:
         limits:
