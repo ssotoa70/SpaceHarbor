@@ -288,6 +288,77 @@ function EnvVarDisplay({ label, value }: { label: string; value?: string | null 
 }
 
 // ---------------------------------------------------------------------------
+// S3 section — manages its own inline test results
+// ---------------------------------------------------------------------------
+
+function S3Section({
+  endpoints,
+  onUpdate,
+  onRemove,
+  onAdd,
+}: {
+  endpoints: S3EndpointConfig[];
+  onUpdate: (id: string, updated: S3EndpointConfig) => void;
+  onRemove: (id: string) => void;
+  onAdd: () => void;
+}) {
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResult, setS3TestResult] = useState<{ id: string; status: string; message: string } | null>(null);
+
+  const handleTest = async (epId: string) => {
+    setTestingId(epId);
+    setS3TestResult(null);
+    try {
+      const result = await testServiceConnection(`s3:${epId}`);
+      setS3TestResult({ id: epId, status: result.status, message: result.message });
+    } catch {
+      setS3TestResult({ id: epId, status: "error", message: "Connection test failed" });
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  return (
+    <SectionCard
+      title="Object Storage (S3)"
+      iconPath="M3 3h10v10H3zM7 3v10M3 7h10"
+      status={endpoints.length > 0 ? "connected" : "not_configured"}
+    >
+      <p className="text-xs text-[var(--color-ah-text-muted)] mb-3">
+        Configure one or more S3-compatible endpoints. VAST requires path-style addressing and SigV4 signatures.
+      </p>
+
+      <div className="space-y-3">
+        {endpoints.map((ep) => (
+          <div key={ep.id}>
+            <S3EndpointRow
+              ep={ep}
+              onChange={(updated) => onUpdate(ep.id, updated)}
+              onRemove={() => onRemove(ep.id)}
+              onTest={() => void handleTest(ep.id)}
+              testing={testingId === ep.id}
+            />
+            {testResult && testResult.id === ep.id && (
+              <div className={`mt-2 p-2 rounded text-xs border ${
+                testResult.status === "ok"
+                  ? "bg-[var(--color-ah-success-bg,#0d3320)] border-[var(--color-ah-success,#22c55e)] text-[var(--color-ah-success,#22c55e)]"
+                  : "bg-red-900/30 border-red-500 text-red-400"
+              }`}>
+                {testResult.message}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <Button variant="secondary" onClick={onAdd} className="mt-3">
+        + Add S3 Endpoint
+      </Button>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SCIM section — manages its own inline token display
 // ---------------------------------------------------------------------------
 
@@ -731,32 +802,12 @@ export function SettingsPage() {
         </SectionCard>
 
         {/* 4. Object Storage (S3) — Multi-endpoint */}
-        <SectionCard
-          title="Object Storage (S3)"
-          iconPath="M3 3h10v10H3zM7 3v10M3 7h10"
-          status={s3Endpoints.length > 0 ? "connected" : "not_configured"}
-        >
-          <p className="text-xs text-[var(--color-ah-text-muted)] mb-3">
-            Configure one or more S3-compatible endpoints. VAST requires path-style addressing and SigV4 signatures.
-          </p>
-
-          <div className="space-y-3">
-            {s3Endpoints.map((ep) => (
-              <S3EndpointRow
-                key={ep.id}
-                ep={ep}
-                onChange={(updated) => updateS3Endpoint(ep.id, updated)}
-                onRemove={() => removeS3Endpoint(ep.id)}
-                onTest={() => void handleTestConnection(`s3:${ep.id}`)}
-                testing={testingService === `s3:${ep.id}`}
-              />
-            ))}
-          </div>
-
-          <Button variant="secondary" onClick={addS3Endpoint} className="mt-3">
-            + Add S3 Endpoint
-          </Button>
-        </SectionCard>
+        <S3Section
+          endpoints={s3Endpoints}
+          onUpdate={updateS3Endpoint}
+          onRemove={removeS3Endpoint}
+          onAdd={addS3Endpoint}
+        />
 
         {/* 5. Storage Connectors (NFS / SMB) */}
         <SectionCard

@@ -716,17 +716,63 @@ export async function registerPlatformSettingsRoutes(
           } satisfies ConnectionTestResult);
         }
 
-        if (service === "s3") {
-          const s3Endpoint = process.env.SPACEHARBOR_S3_ENDPOINT ?? process.env.AWS_S3_ENDPOINT;
-          const s3Bucket = process.env.SPACEHARBOR_S3_BUCKET ?? process.env.AWS_S3_BUCKET;
-          const ok = !!(s3Endpoint && s3Bucket);
-          return reply.send({
-            service,
-            status: ok ? "ok" : "error",
-            message: ok
-              ? "S3 endpoint and bucket are configured"
-              : "S3 endpoint or bucket is not configured",
-          } satisfies ConnectionTestResult);
+        if (service === "s3" || service.startsWith("s3:")) {
+          // Find the endpoint to test: either from operational store (UI-configured)
+          // or fall back to env vars for legacy single-endpoint config.
+          const epId = service.startsWith("s3:") ? service.slice(3) : null;
+          const stored = epId ? operationalStore.storage.endpoints.find((e) => e.id === epId) : null;
+
+          const endpoint = stored?.endpoint || process.env.SPACEHARBOR_S3_ENDPOINT || process.env.AWS_S3_ENDPOINT;
+          const bucket = stored?.bucket || process.env.SPACEHARBOR_S3_BUCKET || process.env.AWS_S3_BUCKET;
+          const accessKey = stored?.accessKeyId || process.env.SPACEHARBOR_S3_ACCESS_KEY_ID || "";
+          const secretKey = stored?.secretAccessKey || process.env.SPACEHARBOR_S3_SECRET_ACCESS_KEY || "";
+
+          if (!endpoint || !bucket) {
+            return reply.send({
+              service,
+              status: "error",
+              message: "S3 endpoint or bucket is not configured",
+            } satisfies ConnectionTestResult);
+          }
+
+          // Actually test connectivity: attempt HEAD on the bucket
+          try {
+            const url = new URL(bucket.startsWith("/") ? `${endpoint}${bucket}` : `${endpoint}/${bucket}`);
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 5000);
+            const res = await fetch(url.toString(), {
+              method: "HEAD",
+              signal: controller.signal,
+              headers: accessKey ? { "x-amz-content-sha256": "UNSIGNED-PAYLOAD" } : {},
+            }).catch((err: Error) => err);
+            clearTimeout(timeout);
+
+            if (res instanceof Error) {
+              return reply.send({
+                service,
+                status: "error",
+                message: `Connection failed: ${res.message}`,
+              } satisfies ConnectionTestResult);
+            }
+
+            // S3 returns 200, 301, 403 (valid endpoint, auth issue), or 404 (bucket not found)
+            if (res.status === 200 || res.status === 301) {
+              return reply.send({ service, status: "ok", message: `Connected to ${endpoint} — bucket "${bucket}" accessible` } satisfies ConnectionTestResult);
+            }
+            if (res.status === 403) {
+              return reply.send({ service, status: "ok", message: `Endpoint ${endpoint} reachable — bucket "${bucket}" returned 403 (check credentials)` } satisfies ConnectionTestResult);
+            }
+            if (res.status === 404) {
+              return reply.send({ service, status: "error", message: `Endpoint reachable but bucket "${bucket}" not found (404)` } satisfies ConnectionTestResult);
+            }
+            return reply.send({ service, status: "ok", message: `Endpoint reachable — HTTP ${res.status}` } satisfies ConnectionTestResult);
+          } catch (err) {
+            return reply.send({
+              service,
+              status: "error",
+              message: `S3 test failed: ${err instanceof Error ? err.message : String(err)}`,
+            } satisfies ConnectionTestResult);
+          }
         }
 
         return reply.status(400).send({
