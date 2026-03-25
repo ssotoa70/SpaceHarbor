@@ -13,9 +13,11 @@ RUN addgroup -S app && adduser -S app -G app \
     && chown -R app:app /tmp/nginx /usr/share/nginx/html \
     && chown -R app:app /etc/nginx/conf.d
 
-# Include non-root path overrides at the top of the main nginx.conf
+# Include non-root path overrides at the top of the main nginx.conf.
+# Remove the stock pid directive first to avoid a duplicate when nginx-nonroot.conf sets its own.
 COPY --chown=app:app nginx-nonroot.conf /etc/nginx/nginx-nonroot.conf
-RUN sed -i '1s|^|include /etc/nginx/nginx-nonroot.conf;\n|' /etc/nginx/nginx.conf
+RUN sed -i '/^pid\s/d' /etc/nginx/nginx.conf \
+    && sed -i '1s|^|include /etc/nginx/nginx-nonroot.conf;\n|' /etc/nginx/nginx.conf
 
 COPY --from=build --chown=app:app /app/dist /usr/share/nginx/html
 COPY --chown=app:app nginx.conf /etc/nginx/conf.d/default.conf
@@ -24,4 +26,4 @@ USER app
 
 EXPOSE 8080
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["sh", "-c", "mkdir -p /tmp/nginx && exec nginx -g 'daemon off;'"]
