@@ -7,6 +7,9 @@
 </p>
 
 <p align="center">
+  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/ssotoa70/SpaceHarbor?include_prereleases" alt="GitHub release"></a>
+  <img src="https://img.shields.io/github/last-commit/ssotoa70/SpaceHarbor" alt="GitHub last commit">
+  <img src="https://img.shields.io/github/issues/ssotoa70/SpaceHarbor" alt="GitHub issues">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <a href="../../wiki"><img src="https://img.shields.io/badge/docs-Wiki-blue" alt="Wiki"></a>
 </p>
