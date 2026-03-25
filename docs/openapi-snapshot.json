@@ -12975,18 +12975,72 @@
         },
         "/api/v1/outbox": {
             "get": {
+                "operationId": "getOutboxItems",
+                "summary": "List pending outbox items awaiting publication",
+                "tags": [
+                    "events"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "items"
+                                    ],
+                                    "properties": {
+                                        "items": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": true
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/outbox/publish": {
             "post": {
+                "operationId": "publishOutbox",
+                "summary": "Publish all pending outbox items to the event broker",
+                "tags": [
+                    "events"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "publishedCount"
+                                    ],
+                                    "properties": {
+                                        "publishedCount": {
+                                            "type": "number"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -16946,6 +17000,44 @@
                                 }
                             }
                         }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "code",
+                                        "message",
+                                        "requestId",
+                                        "details"
+                                    ],
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        },
+                                        "requestId": {
+                                            "type": "string"
+                                        },
+                                        "details": {
+                                            "anyOf": [
+                                                {
+                                                    "type": "object",
+                                                    "additionalProperties": true
+                                                },
+                                                {
+                                                    "type": "null"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -19322,18 +19414,108 @@
         },
         "/events/stream": {
             "get": {
+                "operationId": "legacyGetEventsStream",
+                "summary": "Server-Sent Events stream for real-time workflow notifications",
+                "tags": [
+                    "events"
+                ],
+                "description": "Opens a persistent SSE connection. Events include job status changes, nav badge updates, and workflow notifications. Requires API key when SPACEHARBOR_API_KEY is configured. Max 100 concurrent connections.",
+                "security": [],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "SSE text/event-stream",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "string",
+                                    "description": "SSE text/event-stream"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/events/stream": {
             "get": {
+                "operationId": "v1GetEventsStream",
+                "summary": "Server-Sent Events stream for real-time workflow notifications",
+                "tags": [
+                    "events"
+                ],
+                "description": "Opens a persistent SSE connection. Events include job status changes, nav badge updates, and workflow notifications. Requires API key when SPACEHARBOR_API_KEY is configured. Max 100 concurrent connections.",
+                "security": [],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "SSE text/event-stream",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "string",
+                                    "description": "SSE text/event-stream"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -30760,6 +30942,130 @@
                 }
             }
         },
+        "/platform/settings/iam": {
+            "get": {
+                "operationId": "rootGetIamSettings",
+                "summary": "Get IAM feature flag configuration",
+                "tags": [
+                    "platform"
+                ],
+                "description": "Returns the merged IAM flags (env defaults + runtime overrides).",
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            },
+            "put": {
+                "operationId": "rootSaveIamSettings",
+                "summary": "Update IAM feature flags at runtime",
+                "tags": [
+                    "platform"
+                ],
+                "description": "Saves IAM flag overrides that take effect immediately without restart.",
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/platform/settings/rbac-matrix": {
+            "get": {
+                "operationId": "rootGetRbacMatrix",
+                "summary": "Get role-permission matrix",
+                "tags": [
+                    "platform"
+                ],
+                "description": "Returns the full RBAC matrix showing which permissions each role has.",
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/platform/settings/ldap": {
+            "get": {
+                "operationId": "rootGetLdapSettings",
+                "summary": "Get LDAP/AD configuration",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            },
+            "put": {
+                "operationId": "rootSaveLdapSettings",
+                "summary": "Update LDAP/AD configuration",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/platform/settings/ldap/test": {
+            "post": {
+                "operationId": "rootTestLdapConnection",
+                "summary": "Test LDAP/AD connectivity",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/platform/settings/scim": {
+            "get": {
+                "operationId": "rootGetScimSettings",
+                "summary": "Get SCIM provisioning configuration",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            },
+            "put": {
+                "operationId": "rootSaveScimSettings",
+                "summary": "Update SCIM provisioning configuration",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/platform/settings/scim/generate-token": {
+            "post": {
+                "operationId": "rootGenerateScimToken",
+                "summary": "Generate a new SCIM bearer token",
+                "tags": [
+                    "platform"
+                ],
+                "description": "Returns the plaintext token ONCE. Store it securely \u2014 it cannot be retrieved again.",
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
         "/api/v1/platform/settings": {
             "get": {
                 "operationId": "apiv1GetPlatformSettings",
@@ -31896,8 +32202,27 @@
                 }
             }
         },
-        "/metrics/iam": {
+        "/api/v1/platform/settings/iam": {
             "get": {
+                "operationId": "apiv1GetIamSettings",
+                "summary": "Get IAM feature flag configuration",
+                "tags": [
+                    "platform"
+                ],
+                "description": "Returns the merged IAM flags (env defaults + runtime overrides).",
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            },
+            "put": {
+                "operationId": "apiv1SaveIamSettings",
+                "summary": "Update IAM feature flags at runtime",
+                "tags": [
+                    "platform"
+                ],
+                "description": "Saves IAM flag overrides that take effect immediately without restart.",
                 "responses": {
                     "200": {
                         "description": "Default Response"
@@ -31905,11 +32230,228 @@
                 }
             }
         },
-        "/api/v1/metrics/iam": {
+        "/api/v1/platform/settings/rbac-matrix": {
             "get": {
+                "operationId": "apiv1GetRbacMatrix",
+                "summary": "Get role-permission matrix",
+                "tags": [
+                    "platform"
+                ],
+                "description": "Returns the full RBAC matrix showing which permissions each role has.",
                 "responses": {
                     "200": {
                         "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/api/v1/platform/settings/ldap": {
+            "get": {
+                "operationId": "apiv1GetLdapSettings",
+                "summary": "Get LDAP/AD configuration",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            },
+            "put": {
+                "operationId": "apiv1SaveLdapSettings",
+                "summary": "Update LDAP/AD configuration",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/api/v1/platform/settings/ldap/test": {
+            "post": {
+                "operationId": "apiv1TestLdapConnection",
+                "summary": "Test LDAP/AD connectivity",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/api/v1/platform/settings/scim": {
+            "get": {
+                "operationId": "apiv1GetScimSettings",
+                "summary": "Get SCIM provisioning configuration",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            },
+            "put": {
+                "operationId": "apiv1SaveScimSettings",
+                "summary": "Update SCIM provisioning configuration",
+                "tags": [
+                    "platform"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/api/v1/platform/settings/scim/generate-token": {
+            "post": {
+                "operationId": "apiv1GenerateScimToken",
+                "summary": "Generate a new SCIM bearer token",
+                "tags": [
+                    "platform"
+                ],
+                "description": "Returns the plaintext token ONCE. Store it securely \u2014 it cannot be retrieved again.",
+                "responses": {
+                    "200": {
+                        "description": "Default Response"
+                    }
+                }
+            }
+        },
+        "/metrics/iam": {
+            "get": {
+                "operationId": "legacyGetIamMetrics",
+                "summary": "IAM authorization metrics \u2014 success/failure rates and strategy breakdown",
+                "tags": [
+                    "observability"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "totalAuthAttempts",
+                                        "successRate",
+                                        "failureRate"
+                                    ],
+                                    "properties": {
+                                        "totalAuthAttempts": {
+                                            "type": "number"
+                                        },
+                                        "successRate": {
+                                            "type": "number"
+                                        },
+                                        "failureRate": {
+                                            "type": "number"
+                                        },
+                                        "authStrategyBreakdown": {
+                                            "type": "object",
+                                            "properties": {
+                                                "jwt": {
+                                                    "type": "number"
+                                                },
+                                                "api_key": {
+                                                    "type": "number"
+                                                },
+                                                "service_token": {
+                                                    "type": "number"
+                                                }
+                                            }
+                                        },
+                                        "permissionDenialRate": {
+                                            "type": "number"
+                                        },
+                                        "shadowDenyRate": {
+                                            "type": "number"
+                                        },
+                                        "activeSessions": {
+                                            "type": "number"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/metrics/iam": {
+            "get": {
+                "operationId": "v1GetIamMetrics",
+                "summary": "IAM authorization metrics \u2014 success/failure rates and strategy breakdown",
+                "tags": [
+                    "observability"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "totalAuthAttempts",
+                                        "successRate",
+                                        "failureRate"
+                                    ],
+                                    "properties": {
+                                        "totalAuthAttempts": {
+                                            "type": "number"
+                                        },
+                                        "successRate": {
+                                            "type": "number"
+                                        },
+                                        "failureRate": {
+                                            "type": "number"
+                                        },
+                                        "authStrategyBreakdown": {
+                                            "type": "object",
+                                            "properties": {
+                                                "jwt": {
+                                                    "type": "number"
+                                                },
+                                                "api_key": {
+                                                    "type": "number"
+                                                },
+                                                "service_token": {
+                                                    "type": "number"
+                                                }
+                                            }
+                                        },
+                                        "permissionDenialRate": {
+                                            "type": "number"
+                                        },
+                                        "shadowDenyRate": {
+                                            "type": "number"
+                                        },
+                                        "activeSessions": {
+                                            "type": "number"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -34726,6 +35268,43 @@
         },
         "/projects/{projectId}/members": {
             "post": {
+                "operationId": "addProjectMember",
+                "summary": "Add a user to a project with a specific role",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "userId",
+                                    "role"
+                                ],
+                                "properties": {
+                                    "userId": {
+                                        "type": "string"
+                                    },
+                                    "role": {
+                                        "type": "string",
+                                        "enum": [
+                                            "viewer",
+                                            "artist",
+                                            "lead",
+                                            "production",
+                                            "supervisor"
+                                        ]
+                                    },
+                                    "tenantId": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "parameters": [
                     {
                         "schema": {
@@ -34736,13 +35315,67 @@
                         "required": true
                     }
                 ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
-                    "200": {
-                        "description": "Default Response"
+                    "201": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             },
             "get": {
+                "operationId": "listProjectMembers",
+                "summary": "List all members of a project",
+                "tags": [
+                    "iam"
+                ],
                 "parameters": [
                     {
                         "schema": {
@@ -34753,15 +35386,62 @@
                         "required": true
                     }
                 ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "members": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": true
+                                            }
+                                        },
+                                        "total": {
+                                            "type": "number"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/projects/{projectId}/members/{userId}": {
             "delete": {
+                "operationId": "revokeProjectMember",
+                "summary": "Remove a user from a project",
+                "tags": [
+                    "iam"
+                ],
                 "parameters": [
                     {
                         "schema": {
@@ -34780,15 +35460,89 @@
                         "required": true
                     }
                 ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
-                    "200": {
-                        "description": "Default Response"
+                    "204": {
+                        "description": "Membership revoked"
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/projects/{projectId}/members/{userId}/role": {
             "put": {
+                "operationId": "changeProjectMemberRole",
+                "summary": "Change the role of an existing project member",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "role"
+                                ],
+                                "properties": {
+                                    "role": {
+                                        "type": "string",
+                                        "enum": [
+                                            "viewer",
+                                            "artist",
+                                            "lead",
+                                            "production",
+                                            "supervisor"
+                                        ]
+                                    },
+                                    "tenantId": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "parameters": [
                     {
                         "schema": {
@@ -34807,9 +35561,58 @@
                         "required": true
                     }
                 ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -35049,9 +35852,97 @@
         },
         "/auth/bootstrap": {
             "post": {
+                "operationId": "authBootstrap",
+                "summary": "Create the initial super_admin user (one-time, fails if users exist)",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "email",
+                                    "displayName",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email"
+                                    },
+                                    "displayName": {
+                                        "type": "string"
+                                    },
+                                    "password": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [],
                 "responses": {
-                    "200": {
-                        "description": "Default Response"
+                    "201": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "user": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        },
+                                        "role": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "410": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -35444,45 +36335,502 @@
         },
         "/auth/password": {
             "put": {
+                "operationId": "changePassword",
+                "summary": "Change the authenticated user's password",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "currentPassword",
+                                    "newPassword"
+                                ],
+                                "properties": {
+                                    "currentPassword": {
+                                        "type": "string"
+                                    },
+                                    "newPassword": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/auth/reset-password": {
             "post": {
+                "operationId": "adminResetPassword",
+                "summary": "Admin reset a user's password (requires administrator role)",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "userId",
+                                    "temporaryPassword"
+                                ],
+                                "properties": {
+                                    "userId": {
+                                        "type": "string"
+                                    },
+                                    "temporaryPassword": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/auth/token": {
             "get": {
+                "operationId": "getTokenViaRefresh",
+                "summary": "Get new access token using a refresh token (query param or x-refresh-token header)",
+                "tags": [
+                    "iam"
+                ],
+                "parameters": [
+                    {
+                        "schema": {
+                            "type": "string"
+                        },
+                        "in": "query",
+                        "name": "refreshToken",
+                        "required": false
+                    }
+                ],
+                "security": [],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "accessToken",
+                                        "refreshToken",
+                                        "expiresIn"
+                                    ],
+                                    "properties": {
+                                        "accessToken": {
+                                            "type": "string"
+                                        },
+                                        "refreshToken": {
+                                            "type": "string"
+                                        },
+                                        "expiresIn": {
+                                            "type": "number"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/auth/register": {
             "post": {
+                "operationId": "authRegister",
+                "summary": "Self-registration (requires SPACEHARBOR_ALLOW_REGISTRATION=true)",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "email",
+                                    "displayName",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email"
+                                    },
+                                    "displayName": {
+                                        "type": "string"
+                                    },
+                                    "password": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [],
                 "responses": {
-                    "200": {
-                        "description": "Default Response"
+                    "201": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "user": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/iam/transfer-super-admin": {
             "post": {
+                "operationId": "transferSuperAdmin",
+                "summary": "Transfer super_admin role to another user (requires super_admin + password confirmation)",
+                "tags": [
+                    "admin"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "targetUserId",
+                                    "confirmPassword"
+                                ],
+                                "properties": {
+                                    "targetUserId": {
+                                        "type": "string"
+                                    },
+                                    "confirmPassword": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "message": {
+                                            "type": "string"
+                                        },
+                                        "transferredTo": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -36123,6 +37471,43 @@
         },
         "/api/v1/projects/{projectId}/members": {
             "post": {
+                "operationId": "addProjectMember",
+                "summary": "Add a user to a project with a specific role",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "userId",
+                                    "role"
+                                ],
+                                "properties": {
+                                    "userId": {
+                                        "type": "string"
+                                    },
+                                    "role": {
+                                        "type": "string",
+                                        "enum": [
+                                            "viewer",
+                                            "artist",
+                                            "lead",
+                                            "production",
+                                            "supervisor"
+                                        ]
+                                    },
+                                    "tenantId": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "parameters": [
                     {
                         "schema": {
@@ -36133,13 +37518,67 @@
                         "required": true
                     }
                 ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
-                    "200": {
-                        "description": "Default Response"
+                    "201": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             },
             "get": {
+                "operationId": "listProjectMembers",
+                "summary": "List all members of a project",
+                "tags": [
+                    "iam"
+                ],
                 "parameters": [
                     {
                         "schema": {
@@ -36150,15 +37589,62 @@
                         "required": true
                     }
                 ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "members": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": true
+                                            }
+                                        },
+                                        "total": {
+                                            "type": "number"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/projects/{projectId}/members/{userId}": {
             "delete": {
+                "operationId": "revokeProjectMember",
+                "summary": "Remove a user from a project",
+                "tags": [
+                    "iam"
+                ],
                 "parameters": [
                     {
                         "schema": {
@@ -36177,15 +37663,89 @@
                         "required": true
                     }
                 ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
-                    "200": {
-                        "description": "Default Response"
+                    "204": {
+                        "description": "Membership revoked"
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/projects/{projectId}/members/{userId}/role": {
             "put": {
+                "operationId": "changeProjectMemberRole",
+                "summary": "Change the role of an existing project member",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "role"
+                                ],
+                                "properties": {
+                                    "role": {
+                                        "type": "string",
+                                        "enum": [
+                                            "viewer",
+                                            "artist",
+                                            "lead",
+                                            "production",
+                                            "supervisor"
+                                        ]
+                                    },
+                                    "tenantId": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "parameters": [
                     {
                         "schema": {
@@ -36204,9 +37764,58 @@
                         "required": true
                     }
                 ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -36446,9 +38055,97 @@
         },
         "/api/v1/auth/bootstrap": {
             "post": {
+                "operationId": "authBootstrap",
+                "summary": "Create the initial super_admin user (one-time, fails if users exist)",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "email",
+                                    "displayName",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email"
+                                    },
+                                    "displayName": {
+                                        "type": "string"
+                                    },
+                                    "password": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [],
                 "responses": {
-                    "200": {
-                        "description": "Default Response"
+                    "201": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "user": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        },
+                                        "role": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "410": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -36841,45 +38538,502 @@
         },
         "/api/v1/auth/password": {
             "put": {
+                "operationId": "changePassword",
+                "summary": "Change the authenticated user's password",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "currentPassword",
+                                    "newPassword"
+                                ],
+                                "properties": {
+                                    "currentPassword": {
+                                        "type": "string"
+                                    },
+                                    "newPassword": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/auth/reset-password": {
             "post": {
+                "operationId": "adminResetPassword",
+                "summary": "Admin reset a user's password (requires administrator role)",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "userId",
+                                    "temporaryPassword"
+                                ],
+                                "properties": {
+                                    "userId": {
+                                        "type": "string"
+                                    },
+                                    "temporaryPassword": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/auth/token": {
             "get": {
+                "operationId": "getTokenViaRefresh",
+                "summary": "Get new access token using a refresh token (query param or x-refresh-token header)",
+                "tags": [
+                    "iam"
+                ],
+                "parameters": [
+                    {
+                        "schema": {
+                            "type": "string"
+                        },
+                        "in": "query",
+                        "name": "refreshToken",
+                        "required": false
+                    }
+                ],
+                "security": [],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "accessToken",
+                                        "refreshToken",
+                                        "expiresIn"
+                                    ],
+                                    "properties": {
+                                        "accessToken": {
+                                            "type": "string"
+                                        },
+                                        "refreshToken": {
+                                            "type": "string"
+                                        },
+                                        "expiresIn": {
+                                            "type": "number"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/auth/register": {
             "post": {
+                "operationId": "authRegister",
+                "summary": "Self-registration (requires SPACEHARBOR_ALLOW_REGISTRATION=true)",
+                "tags": [
+                    "iam"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "email",
+                                    "displayName",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email"
+                                    },
+                                    "displayName": {
+                                        "type": "string"
+                                    },
+                                    "password": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [],
                 "responses": {
-                    "200": {
-                        "description": "Default Response"
+                    "201": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "user": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/iam/transfer-super-admin": {
             "post": {
+                "operationId": "transferSuperAdmin",
+                "summary": "Transfer super_admin role to another user (requires super_admin + password confirmation)",
+                "tags": [
+                    "admin"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "targetUserId",
+                                    "confirmPassword"
+                                ],
+                                "properties": {
+                                    "targetUserId": {
+                                        "type": "string"
+                                    },
+                                    "confirmPassword": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Default Response"
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "message": {
+                                            "type": "string"
+                                        },
+                                        "transferredTo": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Default Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -39414,12 +41568,32 @@
             "description": "Review sessions, submissions, comments, and approvals"
         },
         {
+            "name": "review-sessions",
+            "description": "Review session management \u2014 create, list, close, submit"
+        },
+        {
+            "name": "comments",
+            "description": "Review comments and annotation threads"
+        },
+        {
             "name": "collections",
             "description": "Playlists, selections, and deliverables"
         },
         {
+            "name": "playlists",
+            "description": "Curated playlists for review and delivery"
+        },
+        {
             "name": "provenance",
             "description": "Asset provenance, lineage, and dependency tracking"
+        },
+        {
+            "name": "lineage",
+            "description": "Asset lineage graph traversal"
+        },
+        {
+            "name": "dependencies",
+            "description": "Asset dependency management and impact analysis"
         },
         {
             "name": "events",
@@ -39440,6 +41614,74 @@
         {
             "name": "scim",
             "description": "SCIM 2.0 user and group provisioning"
+        },
+        {
+            "name": "hierarchy",
+            "description": "VFX hierarchy \u2014 projects, sequences, shots"
+        },
+        {
+            "name": "materials",
+            "description": "MaterialX shader and look management"
+        },
+        {
+            "name": "timelines",
+            "description": "Editorial timelines and OTIO conformance"
+        },
+        {
+            "name": "dcc",
+            "description": "DCC integration endpoints (deprecated)"
+        },
+        {
+            "name": "versions",
+            "description": "Asset version comparison and detail"
+        },
+        {
+            "name": "capacity",
+            "description": "Storage capacity, footprint, and forecast"
+        },
+        {
+            "name": "catalog",
+            "description": "VAST catalog \u2014 views, buckets, schemas"
+        },
+        {
+            "name": "analytics",
+            "description": "Dashboard analytics and reporting"
+        },
+        {
+            "name": "dataengine",
+            "description": "VAST DataEngine function registry"
+        },
+        {
+            "name": "observability",
+            "description": "Metrics, counters, and monitoring"
+        },
+        {
+            "name": "operations",
+            "description": "Incident coordination and operational workflows"
+        },
+        {
+            "name": "workflow",
+            "description": "Approval workflows and routing"
+        },
+        {
+            "name": "work",
+            "description": "Work assignments, shot tasks, and delivery tracking"
+        },
+        {
+            "name": "production",
+            "description": "Production management and shot delivery"
+        },
+        {
+            "name": "navigation",
+            "description": "UI navigation badges and counters"
+        },
+        {
+            "name": "admin",
+            "description": "Administrative and privileged operations"
+        },
+        {
+            "name": "dev",
+            "description": "Development-only helper endpoints"
         }
     ]
 }

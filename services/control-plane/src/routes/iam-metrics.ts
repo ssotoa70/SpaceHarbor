@@ -11,7 +11,36 @@ export async function registerIamMetricsRoute(
   prefixes: string[] = ["", "/api/v1"],
 ): Promise<void> {
   for (const prefix of prefixes) {
-    app.get(`${prefix}/metrics/iam`, async (_request, reply) => {
+    app.get(`${prefix}/metrics/iam`, {
+      schema: {
+        tags: ["observability"],
+        operationId: prefix ? "v1GetIamMetrics" : "legacyGetIamMetrics",
+        summary: "IAM authorization metrics — success/failure rates and strategy breakdown",
+        security: [{ BearerAuth: [] }],
+        response: {
+          200: {
+            type: "object",
+            required: ["totalAuthAttempts", "successRate", "failureRate"],
+            properties: {
+              totalAuthAttempts: { type: "number" },
+              successRate: { type: "number" },
+              failureRate: { type: "number" },
+              authStrategyBreakdown: {
+                type: "object",
+                properties: {
+                  jwt: { type: "number" },
+                  api_key: { type: "number" },
+                  service_token: { type: "number" },
+                },
+              },
+              permissionDenialRate: { type: "number" },
+              shadowDenyRate: { type: "number" },
+              activeSessions: { type: "number" },
+            },
+          },
+        },
+      },
+    }, async (_request, reply) => {
       const metrics: AuthzMetrics = getAuthzLogger().getMetrics();
       const total = metrics.total || 1; // avoid division by zero
 

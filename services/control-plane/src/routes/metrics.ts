@@ -105,9 +105,9 @@ export async function registerMetricsRoute(app: FastifyInstance, persistence: Pe
               }
             }
           }
-        }
+        },
+        401: errorEnvelopeSchema,
       },
-      401: errorEnvelopeSchema
     }
   }, async () => await persistence.getWorkflowStats());
 }

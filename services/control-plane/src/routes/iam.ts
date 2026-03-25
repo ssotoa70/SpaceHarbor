@@ -686,7 +686,33 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // POST /projects/:projectId/members — Grant project role
     // -----------------------------------------------------------------------
-    app.post(withPrefix(prefix, "/projects/:projectId/members"), async (request, reply) => {
+    app.post(withPrefix(prefix, "/projects/:projectId/members"), {
+      schema: {
+        tags: ["iam"],
+        operationId: "addProjectMember",
+        summary: "Add a user to a project with a specific role",
+        security: [{ BearerAuth: [] }],
+        params: {
+          type: "object",
+          required: ["projectId"],
+          properties: { projectId: { type: "string" } },
+        },
+        body: {
+          type: "object",
+          required: ["userId", "role"],
+          properties: {
+            userId: { type: "string" },
+            role: { type: "string", enum: ["viewer", "artist", "lead", "production", "supervisor"] },
+            tenantId: { type: "string" },
+          },
+        },
+        response: {
+          201: { type: "object", additionalProperties: true },
+          400: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          403: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       const ctx = getIamContext(request);
       if (!ctx || !callerHasAtLeast(ctx, "production")) {
         return reply.status(403).send({
@@ -736,7 +762,29 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // GET /projects/:projectId/members — List project members
     // -----------------------------------------------------------------------
-    app.get(withPrefix(prefix, "/projects/:projectId/members"), async (request, reply) => {
+    app.get(withPrefix(prefix, "/projects/:projectId/members"), {
+      schema: {
+        tags: ["iam"],
+        operationId: "listProjectMembers",
+        summary: "List all members of a project",
+        security: [{ BearerAuth: [] }],
+        params: {
+          type: "object",
+          required: ["projectId"],
+          properties: { projectId: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              members: { type: "array", items: { type: "object", additionalProperties: true } },
+              total: { type: "number" },
+            },
+          },
+          401: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       const ctx = getIamContext(request);
       if (!ctx) {
         return reply.status(401).send({
@@ -756,7 +804,24 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // DELETE /projects/:projectId/members/:userId — Revoke membership
     // -----------------------------------------------------------------------
-    app.delete(withPrefix(prefix, "/projects/:projectId/members/:userId"), async (request, reply) => {
+    app.delete(withPrefix(prefix, "/projects/:projectId/members/:userId"), {
+      schema: {
+        tags: ["iam"],
+        operationId: "revokeProjectMember",
+        summary: "Remove a user from a project",
+        security: [{ BearerAuth: [] }],
+        params: {
+          type: "object",
+          required: ["projectId", "userId"],
+          properties: { projectId: { type: "string" }, userId: { type: "string" } },
+        },
+        response: {
+          204: { type: "null", description: "Membership revoked" },
+          403: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          404: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       const ctx = getIamContext(request);
       if (!ctx || !callerHasAtLeast(ctx, "production")) {
         return reply.status(403).send({
@@ -786,7 +851,32 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // PUT /projects/:projectId/members/:userId/role — Change member role
     // -----------------------------------------------------------------------
-    app.put(withPrefix(prefix, "/projects/:projectId/members/:userId/role"), async (request, reply) => {
+    app.put(withPrefix(prefix, "/projects/:projectId/members/:userId/role"), {
+      schema: {
+        tags: ["iam"],
+        operationId: "changeProjectMemberRole",
+        summary: "Change the role of an existing project member",
+        security: [{ BearerAuth: [] }],
+        params: {
+          type: "object",
+          required: ["projectId", "userId"],
+          properties: { projectId: { type: "string" }, userId: { type: "string" } },
+        },
+        body: {
+          type: "object",
+          required: ["role"],
+          properties: {
+            role: { type: "string", enum: ["viewer", "artist", "lead", "production", "supervisor"] },
+            tenantId: { type: "string" },
+          },
+        },
+        response: {
+          200: { type: "object", additionalProperties: true },
+          400: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          403: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       const ctx = getIamContext(request);
       if (!ctx || !callerHasAtLeast(ctx, "production")) {
         return reply.status(403).send({
@@ -1044,7 +1134,35 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // POST /auth/bootstrap — First-run super_admin creation
     // -----------------------------------------------------------------------
-    app.post(withPrefix(prefix, "/auth/bootstrap"), async (request, reply) => {
+    app.post(withPrefix(prefix, "/auth/bootstrap"), {
+      schema: {
+        tags: ["iam"],
+        operationId: "authBootstrap",
+        summary: "Create the initial super_admin user (one-time, fails if users exist)",
+        security: [],
+        body: {
+          type: "object",
+          required: ["email", "displayName", "password"],
+          properties: {
+            email: { type: "string", format: "email" },
+            displayName: { type: "string" },
+            password: { type: "string" },
+          },
+        },
+        response: {
+          201: {
+            type: "object",
+            properties: {
+              user: { type: "object", additionalProperties: true },
+              role: { type: "string" },
+              message: { type: "string" },
+            },
+          },
+          400: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          410: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       if (bootstrapComplete) {
         return reply.status(410).send({
           code: "GONE",
@@ -1568,7 +1686,27 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // PUT /auth/password — Change own password
     // -----------------------------------------------------------------------
-    app.put(withPrefix(prefix, "/auth/password"), async (request, reply) => {
+    app.put(withPrefix(prefix, "/auth/password"), {
+      schema: {
+        tags: ["iam"],
+        operationId: "changePassword",
+        summary: "Change the authenticated user's password",
+        security: [{ BearerAuth: [] }],
+        body: {
+          type: "object",
+          required: ["currentPassword", "newPassword"],
+          properties: {
+            currentPassword: { type: "string" },
+            newPassword: { type: "string" },
+          },
+        },
+        response: {
+          200: { type: "object", properties: { message: { type: "string" } } },
+          400: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          401: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       const ctx = getIamContext(request);
       if (!ctx) {
         return reply.status(401).send({
@@ -1632,7 +1770,27 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // POST /auth/reset-password — Admin password reset
     // -----------------------------------------------------------------------
-    app.post(withPrefix(prefix, "/auth/reset-password"), async (request, reply) => {
+    app.post(withPrefix(prefix, "/auth/reset-password"), {
+      schema: {
+        tags: ["iam"],
+        operationId: "adminResetPassword",
+        summary: "Admin reset a user's password (requires administrator role)",
+        security: [{ BearerAuth: [] }],
+        body: {
+          type: "object",
+          required: ["userId", "temporaryPassword"],
+          properties: {
+            userId: { type: "string" },
+            temporaryPassword: { type: "string" },
+          },
+        },
+        response: {
+          200: { type: "object", properties: { message: { type: "string" } } },
+          400: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          403: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       const ctx = getIamContext(request);
       if (!ctx || !callerHasAtLeast(ctx, "administrator")) {
         return reply.status(403).send({
@@ -1682,7 +1840,33 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // GET /auth/token — Backend proxy for token refresh
     // -----------------------------------------------------------------------
-    app.get(withPrefix(prefix, "/auth/token"), async (request, reply) => {
+    app.get(withPrefix(prefix, "/auth/token"), {
+      schema: {
+        tags: ["iam"],
+        operationId: "getTokenViaRefresh",
+        summary: "Get new access token using a refresh token (query param or x-refresh-token header)",
+        security: [],
+        querystring: {
+          type: "object",
+          properties: {
+            refreshToken: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["accessToken", "refreshToken", "expiresIn"],
+            properties: {
+              accessToken: { type: "string" },
+              refreshToken: { type: "string" },
+              expiresIn: { type: "number" },
+            },
+          },
+          400: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          401: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       // In local mode, delegates to the refresh logic
       const refreshToken =
         (request.query as Record<string, string | undefined>)?.refreshToken ??
@@ -1764,7 +1948,35 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // POST /auth/register — Self-registration (when enabled)
     // -----------------------------------------------------------------------
-    app.post(withPrefix(prefix, "/auth/register"), async (request, reply) => {
+    app.post(withPrefix(prefix, "/auth/register"), {
+      schema: {
+        tags: ["iam"],
+        operationId: "authRegister",
+        summary: "Self-registration (requires SPACEHARBOR_ALLOW_REGISTRATION=true)",
+        security: [],
+        body: {
+          type: "object",
+          required: ["email", "displayName", "password"],
+          properties: {
+            email: { type: "string", format: "email" },
+            displayName: { type: "string" },
+            password: { type: "string" },
+          },
+        },
+        response: {
+          201: {
+            type: "object",
+            properties: {
+              user: { type: "object", additionalProperties: true },
+              message: { type: "string" },
+            },
+          },
+          400: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          403: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          409: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       const registrationEnabled = process.env.SPACEHARBOR_ALLOW_REGISTRATION === "true";
       if (!registrationEnabled) {
         return reply.status(403).send({
@@ -1832,7 +2044,29 @@ export function registerIamRoutes(
     // -----------------------------------------------------------------------
     // POST /iam/transfer-super-admin — Transfer super_admin role
     // -----------------------------------------------------------------------
-    app.post(withPrefix(prefix, "/iam/transfer-super-admin"), async (request, reply) => {
+    app.post(withPrefix(prefix, "/iam/transfer-super-admin"), {
+      schema: {
+        tags: ["admin"],
+        operationId: "transferSuperAdmin",
+        summary: "Transfer super_admin role to another user (requires super_admin + password confirmation)",
+        security: [{ BearerAuth: [] }],
+        body: {
+          type: "object",
+          required: ["targetUserId", "confirmPassword"],
+          properties: {
+            targetUserId: { type: "string" },
+            confirmPassword: { type: "string" },
+          },
+        },
+        response: {
+          200: { type: "object", properties: { message: { type: "string" }, transferredTo: { type: "string" } } },
+          400: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          401: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          403: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+          404: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } },
+        },
+      },
+    }, async (request, reply) => {
       const ctx = getIamContext(request);
       if (!ctx || !callerHasAtLeast(ctx, "super_admin")) {
         return reply.status(403).send({

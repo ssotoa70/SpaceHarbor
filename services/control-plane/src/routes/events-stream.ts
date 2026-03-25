@@ -28,7 +28,29 @@ export function registerEventsStreamRoute(
   prefixes: string[] = [""]
 ): void {
   for (const prefix of prefixes) {
-    app.get(`${prefix}/events/stream`, async (request, reply) => {
+    app.get(`${prefix}/events/stream`, {
+      schema: {
+        tags: ["events"],
+        operationId: prefix ? "v1GetEventsStream" : "legacyGetEventsStream",
+        summary: "Server-Sent Events stream for real-time workflow notifications",
+        description:
+          "Opens a persistent SSE connection. Events include job status changes, " +
+          "nav badge updates, and workflow notifications. Requires API key when " +
+          "SPACEHARBOR_API_KEY is configured. Max 100 concurrent connections.",
+        security: [],
+        response: {
+          200: { type: "string", description: "SSE text/event-stream" },
+          401: {
+            type: "object",
+            properties: { error: { type: "string" } },
+          },
+          503: {
+            type: "object",
+            properties: { error: { type: "string" } },
+          },
+        },
+      },
+    }, async (request, reply) => {
       // --- API key authentication (supports per-service credentials) ---
       const hasKeys = resolveValidApiKeys().length > 0;
       if (hasKeys) {
