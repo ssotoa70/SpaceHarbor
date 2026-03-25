@@ -639,7 +639,7 @@ export async function registerPlatformSettingsRoutes(
 
     // ── POST /platform/settings/test-connection ─────────────────────────
     app.post<{
-      Body: { service: "vast_database" | "event_broker" | "data_engine" | "s3" };
+      Body: { service: string };
     }>(
       withPrefix(prefix, "/platform/settings/test-connection"),
       {
@@ -647,14 +647,14 @@ export async function registerPlatformSettingsRoutes(
           tags: ["platform"],
           operationId: `${opPrefix}TestServiceConnection`,
           summary: "Test connectivity to a platform service",
-          description: "Attempts to connect to the specified service and returns the result. For S3, tests ListBuckets via path-style SigV4. For Trino, runs SELECT 1. Requires admin:system_config permission.",
+          description: "Attempts to connect to the specified service. Use 's3:{endpointId}' to test a specific S3 endpoint. Requires admin:system_config permission.",
           body: {
             type: "object",
             required: ["service"],
             properties: {
               service: {
                 type: "string",
-                enum: ["vast_database", "event_broker", "data_engine", "s3"],
+                description: "Service to test: vast_database, event_broker, data_engine, s3, or s3:{endpointId}",
               },
             },
           },

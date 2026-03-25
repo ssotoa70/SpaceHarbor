@@ -186,11 +186,14 @@ export const savePlatformSettingsBodySchema = {
     },
     storage: {
       type: "object",
+      additionalProperties: true,
       properties: {
         s3Endpoint: { anyOf: [{ type: "string" }, { type: "null" }] },
         s3Bucket: { anyOf: [{ type: "string" }, { type: "null" }] },
         // endpoints use the write schema which allows secretAccessKey
         endpoints: { type: "array", items: s3EndpointConfigWriteSchema },
+        nfsConnectors: { type: "array" },
+        smbConnectors: { type: "array" },
       },
     },
   },
@@ -202,8 +205,7 @@ export const connectionTestRequestSchema = {
   properties: {
     service: {
       type: "string",
-      enum: ["vast_database", "event_broker", "data_engine", "s3"],
-      description: "Service identifier to test. S3 endpoints can be tested with 's3:{endpointId}'.",
+      description: "Service identifier to test. Use 's3:{endpointId}' to test a specific S3 endpoint.",
     },
   },
 } as const;
