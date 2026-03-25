@@ -10,9 +10,12 @@ import {
 } from "../http/schemas.js";
 import { TrinoClient } from "../db/trino-client.js";
 import { migrations } from "../db/migrations/index.js";
-import { resolveIamFlags } from "../iam/feature-flags.js";
+import { resolveIamFlags, setIamRuntimeOverrides, getIamRuntimeOverrides } from "../iam/feature-flags.js";
+import type { IamFeatureFlags } from "../iam/feature-flags.js";
 import { isValidApiKey, resolveValidApiKeys } from "../iam/auth-plugin.js";
 import { PERMISSIONS } from "../iam/types.js";
+import { getEffectivePermissions } from "../iam/permissions.js";
+import type { SettingsStore } from "../persistence/settings-store.js";
 
 /**
  * Enforce admin:system_config permission when IAM is enabled, or require an API
@@ -141,6 +144,45 @@ interface S3EndpointStored {
   pathStyle: boolean;
 }
 
+interface NfsConnectorStored {
+  id: string;
+  label: string;
+  exportPath: string;
+  mountPoint: string;
+  version: "3" | "4" | "4.1";
+  options: string;
+}
+
+interface SmbConnectorStored {
+  id: string;
+  label: string;
+  sharePath: string;
+  mountPoint: string;
+  domain: string;
+  username: string;
+  password: string; // write-only; never returned to clients
+}
+
+interface LdapConfigStored {
+  enabled: boolean;
+  host: string;
+  port: number;
+  baseDn: string;
+  bindDn: string;
+  bindPassword: string; // write-only; never returned to clients
+  useTls: boolean;
+  userSearchFilter: string;
+  groupSearchBase: string;
+  groupSearchFilter: string;
+  syncIntervalMinutes: number;
+}
+
+interface ScimConfigStored {
+  enabled: boolean;
+  tokenHash: string; // never returned; presence checked for "configured" status
+  defaultRole: string;
+}
+
 interface OperationalSettings {
   vastDatabase: {
     vmsVip: string | null;
@@ -152,15 +194,49 @@ interface OperationalSettings {
   };
   storage: {
     endpoints: S3EndpointStored[];
+    nfsConnectors: NfsConnectorStored[];
+    smbConnectors: SmbConnectorStored[];
   };
+  ldap: LdapConfigStored | null;
+  scim: ScimConfigStored | null;
 }
 
-/** Module-level store. Survives the request lifecycle; resets on process restart. */
-const operationalStore: OperationalSettings = {
+const defaultOperationalSettings: OperationalSettings = {
   vastDatabase: { vmsVip: null, cnodeVips: null, accessKeyId: null },
   vastDataEngine: { tenant: null },
-  storage: { endpoints: [] },
+  storage: { endpoints: [], nfsConnectors: [], smbConnectors: [] },
+  ldap: null,
+  scim: null,
 };
+
+/** Module-level store. Loaded from SettingsStore on startup; persisted on write. */
+let operationalStore: OperationalSettings = { ...defaultOperationalSettings, storage: { ...defaultOperationalSettings.storage } };
+
+/** Module-level reference to the settings store for persistence. */
+let settingsStoreRef: SettingsStore | null = null;
+
+function persistOperationalStore(): void {
+  if (settingsStoreRef) {
+    settingsStoreRef.set("platform.operational", operationalStore as unknown as Record<string, unknown>);
+  }
+}
+
+function loadOperationalStore(store: SettingsStore): void {
+  const saved = store.get("platform.operational") as unknown as OperationalSettings | null;
+  if (saved) {
+    operationalStore = {
+      vastDatabase: saved.vastDatabase ?? defaultOperationalSettings.vastDatabase,
+      vastDataEngine: saved.vastDataEngine ?? defaultOperationalSettings.vastDataEngine,
+      storage: {
+        endpoints: saved.storage?.endpoints ?? [],
+        nfsConnectors: saved.storage?.nfsConnectors ?? [],
+        smbConnectors: saved.storage?.smbConnectors ?? [],
+      },
+      ldap: saved.ldap ?? null,
+      scim: saved.scim ?? null,
+    };
+  }
+}
 
 export interface ConnectionTestResult {
   service: string;
@@ -215,7 +291,16 @@ function buildTrinoFromEnv(): TrinoClient | null {
 export async function registerPlatformSettingsRoutes(
   app: FastifyInstance,
   prefixes: string[],
+  store?: SettingsStore,
 ): Promise<void> {
+  // Load persisted settings and IAM overrides on startup
+  if (store) {
+    settingsStoreRef = store;
+    loadOperationalStore(store);
+    const iamOverrides = store.get("platform.iam") as Partial<IamFeatureFlags> | null;
+    if (iamOverrides) setIamRuntimeOverrides(iamOverrides);
+  }
+
   for (const prefix of prefixes) {
     const opPrefix = prefix.replace(/\W/g, "") || "root";
 
@@ -326,11 +411,30 @@ export async function registerPlatformSettingsRoutes(
             s3Bucket: s3Bucket,
             configured: s3Configured,
             endpoints: s3EndpointsForResponse,
-          } as any, // storage.endpoints lives outside the base PlatformSettings type
+            nfsConnectors: operationalStore.storage.nfsConnectors,
+            smbConnectors: operationalStore.storage.smbConnectors.map(
+              ({ password: _omit, ...rest }) => rest,
+            ),
+          } as any,
           scim: {
             configured: scimConfigured,
             enabled: scimEnabled,
           },
+          ldap: operationalStore.ldap
+            ? {
+                configured: true,
+                enabled: operationalStore.ldap.enabled,
+                host: operationalStore.ldap.host,
+                port: operationalStore.ldap.port,
+                baseDn: operationalStore.ldap.baseDn,
+                bindDn: operationalStore.ldap.bindDn,
+                useTls: operationalStore.ldap.useTls,
+                userSearchFilter: operationalStore.ldap.userSearchFilter,
+                groupSearchBase: operationalStore.ldap.groupSearchBase,
+                groupSearchFilter: operationalStore.ldap.groupSearchFilter,
+                syncIntervalMinutes: operationalStore.ldap.syncIntervalMinutes,
+              }
+            : { configured: false, enabled: false },
         };
 
         return reply.send(settings);
@@ -404,6 +508,37 @@ export async function registerPlatformSettingsRoutes(
             } satisfies S3EndpointStored;
           });
         }
+
+        // Persist NFS connectors
+        if (storageBody && Array.isArray(storageBody["nfsConnectors"])) {
+          operationalStore.storage.nfsConnectors = (storageBody["nfsConnectors"] as Array<Record<string, unknown>>).map((c) => ({
+            id: String(c["id"] ?? ""),
+            label: String(c["label"] ?? ""),
+            exportPath: String(c["exportPath"] ?? ""),
+            mountPoint: String(c["mountPoint"] ?? ""),
+            version: (["3", "4", "4.1"].includes(String(c["version"])) ? String(c["version"]) : "4.1") as "3" | "4" | "4.1",
+            options: String(c["options"] ?? ""),
+          }));
+        }
+
+        // Persist SMB connectors
+        if (storageBody && Array.isArray(storageBody["smbConnectors"])) {
+          operationalStore.storage.smbConnectors = (storageBody["smbConnectors"] as Array<Record<string, unknown>>).map((c) => {
+            const existing = operationalStore.storage.smbConnectors.find((e) => e.id === c["id"]);
+            return {
+              id: String(c["id"] ?? ""),
+              label: String(c["label"] ?? ""),
+              sharePath: String(c["sharePath"] ?? ""),
+              mountPoint: String(c["mountPoint"] ?? ""),
+              domain: String(c["domain"] ?? ""),
+              username: String(c["username"] ?? ""),
+              password: typeof c["password"] === "string" && c["password"] !== "" ? c["password"] : (existing?.password ?? ""),
+            };
+          });
+        }
+
+        // Write all changes to persistent store
+        persistOperationalStore();
 
         // Re-read current settings to return fresh state
         const iamFlags = resolveIamFlags();
@@ -689,6 +824,265 @@ export async function registerPlatformSettingsRoutes(
           upToDate: pending.length === 0,
           pending,
         } satisfies SchemaStatus);
+      },
+    );
+
+    // ── GET /platform/settings/iam ──────────────────────────────────────
+    app.get(
+      withPrefix(prefix, "/platform/settings/iam"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}GetIamSettings`,
+          summary: "Get IAM feature flag configuration",
+          description: "Returns the merged IAM flags (env defaults + runtime overrides).",
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        const flags = resolveIamFlags();
+        const overrides = getIamRuntimeOverrides();
+        return reply.send({ flags, overrides });
+      },
+    );
+
+    // ── PUT /platform/settings/iam ──────────────────────────────────────
+    app.put<{ Body: Record<string, unknown> }>(
+      withPrefix(prefix, "/platform/settings/iam"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}SaveIamSettings`,
+          summary: "Update IAM feature flags at runtime",
+          description: "Saves IAM flag overrides that take effect immediately without restart.",
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        const body = request.body as Partial<IamFeatureFlags>;
+        const safe: Partial<IamFeatureFlags> = {};
+        if (typeof body.shadowMode === "boolean") safe.shadowMode = body.shadowMode;
+        if (typeof body.enforceReadScope === "boolean") safe.enforceReadScope = body.enforceReadScope;
+        if (typeof body.enforceWriteScope === "boolean") safe.enforceWriteScope = body.enforceWriteScope;
+        if (typeof body.enforceApprovalSod === "boolean") safe.enforceApprovalSod = body.enforceApprovalSod;
+        if (typeof body.enableScimSync === "boolean") safe.enableScimSync = body.enableScimSync;
+        if (typeof body.rolloutRing === "string") safe.rolloutRing = body.rolloutRing as any;
+        setIamRuntimeOverrides(safe);
+        if (settingsStoreRef) settingsStoreRef.set("platform.iam", safe as unknown as Record<string, unknown>);
+        return reply.send({ status: "ok", flags: resolveIamFlags() });
+      },
+    );
+
+    // ── GET /platform/settings/rbac-matrix ──────────────────────────────
+    app.get(
+      withPrefix(prefix, "/platform/settings/rbac-matrix"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}GetRbacMatrix`,
+          summary: "Get role-permission matrix",
+          description: "Returns the full RBAC matrix showing which permissions each role has.",
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        const { PROJECT_ROLES } = await import("../iam/types.js");
+        const { GLOBAL_ROLES } = await import("../iam/types.js");
+        const allRoles = [...PROJECT_ROLES, ...GLOBAL_ROLES] as string[];
+        const matrix: Record<string, string[]> = {};
+        const allPermissions = new Set<string>();
+        for (const role of allRoles) {
+          const perms = getEffectivePermissions(role as any);
+          matrix[role] = [...perms].sort();
+          for (const p of perms) allPermissions.add(p);
+        }
+        return reply.send({
+          roles: allRoles,
+          permissions: [...allPermissions].sort(),
+          matrix,
+        });
+      },
+    );
+
+    // ── GET /platform/settings/ldap ─────────────────────────────────────
+    app.get(
+      withPrefix(prefix, "/platform/settings/ldap"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}GetLdapSettings`,
+          summary: "Get LDAP/AD configuration",
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        if (!operationalStore.ldap) {
+          return reply.send({ configured: false, enabled: false });
+        }
+        const { bindPassword: _, ...safe } = operationalStore.ldap;
+        return reply.send({ configured: true, ...safe });
+      },
+    );
+
+    // ── PUT /platform/settings/ldap ─────────────────────────────────────
+    app.put<{ Body: Record<string, unknown> }>(
+      withPrefix(prefix, "/platform/settings/ldap"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}SaveLdapSettings`,
+          summary: "Update LDAP/AD configuration",
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        const b = request.body as Record<string, unknown>;
+        const existing = operationalStore.ldap;
+        operationalStore.ldap = {
+          enabled: b["enabled"] === true,
+          host: String(b["host"] ?? existing?.host ?? ""),
+          port: typeof b["port"] === "number" ? b["port"] : (existing?.port ?? 389),
+          baseDn: String(b["baseDn"] ?? existing?.baseDn ?? ""),
+          bindDn: String(b["bindDn"] ?? existing?.bindDn ?? ""),
+          bindPassword: typeof b["bindPassword"] === "string" && b["bindPassword"] !== ""
+            ? b["bindPassword"]
+            : (existing?.bindPassword ?? ""),
+          useTls: b["useTls"] !== false,
+          userSearchFilter: String(b["userSearchFilter"] ?? existing?.userSearchFilter ?? "(objectClass=person)"),
+          groupSearchBase: String(b["groupSearchBase"] ?? existing?.groupSearchBase ?? ""),
+          groupSearchFilter: String(b["groupSearchFilter"] ?? existing?.groupSearchFilter ?? "(objectClass=group)"),
+          syncIntervalMinutes: typeof b["syncIntervalMinutes"] === "number" ? b["syncIntervalMinutes"] : (existing?.syncIntervalMinutes ?? 60),
+        };
+        persistOperationalStore();
+        const { bindPassword: _, ...safe } = operationalStore.ldap;
+        return reply.send({ status: "ok", configured: true, ...safe });
+      },
+    );
+
+    // ── POST /platform/settings/ldap/test ───────────────────────────────
+    app.post(
+      withPrefix(prefix, "/platform/settings/ldap/test"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}TestLdapConnection`,
+          summary: "Test LDAP/AD connectivity",
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        if (!operationalStore.ldap?.host) {
+          return reply.send({ status: "error", message: "LDAP not configured" });
+        }
+        // Connection test: verify host:port is reachable via TCP.
+        const { host, port, useTls } = operationalStore.ldap;
+        const net = await import("node:net");
+        return new Promise<void>((resolve) => {
+          const sock = net.createConnection({ host, port, timeout: 5000 }, () => {
+            sock.destroy();
+            reply.send({ status: "ok", message: `Connected to ${host}:${port}${useTls ? " (TLS)" : ""}` });
+            resolve();
+          });
+          sock.on("error", (err) => {
+            sock.destroy();
+            reply.send({ status: "error", message: `Connection failed: ${err.message}` });
+            resolve();
+          });
+          sock.on("timeout", () => {
+            sock.destroy();
+            reply.send({ status: "error", message: "Connection timed out (5s)" });
+            resolve();
+          });
+        });
+      },
+    );
+
+    // ── GET /platform/settings/scim ─────────────────────────────────────
+    app.get(
+      withPrefix(prefix, "/platform/settings/scim"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}GetScimSettings`,
+          summary: "Get SCIM provisioning configuration",
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        const scimCfg = operationalStore.scim;
+        const envToken = !!process.env.SPACEHARBOR_SCIM_TOKEN;
+        return reply.send({
+          enabled: scimCfg?.enabled ?? resolveIamFlags().enableScimSync,
+          configured: envToken || !!scimCfg?.tokenHash,
+          tokenSource: envToken ? "env" : (scimCfg?.tokenHash ? "settings" : "none"),
+          defaultRole: scimCfg?.defaultRole ?? "viewer",
+        });
+      },
+    );
+
+    // ── PUT /platform/settings/scim ─────────────────────────────────────
+    app.put<{ Body: Record<string, unknown> }>(
+      withPrefix(prefix, "/platform/settings/scim"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}SaveScimSettings`,
+          summary: "Update SCIM provisioning configuration",
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        const b = request.body as Record<string, unknown>;
+        const existing = operationalStore.scim;
+        operationalStore.scim = {
+          enabled: b["enabled"] === true,
+          tokenHash: existing?.tokenHash ?? "",
+          defaultRole: String(b["defaultRole"] ?? existing?.defaultRole ?? "viewer"),
+        };
+        // Also update the IAM feature flag for SCIM
+        if (typeof b["enabled"] === "boolean") {
+          const overrides = getIamRuntimeOverrides();
+          overrides.enableScimSync = b["enabled"] as boolean;
+          setIamRuntimeOverrides(overrides);
+          if (settingsStoreRef) settingsStoreRef.set("platform.iam", overrides as unknown as Record<string, unknown>);
+        }
+        persistOperationalStore();
+        return reply.send({
+          status: "ok",
+          enabled: operationalStore.scim.enabled,
+          configured: !!operationalStore.scim.tokenHash || !!process.env.SPACEHARBOR_SCIM_TOKEN,
+          defaultRole: operationalStore.scim.defaultRole,
+        });
+      },
+    );
+
+    // ── POST /platform/settings/scim/generate-token ─────────────────────
+    app.post(
+      withPrefix(prefix, "/platform/settings/scim/generate-token"),
+      {
+        schema: {
+          tags: ["platform"],
+          operationId: `${opPrefix}GenerateScimToken`,
+          summary: "Generate a new SCIM bearer token",
+          description: "Returns the plaintext token ONCE. Store it securely — it cannot be retrieved again.",
+        },
+      },
+      async (request, reply) => {
+        if (denyUnlessAdmin(request, reply)) return;
+        const crypto = await import("node:crypto");
+        const token = crypto.randomBytes(32).toString("base64url");
+        const hash = crypto.createHash("sha256").update(token).digest("hex");
+        if (!operationalStore.scim) {
+          operationalStore.scim = { enabled: true, tokenHash: hash, defaultRole: "viewer" };
+        } else {
+          operationalStore.scim.tokenHash = hash;
+        }
+        persistOperationalStore();
+        return reply.send({
+          status: "ok",
+          token, // plaintext — shown once
+          message: "Copy this token now. You will not be able to see it again.",
+        });
       },
     );
   }

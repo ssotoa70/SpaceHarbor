@@ -210,6 +210,14 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
     icon: "M4 2h8l2 2v10H2V2h2zM4 6h8M4 9h6M4 12h8",
   },
   {
+    id: "rbac",
+    to: "/admin/rbac",
+    label: "RBAC Matrix",
+    section: "ADMIN",
+    permission: "admin:system_config",
+    icon: "M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z",
+  },
+  {
     id: "settings",
     to: "/admin/settings",
     label: "Settings",

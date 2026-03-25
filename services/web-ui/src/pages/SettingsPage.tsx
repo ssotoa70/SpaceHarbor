@@ -7,12 +7,25 @@ import {
   testServiceConnection,
   deploySchema,
   fetchSchemaStatus,
+  fetchIamSettings,
+  saveIamSettings,
+  fetchLdapSettings,
+  saveLdapSettings,
+  testLdapConnection,
+  fetchScimSettings,
+  saveScimSettings,
+  generateScimToken,
+  fetchRbacMatrix,
 } from "../api";
 import type {
   PlatformSettings,
   S3EndpointConfig,
+  NfsConnectorConfig,
+  SmbConnectorConfig,
   ConnectionTestResult,
   SchemaStatus,
+  IamSettings,
+  RbacMatrix,
 } from "../api";
 
 // ---------------------------------------------------------------------------
@@ -367,6 +380,8 @@ export function SettingsPage() {
           endpoints: s3Endpoints,
           s3Endpoint: s3Endpoints[0]?.endpoint ?? null,
           s3Bucket: s3Endpoints[0]?.bucket ?? null,
+          nfsConnectors: settings.storage?.nfsConnectors ?? [],
+          smbConnectors: settings.storage?.smbConnectors ?? [],
         },
       });
       setSettings(updated);
@@ -691,44 +706,152 @@ export function SettingsPage() {
           </Button>
         </SectionCard>
 
-        {/* 5. Authentication & IAM */}
+        {/* 5. Storage Connectors (NFS / SMB) */}
+        <SectionCard
+          title="Storage Connectors (NFS / SMB)"
+          iconPath="M3 6h10v6H3zM6 6V3M9 6V3"
+          status={(settings.storage?.nfsConnectors?.length || settings.storage?.smbConnectors?.length) ? "connected" : "not_configured"}
+        >
+          <p className="text-xs text-[var(--color-ah-text-muted)] mb-3">
+            Configure NFS and SMB mount points for accessing VAST Element Store or network shares.
+          </p>
+
+          <h4 className="text-xs font-semibold mb-2">NFS Exports</h4>
+          {(settings.storage?.nfsConnectors ?? []).map((c, i) => (
+            <div key={c.id || i} className="grid grid-cols-3 gap-2 mb-2 text-xs">
+              <ConfigInput label="Label" value={c.label} onChange={(v) => { const arr = [...(settings.storage?.nfsConnectors ?? [])]; arr[i] = { ...c, label: v }; setSettings({ ...settings, storage: { ...settings.storage, nfsConnectors: arr } }); markDirty(); }} />
+              <ConfigInput label="Export Path" value={c.exportPath} onChange={(v) => { const arr = [...(settings.storage?.nfsConnectors ?? [])]; arr[i] = { ...c, exportPath: v }; setSettings({ ...settings, storage: { ...settings.storage, nfsConnectors: arr } }); markDirty(); }} />
+              <ConfigInput label="Mount Point" value={c.mountPoint} onChange={(v) => { const arr = [...(settings.storage?.nfsConnectors ?? [])]; arr[i] = { ...c, mountPoint: v }; setSettings({ ...settings, storage: { ...settings.storage, nfsConnectors: arr } }); markDirty(); }} />
+            </div>
+          ))}
+          <Button variant="secondary" className="text-xs mb-3" onClick={() => {
+            const arr = [...(settings.storage?.nfsConnectors ?? [])];
+            arr.push({ id: crypto.randomUUID(), label: "", exportPath: "", mountPoint: "", version: "4.1", options: "" });
+            setSettings({ ...settings, storage: { ...settings.storage, nfsConnectors: arr } }); markDirty();
+          }}>+ Add NFS Export</Button>
+
+          <h4 className="text-xs font-semibold mb-2">SMB Shares</h4>
+          {(settings.storage?.smbConnectors ?? []).map((c, i) => (
+            <div key={c.id || i} className="grid grid-cols-3 gap-2 mb-2 text-xs">
+              <ConfigInput label="Label" value={c.label} onChange={(v) => { const arr = [...(settings.storage?.smbConnectors ?? [])]; arr[i] = { ...c, label: v }; setSettings({ ...settings, storage: { ...settings.storage, smbConnectors: arr } }); markDirty(); }} />
+              <ConfigInput label="Share Path" value={c.sharePath} onChange={(v) => { const arr = [...(settings.storage?.smbConnectors ?? [])]; arr[i] = { ...c, sharePath: v }; setSettings({ ...settings, storage: { ...settings.storage, smbConnectors: arr } }); markDirty(); }} />
+              <ConfigInput label="Domain" value={c.domain} onChange={(v) => { const arr = [...(settings.storage?.smbConnectors ?? [])]; arr[i] = { ...c, domain: v }; setSettings({ ...settings, storage: { ...settings.storage, smbConnectors: arr } }); markDirty(); }} />
+            </div>
+          ))}
+          <Button variant="secondary" className="text-xs" onClick={() => {
+            const arr = [...(settings.storage?.smbConnectors ?? [])];
+            arr.push({ id: crypto.randomUUID(), label: "", sharePath: "", mountPoint: "", domain: "", username: "" });
+            setSettings({ ...settings, storage: { ...settings.storage, smbConnectors: arr } }); markDirty();
+          }}>+ Add SMB Share</Button>
+        </SectionCard>
+
+        {/* 6. Authentication & IAM (editable) */}
         <SectionCard
           title="Authentication & IAM"
           iconPath="M8 2a3 3 0 100 6 3 3 0 000-6zM4 14c0-2.2 1.8-4 4-4s4 1.8 4 4"
           status={settings.authentication.iamEnabled ? "connected" : "not_configured"}
         >
           <ConfigRow label="Auth Mode" value={settings.authentication.mode.toUpperCase()} />
-          <ConfigRow
-            label="IAM Enabled"
-            value={settings.authentication.iamEnabled ? "Yes" : "No"}
-          />
-          <ConfigRow
-            label="Shadow Mode"
-            value={settings.authentication.shadowMode ? "Yes" : "No"}
-          />
-          <ConfigRow label="Rollout Ring" value={settings.authentication.rolloutRing} />
+          <div className="grid grid-cols-2 gap-3 mt-2">
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={settings.authentication.shadowMode} onChange={(e) => {
+                setSettings({ ...settings, authentication: { ...settings.authentication, shadowMode: e.target.checked } });
+                void saveIamSettings({ shadowMode: e.target.checked });
+              }} />
+              Shadow Mode
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={settings.scim.enabled} onChange={(e) => {
+                setSettings({ ...settings, scim: { ...settings.scim, enabled: e.target.checked } });
+                void saveIamSettings({ enableScimSync: e.target.checked });
+              }} />
+              SCIM Sync
+            </label>
+          </div>
+          <div className="mt-2">
+            <label className="text-xs font-medium">Rollout Ring</label>
+            <select
+              className="block w-full mt-1 px-2 py-1 rounded text-xs bg-[var(--color-ah-bg-secondary)] border border-[var(--color-ah-border)]"
+              value={settings.authentication.rolloutRing}
+              onChange={(e) => {
+                setSettings({ ...settings, authentication: { ...settings.authentication, rolloutRing: e.target.value } });
+                void saveIamSettings({ rolloutRing: e.target.value });
+              }}
+            >
+              <option value="internal">Internal</option>
+              <option value="pilot">Pilot</option>
+              <option value="expand">Expand</option>
+              <option value="general">General</option>
+            </select>
+          </div>
           {settings.authentication.mode === "oidc" && (
             <>
               <ConfigRow label="OIDC Issuer" value={settings.authentication.oidcIssuer} />
               <ConfigRow label="JWKS URI" value={settings.authentication.jwksUri} />
             </>
           )}
+          <div className="mt-3">
+            <Button
+              variant="secondary"
+              onClick={() => window.location.href = "/admin/rbac"}
+            >
+              View RBAC Matrix
+            </Button>
+          </div>
         </SectionCard>
 
-        {/* 6. SCIM User Sync */}
+        {/* 7. LDAP / Active Directory */}
         <SectionCard
-          title="SCIM User Sync"
+          title="LDAP / Active Directory"
+          iconPath="M3 3h10v10H3zM13 7h3v6h-3"
+          status={settings.ldap?.configured ? (settings.ldap.enabled ? "connected" : "not_configured") : "not_configured"}
+        >
+          <p className="text-xs text-[var(--color-ah-text-muted)] mb-3">
+            Connect to LDAP or Active Directory for centralized user and group management.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <ConfigInput label="Host" value={settings.ldap?.host ?? ""} onChange={(v) => { setSettings({ ...settings, ldap: { ...settings.ldap!, configured: !!v, enabled: settings.ldap?.enabled ?? false, host: v } }); markDirty(); }} />
+            <ConfigInput label="Port" value={String(settings.ldap?.port ?? 389)} onChange={(v) => { setSettings({ ...settings, ldap: { ...settings.ldap!, configured: true, enabled: settings.ldap?.enabled ?? false, port: parseInt(v) || 389 } }); markDirty(); }} />
+            <ConfigInput label="Base DN" value={settings.ldap?.baseDn ?? ""} onChange={(v) => { setSettings({ ...settings, ldap: { ...settings.ldap!, configured: true, enabled: settings.ldap?.enabled ?? false, baseDn: v } }); markDirty(); }} />
+            <ConfigInput label="Bind DN" value={settings.ldap?.bindDn ?? ""} onChange={(v) => { setSettings({ ...settings, ldap: { ...settings.ldap!, configured: true, enabled: settings.ldap?.enabled ?? false, bindDn: v } }); markDirty(); }} />
+          </div>
+          <label className="flex items-center gap-2 text-xs mt-2">
+            <input type="checkbox" checked={settings.ldap?.useTls ?? true} onChange={(e) => { setSettings({ ...settings, ldap: { ...settings.ldap!, configured: true, enabled: settings.ldap?.enabled ?? false, useTls: e.target.checked } }); markDirty(); }} />
+            Use TLS
+          </label>
+          <label className="flex items-center gap-2 text-xs mt-1">
+            <input type="checkbox" checked={settings.ldap?.enabled ?? false} onChange={(e) => { setSettings({ ...settings, ldap: { ...settings.ldap!, configured: true, enabled: e.target.checked } }); markDirty(); }} />
+            Enable LDAP Authentication
+          </label>
+          <div className="flex gap-2 mt-3">
+            <Button variant="secondary" onClick={() => {
+              void saveLdapSettings(settings.ldap ?? {}).then(() => loadData());
+            }}>Save LDAP Config</Button>
+            <Button variant="secondary" onClick={async () => {
+              try {
+                const r = await testLdapConnection();
+                setTestResult({ service: "ldap", status: r.status as "ok" | "error", message: r.message });
+              } catch { setTestResult({ service: "ldap", status: "error", message: "LDAP test failed" }); }
+            }}>Test Connection</Button>
+          </div>
+        </SectionCard>
+
+        {/* 8. SCIM User Sync (editable) */}
+        <SectionCard
+          title="SCIM User Provisioning"
           iconPath="M5 3a2 2 0 100 4 2 2 0 000-4zM11 3a2 2 0 100 4 2 2 0 000-4zM3 13c0-1.7 1-3 2.5-3h5c1.5 0 2.5 1.3 2.5 3"
           status={settings.scim.enabled ? (settings.scim.configured ? "connected" : "not_configured") : "not_configured"}
         >
-          <ConfigRow
-            label="Enabled"
-            value={settings.scim.enabled ? "Yes" : "No"}
-          />
-          <ConfigRow
-            label="Configured"
-            value={settings.scim.configured ? "Yes" : "No"}
-          />
+          <ConfigRow label="Enabled" value={settings.scim.enabled ? "Yes" : "No"} />
+          <ConfigRow label="Token Configured" value={settings.scim.configured ? "Yes" : "No"} />
+          <div className="flex gap-2 mt-3">
+            <Button variant="secondary" onClick={async () => {
+              try {
+                const r = await generateScimToken();
+                setTestResult({ service: "scim_token", status: "ok", message: `Token: ${r.token}  — ${r.message}` });
+              } catch { setTestResult({ service: "scim_token", status: "error", message: "Token generation failed" }); }
+            }}>Generate SCIM Token</Button>
+          </div>
         </SectionCard>
       </div>
     </div>

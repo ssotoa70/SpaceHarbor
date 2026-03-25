@@ -4,6 +4,7 @@ import { resolveCorrelationId } from "./http/correlation.js";
 import { registerOpenApi } from "./http/openapi.js";
 import { createPersistenceAdapter } from "./persistence/factory.js";
 import type { PersistenceAdapter } from "./persistence/types.js";
+import { FileSettingsStore } from "./persistence/settings-store.js";
 import { createLeaseReapingRunner } from "./reaping/lease-reaping.js";
 import { createAuditRetentionRunner } from "./retention/audit-retention.js";
 import { registerAssetsRoute } from "./routes/assets.js";
@@ -362,8 +363,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     // DataEngine function catalogue + pipeline listing
     void registerDataEngineRoutes(app, functionRegistry, prefixes);
 
-    // Platform settings (admin configuration UI)
-    void registerPlatformSettingsRoutes(app, prefixes);
+    // Platform settings (admin configuration UI) — backed by file-based settings store
+    const settingsStore = new FileSettingsStore();
+    void registerPlatformSettingsRoutes(app, prefixes, settingsStore);
 
     // Phase 3.3: IAM metrics endpoint
     void registerIamMetricsRoute(app, () => authzLogger, prefixes);

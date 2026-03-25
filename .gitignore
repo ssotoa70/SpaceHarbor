@@ -8,6 +8,7 @@ services/web-ui/node_modules/
 .env
 dist/
 coverage/
+services/control-plane/data/
 
 # Stale tsc output — canonical source is services/control-plane/src/ (runtime: tsx)
 services/control-plane/src/**/*.js

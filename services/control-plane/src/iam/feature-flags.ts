@@ -69,13 +69,30 @@ export function validateIamInsecureMode(iamEnabled: boolean): void {
   }
 }
 
+// Runtime overrides set from the Settings UI. These merge on top of env defaults
+// so admins can toggle flags without restarting the process.
+let runtimeOverrides: Partial<IamFeatureFlags> = {};
+
 /**
- * Resolves IAM feature flags from environment variables.
- * Secure-by-default: IAM is enabled and shadow mode is off.
+ * Apply runtime overrides from the Settings UI. Called on startup (from
+ * settings store) and on PUT /platform/settings/iam.
+ */
+export function setIamRuntimeOverrides(overrides: Partial<IamFeatureFlags>): void {
+  runtimeOverrides = { ...overrides };
+}
+
+/** Returns the current runtime overrides (for serialisation to settings store). */
+export function getIamRuntimeOverrides(): Partial<IamFeatureFlags> {
+  return { ...runtimeOverrides };
+}
+
+/**
+ * Resolves IAM feature flags from environment variables, then merges runtime
+ * overrides on top. Secure-by-default: IAM is enabled and shadow mode is off.
  * Opt out with SPACEHARBOR_IAM_ENABLED=false + SPACEHARBOR_ALLOW_INSECURE_MODE=true.
  */
 export function resolveIamFlags(): IamFeatureFlags {
-  return {
+  const env: IamFeatureFlags = {
     iamEnabled: envBool("ENABLED", true),
     shadowMode: envBool("SHADOW_MODE", false),
     enforceReadScope: envBool("ENFORCE_READ_SCOPE", false),
@@ -87,6 +104,7 @@ export function resolveIamFlags(): IamFeatureFlags {
     rolloutRing: envString("ROLLOUT_RING", "internal") as RolloutRing,
     allowlistedTenants: envList("ALLOWLISTED_TENANTS"),
   };
+  return { ...env, ...runtimeOverrides };
 }
 
 /**

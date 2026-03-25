@@ -51,6 +51,7 @@ const ApiKeysPage = React.lazy(() =>
 const SettingsPage = React.lazy(() =>
   import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage }))
 );
+const RbacMatrixPage = React.lazy(() => import("./pages/RbacMatrixPage"));
 const AnalyticsDashboard = React.lazy(() =>
   import("./pages/AnalyticsDashboard").then((m) => ({ default: m.AnalyticsDashboard }))
 );
@@ -181,6 +182,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="admin/users" element={<Lazy><UsersRolesPage /></Lazy>} />
             <Route path="admin/audit" element={<Lazy><AuditTrailPage /></Lazy>} />
             <Route path="admin/settings" element={<Lazy><SettingsPage /></Lazy>} />
+            <Route path="admin/rbac" element={<Lazy><RbacMatrixPage /></Lazy>} />
 
             {/* ── Utility routes (not in nav) ── */}
             <Route path="api-keys" element={<Lazy><ApiKeysPage /></Lazy>} />

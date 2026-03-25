@@ -1400,10 +1400,25 @@ export interface PlatformSettings {
     s3Bucket: string | null;
     configured: boolean;
     endpoints: S3EndpointConfig[];
+    nfsConnectors: NfsConnectorConfig[];
+    smbConnectors: SmbConnectorConfig[];
   };
   scim: {
     configured: boolean;
     enabled: boolean;
+  };
+  ldap?: {
+    configured: boolean;
+    enabled: boolean;
+    host?: string;
+    port?: number;
+    baseDn?: string;
+    bindDn?: string;
+    useTls?: boolean;
+    userSearchFilter?: string;
+    groupSearchBase?: string;
+    groupSearchFilter?: string;
+    syncIntervalMinutes?: number;
   };
 }
 
@@ -1422,6 +1437,44 @@ export interface S3EndpointConfig {
   region: string;
   useSsl: boolean;
   pathStyle: boolean;
+}
+
+export interface NfsConnectorConfig {
+  id: string;
+  label: string;
+  exportPath: string;
+  mountPoint: string;
+  version: "3" | "4" | "4.1";
+  options: string;
+}
+
+export interface SmbConnectorConfig {
+  id: string;
+  label: string;
+  sharePath: string;
+  mountPoint: string;
+  domain: string;
+  username: string;
+  password?: string; // write-only
+}
+
+export interface IamSettings {
+  flags: {
+    iamEnabled: boolean;
+    shadowMode: boolean;
+    enforceReadScope: boolean;
+    enforceWriteScope: boolean;
+    enforceApprovalSod: boolean;
+    enableScimSync: boolean;
+    rolloutRing: string;
+  };
+  overrides: Record<string, unknown>;
+}
+
+export interface RbacMatrix {
+  roles: string[];
+  permissions: string[];
+  matrix: Record<string, string[]>;
 }
 
 export interface ConnectionTestResult {
@@ -1496,6 +1549,78 @@ export async function fetchSchemaStatus(): Promise<SchemaStatus> {
     throw new ApiRequestError(response.status, "Failed to fetch schema status");
   }
   return (await response.json()) as SchemaStatus;
+}
+
+/* ── IAM Settings ── */
+
+export async function fetchIamSettings(): Promise<IamSettings> {
+  const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/iam`, { headers: withAuth() });
+  if (!r.ok) throw new ApiRequestError(r.status, "Failed to fetch IAM settings");
+  return (await r.json()) as IamSettings;
+}
+
+export async function saveIamSettings(overrides: Record<string, unknown>): Promise<{ status: string; flags: IamSettings["flags"] }> {
+  const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/iam`, {
+    method: "PUT", headers: withAuth({ "content-type": "application/json" }), body: JSON.stringify(overrides),
+  });
+  if (!r.ok) throw new ApiRequestError(r.status, "Failed to save IAM settings");
+  return (await r.json()) as { status: string; flags: IamSettings["flags"] };
+}
+
+/* ── RBAC Matrix ── */
+
+export async function fetchRbacMatrix(): Promise<RbacMatrix> {
+  const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/rbac-matrix`, { headers: withAuth() });
+  if (!r.ok) throw new ApiRequestError(r.status, "Failed to fetch RBAC matrix");
+  return (await r.json()) as RbacMatrix;
+}
+
+/* ── LDAP Settings ── */
+
+export async function fetchLdapSettings(): Promise<Record<string, unknown>> {
+  const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/ldap`, { headers: withAuth() });
+  if (!r.ok) throw new ApiRequestError(r.status, "Failed to fetch LDAP settings");
+  return (await r.json()) as Record<string, unknown>;
+}
+
+export async function saveLdapSettings(config: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/ldap`, {
+    method: "PUT", headers: withAuth({ "content-type": "application/json" }), body: JSON.stringify(config),
+  });
+  if (!r.ok) throw new ApiRequestError(r.status, "Failed to save LDAP settings");
+  return (await r.json()) as Record<string, unknown>;
+}
+
+export async function testLdapConnection(): Promise<{ status: string; message: string }> {
+  const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/ldap/test`, {
+    method: "POST", headers: withAuth({ "content-type": "application/json" }),
+  });
+  if (!r.ok) throw new ApiRequestError(r.status, "LDAP test failed");
+  return (await r.json()) as { status: string; message: string };
+}
+
+/* ── SCIM Settings ── */
+
+export async function fetchScimSettings(): Promise<Record<string, unknown>> {
+  const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/scim`, { headers: withAuth() });
+  if (!r.ok) throw new ApiRequestError(r.status, "Failed to fetch SCIM settings");
+  return (await r.json()) as Record<string, unknown>;
+}
+
+export async function saveScimSettings(config: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/scim`, {
+    method: "PUT", headers: withAuth({ "content-type": "application/json" }), body: JSON.stringify(config),
+  });
+  if (!r.ok) throw new ApiRequestError(r.status, "Failed to save SCIM settings");
+  return (await r.json()) as Record<string, unknown>;
+}
+
+export async function generateScimToken(): Promise<{ token: string; message: string }> {
+  const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/scim/generate-token`, {
+    method: "POST", headers: withAuth({ "content-type": "application/json" }),
+  });
+  if (!r.ok) throw new ApiRequestError(r.status, "Failed to generate SCIM token");
+  return (await r.json()) as { token: string; message: string };
 }
 
 /* -- VAST Catalog Integration (C.10) -- */
