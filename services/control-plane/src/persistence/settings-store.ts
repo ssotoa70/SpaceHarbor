@@ -26,7 +26,9 @@ export class FileSettingsStore implements SettingsStore {
   private readonly filePath: string;
 
   constructor(filePath?: string) {
-    this.filePath = resolve(filePath ?? "./data/settings.json");
+    // Default to /tmp for container compatibility (read_only filesystem with tmpfs /tmp).
+    // For production persistence across restarts, mount a volume and pass a custom path.
+    this.filePath = resolve(filePath ?? process.env.SPACEHARBOR_SETTINGS_PATH ?? "/tmp/spaceharbor-settings.json");
     this.data = new Map();
     this.load();
   }

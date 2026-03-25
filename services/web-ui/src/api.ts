@@ -1593,7 +1593,7 @@ export async function saveLdapSettings(config: Record<string, unknown>): Promise
 
 export async function testLdapConnection(): Promise<{ status: string; message: string }> {
   const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/ldap/test`, {
-    method: "POST", headers: withAuth({ "content-type": "application/json" }),
+    method: "POST", headers: withAuth({ "content-type": "application/json" }), body: "{}",
   });
   if (!r.ok) throw new ApiRequestError(r.status, "LDAP test failed");
   return (await r.json()) as { status: string; message: string };
@@ -1617,7 +1617,7 @@ export async function saveScimSettings(config: Record<string, unknown>): Promise
 
 export async function generateScimToken(): Promise<{ token: string; message: string }> {
   const r = await fetch(`${API_BASE_URL}/api/v1/platform/settings/scim/generate-token`, {
-    method: "POST", headers: withAuth({ "content-type": "application/json" }),
+    method: "POST", headers: withAuth({ "content-type": "application/json" }), body: "{}",
   });
   if (!r.ok) throw new ApiRequestError(r.status, "Failed to generate SCIM token");
   return (await r.json()) as { token: string; message: string };

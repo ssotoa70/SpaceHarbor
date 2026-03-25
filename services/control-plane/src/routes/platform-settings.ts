@@ -117,10 +117,26 @@ export interface PlatformSettings {
     s3Endpoint: string | null;
     s3Bucket: string | null;
     configured: boolean;
+    endpoints?: unknown[];
+    nfsConnectors?: NfsConnectorStored[];
+    smbConnectors?: Omit<SmbConnectorStored, "password">[];
   };
   scim: {
     configured: boolean;
     enabled: boolean;
+  };
+  ldap?: {
+    configured: boolean;
+    enabled: boolean;
+    host?: string;
+    port?: number;
+    baseDn?: string;
+    bindDn?: string;
+    useTls?: boolean;
+    userSearchFilter?: string;
+    groupSearchBase?: string;
+    groupSearchFilter?: string;
+    syncIntervalMinutes?: number;
   };
 }
 
@@ -591,11 +607,30 @@ export async function registerPlatformSettingsRoutes(
             s3Bucket: s3Bucket,
             configured: !!(s3Endpoint && s3Bucket),
             endpoints: s3EndpointsForResponse,
-          } as any, // storage.endpoints lives outside the base PlatformSettings type
+            nfsConnectors: operationalStore.storage.nfsConnectors,
+            smbConnectors: operationalStore.storage.smbConnectors.map(
+              ({ password: _omit2, ...rest2 }) => rest2,
+            ),
+          } as any,
           scim: {
             configured: iamFlags.enableScimSync && !!process.env.SPACEHARBOR_SCIM_TOKEN,
             enabled: iamFlags.enableScimSync,
           },
+          ldap: operationalStore.ldap
+            ? {
+                configured: true,
+                enabled: operationalStore.ldap.enabled,
+                host: operationalStore.ldap.host,
+                port: operationalStore.ldap.port,
+                baseDn: operationalStore.ldap.baseDn,
+                bindDn: operationalStore.ldap.bindDn,
+                useTls: operationalStore.ldap.useTls,
+                userSearchFilter: operationalStore.ldap.userSearchFilter,
+                groupSearchBase: operationalStore.ldap.groupSearchBase,
+                groupSearchFilter: operationalStore.ldap.groupSearchFilter,
+                syncIntervalMinutes: operationalStore.ldap.syncIntervalMinutes,
+              }
+            : { configured: false, enabled: false },
         };
 
         return reply.send(settings);

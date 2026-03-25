@@ -7,6 +7,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 8080
       SPACEHARBOR_PERSISTENCE_BACKEND: ${SPACEHARBOR_PERSISTENCE_BACKEND:-local}
+      SPACEHARBOR_SETTINGS_PATH: /data/settings.json
       SPACEHARBOR_VAST_STRICT: ${SPACEHARBOR_VAST_STRICT:-false}
       SPACEHARBOR_API_KEY: ${SPACEHARBOR_API_KEY:-}
       # Per-service credentials: control-plane accepts ALL service keys (A2 remediation)
@@ -36,6 +37,8 @@ services:
       SPACEHARBOR_MAX_JOB_ATTEMPTS: ${SPACEHARBOR_MAX_JOB_ATTEMPTS:-3}
     ports:
       - "8080:8080"
+    volumes:
+      - settings-data:/data
     networks:
       - frontend
       - backend
@@ -226,6 +229,10 @@ services:
         limits:
           memory: 256M
           cpus: '0.5'
+
+volumes:
+  settings-data:
+    name: spaceharbor-settings
 
 networks:
   frontend:

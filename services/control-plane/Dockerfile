@@ -8,9 +8,9 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 
-# Create non-root user
+# Create non-root user and settings data directory
 RUN addgroup -S app && adduser -S app -G app \
-    && chown -R app:app /app
+    && mkdir -p /data && chown -R app:app /app /data
 
 USER app
 

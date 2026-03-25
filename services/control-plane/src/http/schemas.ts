@@ -98,6 +98,35 @@ export const platformSettingsResponseSchema = {
         configured: { type: "boolean" },
         // secretAccessKey is intentionally ABSENT from this response schema
         endpoints: { type: "array", items: s3EndpointConfigSchema },
+        nfsConnectors: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              label: { type: "string" },
+              exportPath: { type: "string" },
+              mountPoint: { type: "string" },
+              version: { type: "string" },
+              options: { type: "string" },
+            },
+          },
+        },
+        smbConnectors: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              label: { type: "string" },
+              sharePath: { type: "string" },
+              mountPoint: { type: "string" },
+              domain: { type: "string" },
+              username: { type: "string" },
+              // password is intentionally ABSENT (write-only)
+            },
+          },
+        },
       },
     },
     scim: {
@@ -106,6 +135,23 @@ export const platformSettingsResponseSchema = {
       properties: {
         configured: { type: "boolean" },
         enabled: { type: "boolean" },
+      },
+    },
+    ldap: {
+      type: "object",
+      properties: {
+        configured: { type: "boolean" },
+        enabled: { type: "boolean" },
+        host: { type: "string" },
+        port: { type: "number" },
+        baseDn: { type: "string" },
+        bindDn: { type: "string" },
+        useTls: { type: "boolean" },
+        userSearchFilter: { type: "string" },
+        groupSearchBase: { type: "string" },
+        groupSearchFilter: { type: "string" },
+        syncIntervalMinutes: { type: "number" },
+        // bindPassword intentionally ABSENT (write-only)
       },
     },
   },
