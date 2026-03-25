@@ -288,6 +288,57 @@ function EnvVarDisplay({ label, value }: { label: string; value?: string | null 
 }
 
 // ---------------------------------------------------------------------------
+// SCIM section — manages its own inline token display
+// ---------------------------------------------------------------------------
+
+function ScimSection({ settings }: { settings: PlatformSettings }) {
+  const [scimToken, setScimToken] = useState<string | null>(null);
+  const [scimError, setScimError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+
+  return (
+    <SectionCard
+      title="SCIM User Provisioning"
+      iconPath="M5 3a2 2 0 100 4 2 2 0 000-4zM11 3a2 2 0 100 4 2 2 0 000-4zM3 13c0-1.7 1-3 2.5-3h5c1.5 0 2.5 1.3 2.5 3"
+      status={settings.scim.enabled ? (settings.scim.configured ? "connected" : "not_configured") : "not_configured"}
+    >
+      <ConfigRow label="Enabled" value={settings.scim.enabled ? "Yes" : "No"} />
+      <ConfigRow label="Token Configured" value={settings.scim.configured ? "Yes" : "No"} />
+
+      {scimToken && (
+        <div className="mt-3 p-3 rounded bg-[var(--color-ah-success-bg,#0d3320)] border border-[var(--color-ah-success,#22c55e)]">
+          <p className="text-xs font-semibold text-[var(--color-ah-success,#22c55e)] mb-1">SCIM Token Generated</p>
+          <code className="block text-xs break-all bg-black/30 p-2 rounded select-all">{scimToken}</code>
+          <p className="text-xs text-[var(--color-ah-text-muted)] mt-1">Copy this token now. You will not be able to see it again.</p>
+        </div>
+      )}
+
+      {scimError && (
+        <div className="mt-3 p-2 rounded bg-red-900/30 border border-red-500 text-xs text-red-400">
+          {scimError}
+        </div>
+      )}
+
+      <div className="flex gap-2 mt-3">
+        <Button variant="secondary" disabled={generating} onClick={async () => {
+          setGenerating(true);
+          setScimToken(null);
+          setScimError(null);
+          try {
+            const r = await generateScimToken();
+            setScimToken(r.token);
+          } catch {
+            setScimError("Token generation failed");
+          } finally {
+            setGenerating(false);
+          }
+        }}>{generating ? "Generating..." : "Generate SCIM Token"}</Button>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -838,22 +889,7 @@ export function SettingsPage() {
         </SectionCard>
 
         {/* 8. SCIM User Sync (editable) */}
-        <SectionCard
-          title="SCIM User Provisioning"
-          iconPath="M5 3a2 2 0 100 4 2 2 0 000-4zM11 3a2 2 0 100 4 2 2 0 000-4zM3 13c0-1.7 1-3 2.5-3h5c1.5 0 2.5 1.3 2.5 3"
-          status={settings.scim.enabled ? (settings.scim.configured ? "connected" : "not_configured") : "not_configured"}
-        >
-          <ConfigRow label="Enabled" value={settings.scim.enabled ? "Yes" : "No"} />
-          <ConfigRow label="Token Configured" value={settings.scim.configured ? "Yes" : "No"} />
-          <div className="flex gap-2 mt-3">
-            <Button variant="secondary" onClick={async () => {
-              try {
-                const r = await generateScimToken();
-                setTestResult({ service: "scim_token", status: "ok", message: `Token: ${r.token}  — ${r.message}` });
-              } catch { setTestResult({ service: "scim_token", status: "error", message: "Token generation failed" }); }
-            }}>Generate SCIM Token</Button>
-          </div>
-        </SectionCard>
+        <ScimSection settings={settings} />
       </div>
     </div>
   );
