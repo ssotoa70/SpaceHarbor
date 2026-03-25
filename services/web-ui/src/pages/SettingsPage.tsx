@@ -296,11 +296,13 @@ function S3Section({
   onUpdate,
   onRemove,
   onAdd,
+  onSaveBeforeTest,
 }: {
   endpoints: S3EndpointConfig[];
   onUpdate: (id: string, updated: S3EndpointConfig) => void;
   onRemove: (id: string) => void;
   onAdd: () => void;
+  onSaveBeforeTest: () => Promise<void>;
 }) {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setS3TestResult] = useState<{ id: string; status: string; message: string } | null>(null);
@@ -309,6 +311,8 @@ function S3Section({
     setTestingId(epId);
     setS3TestResult(null);
     try {
+      // Save current config first so the backend has the latest endpoint data
+      await onSaveBeforeTest();
       const result = await testServiceConnection(`s3:${epId}`);
       setS3TestResult({ id: epId, status: result.status, message: result.message });
     } catch {
@@ -807,6 +811,7 @@ export function SettingsPage() {
           onUpdate={updateS3Endpoint}
           onRemove={removeS3Endpoint}
           onAdd={addS3Endpoint}
+          onSaveBeforeTest={handleSave}
         />
 
         {/* 5. Storage Connectors (NFS / SMB) */}
