@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Badge } from "../design-system/Badge";
 import { Button } from "../design-system/Button";
+import { generateId } from "../utils/id";
 import {
   fetchPlatformSettings,
   savePlatformSettings,
@@ -194,7 +195,7 @@ function ConfirmDialog({
 
 function newS3Endpoint(): S3EndpointConfig {
   return {
-    id: crypto.randomUUID(),
+    id: generateId(),
     label: "",
     endpoint: "",
     bucket: "",
@@ -726,7 +727,7 @@ export function SettingsPage() {
           ))}
           <Button variant="secondary" className="text-xs mb-3" onClick={() => {
             const arr = [...(settings.storage?.nfsConnectors ?? [])];
-            arr.push({ id: crypto.randomUUID(), label: "", exportPath: "", mountPoint: "", version: "4.1", options: "" });
+            arr.push({ id: generateId(), label: "", exportPath: "", mountPoint: "", version: "4.1", options: "" });
             setSettings({ ...settings, storage: { ...settings.storage, nfsConnectors: arr } }); markDirty();
           }}>+ Add NFS Export</Button>
 
@@ -740,7 +741,7 @@ export function SettingsPage() {
           ))}
           <Button variant="secondary" className="text-xs" onClick={() => {
             const arr = [...(settings.storage?.smbConnectors ?? [])];
-            arr.push({ id: crypto.randomUUID(), label: "", sharePath: "", mountPoint: "", domain: "", username: "" });
+            arr.push({ id: generateId(), label: "", sharePath: "", mountPoint: "", domain: "", username: "" });
             setSettings({ ...settings, storage: { ...settings.storage, smbConnectors: arr } }); markDirty();
           }}>+ Add SMB Share</Button>
         </SectionCard>

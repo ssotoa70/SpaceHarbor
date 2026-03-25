@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { generateUploadUrl, ingestAsset, type IngestResult } from "../api";
 import { Badge, Button } from "../design-system";
 import { MediaTypeIcon } from "./MediaTypeIcon";
+import { generateId } from "../utils/id";
 import { CloseIcon } from "./CloseIcon";
 import { useEventStream } from "../hooks/useEventStream";
 import { inferMediaType, getTypeBadge, formatFileSize } from "../utils/media-types";
@@ -148,7 +149,7 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
 
   // Upload a single file
   const uploadFile = useCallback(async (file: File) => {
-    const id = crypto.randomUUID();
+    const id = generateId();
     const entry: IngestEntry = {
       id,
       file,
