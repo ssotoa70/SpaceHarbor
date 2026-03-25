@@ -195,7 +195,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
           urlPath.endsWith("/device/code") ||
           urlPath.endsWith("/device/token") ||
           urlPath.endsWith("/openapi.json") ||
-          urlPath.startsWith("/api")
+          urlPath.startsWith("/api/docs")
         ) {
           return;
         }

@@ -328,7 +328,7 @@ const handleSubmit = async (e: FormEvent) => {
 
 ## Troubleshooting
 
-- **API 404**: Check control-plane is running on `localhost:3000` and route exists
+- **API 404**: Check control-plane is running on `localhost:8080` and route exists
 - **Types mismatch**: API response doesn't match `AssetRow` interface — check control-plane sends correct JSON
 - **Build fails**: `rm -rf node_modules && npm ci` then `npm run build`
 - **Tests fail**: Mock API in test, or check that control-plane is running for integration tests

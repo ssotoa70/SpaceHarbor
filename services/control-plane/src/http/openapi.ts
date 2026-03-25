@@ -75,9 +75,9 @@ export function registerOpenApi(app: FastifyInstance): void {
     }
   });
 
-  // Swagger UI — available at /api in all environments
+  // Swagger UI — available at /api/docs in all environments
   app.register(swaggerUi, {
-    routePrefix: "/api",
+    routePrefix: "/api/docs",
     staticCSP: true,
     uiConfig: {
       docExpansion: "list",
