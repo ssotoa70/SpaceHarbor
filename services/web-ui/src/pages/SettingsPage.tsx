@@ -434,6 +434,8 @@ export function SettingsPage() {
   const [brokerTopic, setBrokerTopic] = useState("");
   const [deUrl, setDeUrl] = useState("");
   const [deTenant, setDeTenant] = useState("");
+  const [deUsername, setDeUsername] = useState("");
+  const [dePassword, setDePassword] = useState("");
   const [s3Endpoints, setS3Endpoints] = useState<S3EndpointConfig[]>([]);
 
   // Connection test state
@@ -464,6 +466,8 @@ export function SettingsPage() {
       setBrokerTopic(s.vastEventBroker.topic ?? "");
       setDeUrl(s.vastDataEngine.url ?? "");
       setDeTenant(s.vastDataEngine.tenant ?? "");
+      setDeUsername(s.vastDataEngine.username ?? "");
+      setDePassword(s.vastDataEngine.hasPassword ? "--------" : "");
       setS3Endpoints(s.storage.endpoints ?? (s.storage.s3Endpoint ? [{
         id: "default",
         label: "Default",
@@ -501,7 +505,14 @@ export function SettingsPage() {
           accessKeyId: dbAccessKeyId || null,
         },
         vastEventBroker: { ...settings.vastEventBroker, brokerUrl: brokerUrl || null, topic: brokerTopic || null },
-        vastDataEngine: { ...settings.vastDataEngine, url: deUrl || null, tenant: deTenant || null },
+        vastDataEngine: {
+          ...settings.vastDataEngine,
+          url: deUrl || null,
+          tenant: deTenant || null,
+          username: deUsername || null,
+          // Only send password if user actually changed it (not the masked placeholder)
+          ...(dePassword && dePassword !== "--------" ? { password: dePassword } : {}),
+        },
         storage: {
           ...settings.storage,
           endpoints: s3Endpoints,
@@ -518,7 +529,7 @@ export function SettingsPage() {
     } finally {
       setSaving(false);
     }
-  }, [settings, dbEndpoint, dbVmsVip, dbCnodeVips, dbAccessKeyId, brokerUrl, brokerTopic, deUrl, deTenant, s3Endpoints]);
+  }, [settings, dbEndpoint, dbVmsVip, dbCnodeVips, dbAccessKeyId, brokerUrl, brokerTopic, deUrl, deTenant, deUsername, dePassword, s3Endpoints]);
 
   const handleTestConnection = useCallback(async (service: string) => {
     setTestingService(service);
@@ -791,8 +802,23 @@ export function SettingsPage() {
               placeholder="default"
             />
           </div>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <ConfigInput
+              label="VMS Username"
+              value={deUsername}
+              onChange={(v) => { setDeUsername(v); markDirty(); }}
+              placeholder="admin"
+            />
+            <ConfigInput
+              label="VMS Password"
+              value={dePassword}
+              onChange={(v) => { setDePassword(v); markDirty(); }}
+              placeholder="Enter VMS password"
+              type="password"
+            />
+          </div>
           <p className="text-[10px] text-[var(--color-ah-text-subtle)] mt-1">
-            DataEngine uses S3 access keys for authentication. Configure triggers and functions via the DataEngine web UI or CLI.
+            VMS credentials are used to authenticate with the VAST DataEngine management API. Manage functions, triggers, and pipelines directly from SpaceHarbor.
           </p>
           <div className="flex items-center gap-2 mt-3 pt-3 border-t border-[var(--color-ah-border-muted)]">
             <Button

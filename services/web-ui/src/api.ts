@@ -1386,6 +1386,10 @@ export interface PlatformSettings {
     status: "connected" | "disconnected" | "not_configured";
     /** Operational: VAST tenant name used for DataEngine function calls */
     tenant: string | null;
+    /** VMS username for DataEngine management API */
+    username: string | null;
+    /** True if VMS password is stored. Password value is never returned. */
+    hasPassword: boolean;
   };
   authentication: {
     mode: "local" | "oidc";

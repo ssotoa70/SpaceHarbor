@@ -65,6 +65,8 @@ import { hashPassword } from "./iam/local-auth.js";
 import { csrfHook } from "./iam/csrf.js";
 import { FunctionRegistry, ExrInspectorFunction, OiioProxyFunction } from "./data-engine/index.js";
 import { registerDataEngineRoutes } from "./routes/dataengine.js";
+import { registerDataEngineProxyRoutes } from "./routes/dataengine-proxy.js";
+import { getVastDataEngineUrl, getVastDataEngineCredentials } from "./routes/platform-settings.js";
 
 // Augment Fastify request with identity
 declare module "fastify" {
@@ -363,6 +365,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // DataEngine function catalogue + pipeline listing
     void registerDataEngineRoutes(app, functionRegistry, prefixes);
+
+    // DataEngine proxy — forward CRUD requests to VAST DataEngine API
+    void registerDataEngineProxyRoutes(app, prefixes, {
+      getVastUrl: getVastDataEngineUrl,
+      getCredentials: getVastDataEngineCredentials,
+    });
 
     // Platform settings (admin configuration UI) — backed by file-based settings store
     const settingsStore = new FileSettingsStore();

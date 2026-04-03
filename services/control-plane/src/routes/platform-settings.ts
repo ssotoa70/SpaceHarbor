@@ -104,6 +104,9 @@ export interface PlatformSettings {
     url: string | null;
     status: "connected" | "disconnected" | "not_configured";
     tenant: string | null;
+    username: string | null;
+    /** True if VMS password is stored. Password value is never returned. */
+    hasPassword: boolean;
   };
   authentication: {
     mode: "local" | "oidc";
@@ -207,6 +210,8 @@ interface OperationalSettings {
   };
   vastDataEngine: {
     tenant: string | null;
+    username: string | null;
+    password: string | null; // write-only; never returned to clients
   };
   storage: {
     endpoints: S3EndpointStored[];
@@ -219,7 +224,7 @@ interface OperationalSettings {
 
 const defaultOperationalSettings: OperationalSettings = {
   vastDatabase: { vmsVip: null, cnodeVips: null, accessKeyId: null },
-  vastDataEngine: { tenant: null },
+  vastDataEngine: { tenant: null, username: null, password: null },
   storage: { endpoints: [], nfsConnectors: [], smbConnectors: [] },
   ldap: null,
   scim: null,
@@ -252,6 +257,25 @@ function loadOperationalStore(store: SettingsStore): void {
       scim: saved.scim ?? null,
     };
   }
+}
+
+/**
+ * Get the configured VAST DataEngine URL (from env).
+ * Used by the DataEngine proxy routes to determine the upstream target.
+ */
+export function getVastDataEngineUrl(): string | null {
+  return process.env.VAST_DATA_ENGINE_URL ?? null;
+}
+
+/**
+ * Get VMS credentials for the DataEngine proxy.
+ * Returns null if credentials are not configured.
+ */
+export function getVastDataEngineCredentials(): { username: string; password: string } | null {
+  const username = operationalStore.vastDataEngine.username;
+  const password = operationalStore.vastDataEngine.password;
+  if (!username || !password) return null;
+  return { username, password };
 }
 
 export interface ConnectionTestResult {
@@ -413,6 +437,8 @@ export async function registerPlatformSettingsRoutes(
             url: maskEndpoint(dataEngineUrl),
             status: deConfigured ? "connected" : "not_configured",
             tenant: operationalStore.vastDataEngine.tenant,
+            username: operationalStore.vastDataEngine.username,
+            hasPassword: !!operationalStore.vastDataEngine.password,
           },
           authentication: {
             mode: authMode,
@@ -498,6 +524,13 @@ export async function registerPlatformSettingsRoutes(
         if (deBody) {
           if (typeof deBody["tenant"] === "string" || deBody["tenant"] === null) {
             operationalStore.vastDataEngine.tenant = (deBody["tenant"] as string | null) || null;
+          }
+          if (typeof deBody["username"] === "string" || deBody["username"] === null) {
+            operationalStore.vastDataEngine.username = (deBody["username"] as string | null) || null;
+          }
+          // Only overwrite password if a non-empty value is provided (write-only field)
+          if (typeof deBody["password"] === "string" && deBody["password"] !== "") {
+            operationalStore.vastDataEngine.password = deBody["password"];
           }
         }
 
@@ -593,6 +626,8 @@ export async function registerPlatformSettingsRoutes(
             url: maskEndpoint(dataEngineUrl),
             status: dataEngineUrl ? "connected" : "not_configured",
             tenant: operationalStore.vastDataEngine.tenant,
+            username: operationalStore.vastDataEngine.username,
+            hasPassword: !!operationalStore.vastDataEngine.password,
           },
           authentication: {
             mode: jwksUri ? "oidc" : "local",
@@ -707,12 +742,31 @@ export async function registerPlatformSettingsRoutes(
 
         if (service === "data_engine") {
           const deUrl = process.env.VAST_DATA_ENGINE_URL;
+          if (!deUrl) {
+            return reply.send({
+              service,
+              status: "error",
+              message: "VAST_DATA_ENGINE_URL is not configured",
+            } satisfies ConnectionTestResult);
+          }
+
+          const creds = getVastDataEngineCredentials();
+          if (!creds) {
+            return reply.send({
+              service,
+              status: "error",
+              message: "VMS username and password are not configured. Set them in the DataEngine settings section.",
+            } satisfies ConnectionTestResult);
+          }
+
+          // Actually test VMS authentication
+          const { VmsTokenManager } = await import("../vast/vms-token-manager.js");
+          const tokenManager = new VmsTokenManager(deUrl, creds);
+          const result = await tokenManager.testConnection();
           return reply.send({
             service,
-            status: deUrl ? "ok" : "error",
-            message: deUrl
-              ? "DataEngine URL is configured"
-              : "VAST_DATA_ENGINE_URL is not configured",
+            status: result.ok ? "ok" : "error",
+            message: result.message,
           } satisfies ConnectionTestResult);
         }
 

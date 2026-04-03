@@ -1,26 +1,43 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { DataEnginePage } from "./DataEnginePage";
 
+// Mock PermissionGate to always render children
 vi.mock("../components/PermissionGate", () => ({
   PermissionGate: ({
     children,
-    fallback,
     permission,
   }: {
     children: React.ReactNode;
     fallback?: React.ReactNode;
     permission: string;
-  }) => {
-    // Expose permission prop for testing; render children by default
-    return (
-      <div data-testid="permission-gate" data-permission={permission}>
-        {children}
-      </div>
-    );
-  },
+  }) => (
+    <div data-testid="permission-gate" data-permission={permission}>
+      {children}
+    </div>
+  ),
   useHasPermission: () => true,
+}));
+
+// Mock fetchPlatformSettings to simulate connection states
+const mockFetchSettings = vi.fn();
+vi.mock("../api", () => ({
+  fetchPlatformSettings: (...args: unknown[]) => mockFetchSettings(...args),
+}));
+
+// Mock lazy-loaded tab components
+vi.mock("./dataengine/DashboardTab", () => ({
+  DashboardTab: () => <div data-testid="dashboard-tab">Dashboard Content</div>,
+}));
+vi.mock("./dataengine/FunctionsTab", () => ({
+  FunctionsTab: () => <div data-testid="functions-tab">Functions Content</div>,
+}));
+vi.mock("./dataengine/TriggersTab", () => ({
+  TriggersTab: () => <div data-testid="triggers-tab">Triggers Content</div>,
+}));
+vi.mock("./dataengine/PipelinesTab", () => ({
+  PipelinesTab: () => <div data-testid="pipelines-tab">Pipelines Content</div>,
 }));
 
 describe("DataEnginePage", () => {
@@ -28,70 +45,101 @@ describe("DataEnginePage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders Function Library heading", () => {
-    render(<DataEnginePage />);
-    expect(screen.getByText("Function Library")).toBeInTheDocument();
-  });
-
-  it("renders function library with function cards", () => {
-    render(<DataEnginePage />);
-    expect(screen.getByText("exr-to-proxy")).toBeInTheDocument();
-    expect(screen.getByText("exr-thumbnail")).toBeInTheDocument();
-    expect(screen.getByText("ffmpeg-transcode")).toBeInTheDocument();
-    expect(screen.getByText("mtlx-parse")).toBeInTheDocument();
-    expect(screen.getByText("otio-conform")).toBeInTheDocument();
-  });
-
-  it("renders Pipeline View with pipeline name", () => {
-    render(<DataEnginePage />);
-    expect(screen.getByText("EXR Ingest Pipeline")).toBeInTheDocument();
-  });
-
-  it("renders category sections", () => {
-    render(<DataEnginePage />);
-    expect(screen.getByText("VFX PROCESSING")).toBeInTheDocument();
-    expect(screen.getByText("COLOR & GRADE")).toBeInTheDocument();
-    expect(screen.getByText("EDITORIAL")).toBeInTheDocument();
-    expect(screen.getByText("METADATA & PROVENANCE")).toBeInTheDocument();
-    expect(screen.getByText("DELIVERY & NOTIFICATION")).toBeInTheDocument();
-  });
-
-  it("renders pipeline steps with status badges", () => {
-    render(<DataEnginePage />);
-    expect(screen.getByText("Frame Sequence Validator")).toBeInTheDocument();
-    expect(screen.getByText("EXR Metadata Extract")).toBeInTheDocument();
-    expect(screen.getByText("Generate EXR Proxy")).toBeInTheDocument();
-    expect(screen.getByText("AOV Splitter")).toBeInTheDocument();
-    // Status badges
-    expect(screen.getAllByText("done").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("running")).toBeInTheDocument();
-    expect(screen.getAllByText("queued").length).toBeGreaterThanOrEqual(3);
-  });
-
-  it("wraps content with PermissionGate using admin:system_config", () => {
+  it("wraps content with PermissionGate using admin:system_config", async () => {
+    mockFetchSettings.mockResolvedValue({
+      vastDataEngine: { configured: true, hasPassword: true },
+    });
     render(<DataEnginePage />);
     const gate = screen.getByTestId("permission-gate");
     expect(gate).toHaveAttribute("data-permission", "admin:system_config");
   });
 
-  it("highlights selected function card", () => {
+  it("shows ConnectionBanner when VAST DataEngine is not configured", async () => {
+    mockFetchSettings.mockResolvedValue({
+      vastDataEngine: { configured: false, hasPassword: false },
+    });
     render(<DataEnginePage />);
-    const card = screen.getByText("exr-to-proxy").closest("[role='listitem']")!;
-    fireEvent.click(card);
-    expect(card.className).toContain("ring-1");
+    await waitFor(() => {
+      expect(screen.getByText("VAST DataEngine Not Configured")).toBeInTheDocument();
+    });
   });
 
-  it("adds function to pipeline via + button", () => {
+  it("shows ConnectionBanner when credentials are missing", async () => {
+    mockFetchSettings.mockResolvedValue({
+      vastDataEngine: { configured: true, hasPassword: false },
+    });
     render(<DataEnginePage />);
-    // Before adding, pipeline has 6 steps
-    const addButtons = screen.getAllByLabelText(/Add .+ to pipeline/);
-    fireEvent.click(addButtons[0]); // add exr-to-proxy
-    // Now the pipeline step list should contain a 7th step with the function name
-    const pipelineSteps = screen.getByRole("list", { name: "Pipeline steps" });
-    expect(pipelineSteps).toBeInTheDocument();
-    // The function name should appear in the pipeline
-    const stepsWithName = screen.getAllByText("exr-to-proxy");
-    // At least 2: one in library, one in pipeline
-    expect(stepsWithName.length).toBeGreaterThanOrEqual(2);
+    await waitFor(() => {
+      expect(screen.getByText("VAST DataEngine Not Configured")).toBeInTheDocument();
+    });
+  });
+
+  it("shows tab bar when connected", async () => {
+    mockFetchSettings.mockResolvedValue({
+      vastDataEngine: { configured: true, hasPassword: true },
+    });
+    render(<DataEnginePage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Dashboard" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Functions" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Triggers" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Pipelines" })).toBeInTheDocument();
+    });
+  });
+
+  it("shows Dashboard tab by default", async () => {
+    mockFetchSettings.mockResolvedValue({
+      vastDataEngine: { configured: true, hasPassword: true },
+    });
+    render(<DataEnginePage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("dashboard-tab")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("tab", { name: "Dashboard" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("switches to Functions tab on click", async () => {
+    mockFetchSettings.mockResolvedValue({
+      vastDataEngine: { configured: true, hasPassword: true },
+    });
+    render(<DataEnginePage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Functions" })).toBeInTheDocument();
+    });
+    screen.getByRole("tab", { name: "Functions" }).click();
+    await waitFor(() => {
+      expect(screen.getByTestId("functions-tab")).toBeInTheDocument();
+    });
+  });
+
+  it("switches to Triggers tab on click", async () => {
+    mockFetchSettings.mockResolvedValue({
+      vastDataEngine: { configured: true, hasPassword: true },
+    });
+    render(<DataEnginePage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Triggers" })).toBeInTheDocument();
+    });
+    screen.getByRole("tab", { name: "Triggers" }).click();
+    await waitFor(() => {
+      expect(screen.getByTestId("triggers-tab")).toBeInTheDocument();
+    });
+  });
+
+  it("switches to Pipelines tab on click", async () => {
+    mockFetchSettings.mockResolvedValue({
+      vastDataEngine: { configured: true, hasPassword: true },
+    });
+    render(<DataEnginePage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Pipelines" })).toBeInTheDocument();
+    });
+    screen.getByRole("tab", { name: "Pipelines" }).click();
+    await waitFor(() => {
+      expect(screen.getByTestId("pipelines-tab")).toBeInTheDocument();
+    });
   });
 });
