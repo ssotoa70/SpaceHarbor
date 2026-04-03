@@ -1,6 +1,9 @@
+import { useNavigate } from "react-router-dom";
 import { Card, Button } from "../../design-system";
 
 export function ConnectionBanner() {
+  const navigate = useNavigate();
+
   return (
     <Card className="px-5 py-6 text-center max-w-lg mx-auto mt-12">
       <div className="text-[var(--color-ah-warning)] text-2xl mb-2">&#9888;</div>
@@ -10,10 +13,7 @@ export function ConnectionBanner() {
       </p>
       <Button
         variant="secondary"
-        onClick={() => {
-          window.location.hash = "";
-          window.location.pathname = "/admin/settings";
-        }}
+        onClick={() => navigate("/admin/settings")}
       >
         Go to Settings
       </Button>
