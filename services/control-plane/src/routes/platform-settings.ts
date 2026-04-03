@@ -209,6 +209,7 @@ interface OperationalSettings {
     accessKeyId: string | null;
   };
   vastDataEngine: {
+    url: string | null;
     tenant: string | null;
     username: string | null;
     password: string | null; // write-only; never returned to clients
@@ -224,7 +225,7 @@ interface OperationalSettings {
 
 const defaultOperationalSettings: OperationalSettings = {
   vastDatabase: { vmsVip: null, cnodeVips: null, accessKeyId: null },
-  vastDataEngine: { tenant: null, username: null, password: null },
+  vastDataEngine: { url: null, tenant: null, username: null, password: null },
   storage: { endpoints: [], nfsConnectors: [], smbConnectors: [] },
   ldap: null,
   scim: null,
@@ -260,11 +261,11 @@ function loadOperationalStore(store: SettingsStore): void {
 }
 
 /**
- * Get the configured VAST DataEngine URL (from env).
- * Used by the DataEngine proxy routes to determine the upstream target.
+ * Get the configured VAST DataEngine URL.
+ * Operational store (set via Settings UI) takes precedence over env var.
  */
 export function getVastDataEngineUrl(): string | null {
-  return process.env.VAST_DATA_ENGINE_URL ?? null;
+  return operationalStore.vastDataEngine.url || process.env.VAST_DATA_ENGINE_URL || null;
 }
 
 /**
@@ -394,7 +395,7 @@ export async function registerPlatformSettingsRoutes(
         const brokerConfigured = !!brokerUrl;
 
         // VAST DataEngine
-        const dataEngineUrl = process.env.VAST_DATA_ENGINE_URL ?? null;
+        const dataEngineUrl = getVastDataEngineUrl();
         const deConfigured = !!dataEngineUrl;
 
         // S3 / Object Storage
@@ -522,6 +523,9 @@ export async function registerPlatformSettingsRoutes(
         // Persist VAST DataEngine operational fields
         const deBody = body["vastDataEngine"] as Record<string, unknown> | undefined;
         if (deBody) {
+          if (typeof deBody["url"] === "string" || deBody["url"] === null) {
+            operationalStore.vastDataEngine.url = (deBody["url"] as string | null) || null;
+          }
           if (typeof deBody["tenant"] === "string" || deBody["tenant"] === null) {
             operationalStore.vastDataEngine.tenant = (deBody["tenant"] as string | null) || null;
           }
@@ -594,7 +598,7 @@ export async function registerPlatformSettingsRoutes(
         const dbUrl = process.env.VAST_DATABASE_URL;
         const brokerUrl = process.env.VAST_EVENT_BROKER_URL ?? null;
         const brokerTopic = process.env.VAST_EVENT_BROKER_TOPIC ?? "spaceharbor.dataengine.completed";
-        const dataEngineUrl = process.env.VAST_DATA_ENGINE_URL ?? null;
+        const dataEngineUrl = getVastDataEngineUrl();
         const s3Endpoint = process.env.SPACEHARBOR_S3_ENDPOINT ?? process.env.AWS_S3_ENDPOINT ?? null;
         const s3Bucket = process.env.SPACEHARBOR_S3_BUCKET ?? process.env.AWS_S3_BUCKET ?? null;
         const oidcIssuer = process.env.SPACEHARBOR_OIDC_ISSUER ?? null;
@@ -741,7 +745,7 @@ export async function registerPlatformSettingsRoutes(
         }
 
         if (service === "data_engine") {
-          const deUrl = process.env.VAST_DATA_ENGINE_URL;
+          const deUrl = getVastDataEngineUrl();
           if (!deUrl) {
             return reply.send({
               service,
