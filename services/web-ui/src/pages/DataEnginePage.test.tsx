@@ -39,6 +39,9 @@ vi.mock("./dataengine/TriggersTab", () => ({
 vi.mock("./dataengine/PipelinesTab", () => ({
   PipelinesTab: () => <div data-testid="pipelines-tab">Pipelines Content</div>,
 }));
+vi.mock("./dataengine/TelemetryTab", () => ({
+  TelemetryTab: () => <div data-testid="telemetry-tab">Telemetry Content</div>,
+}));
 
 describe("DataEnginePage", () => {
   beforeEach(() => {
@@ -84,6 +87,7 @@ describe("DataEnginePage", () => {
       expect(screen.getByRole("tab", { name: "Functions" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Triggers" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Pipelines" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Telemetry" })).toBeInTheDocument();
     });
   });
 
@@ -140,6 +144,20 @@ describe("DataEnginePage", () => {
     screen.getByRole("tab", { name: "Pipelines" }).click();
     await waitFor(() => {
       expect(screen.getByTestId("pipelines-tab")).toBeInTheDocument();
+    });
+  });
+
+  it("switches to Telemetry tab on click", async () => {
+    mockFetchSettings.mockResolvedValue({
+      vastDataEngine: { configured: true, hasPassword: true },
+    });
+    render(<DataEnginePage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Telemetry" })).toBeInTheDocument();
+    });
+    screen.getByRole("tab", { name: "Telemetry" }).click();
+    await waitFor(() => {
+      expect(screen.getByTestId("telemetry-tab")).toBeInTheDocument();
     });
   });
 });

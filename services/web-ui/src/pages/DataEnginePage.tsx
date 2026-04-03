@@ -19,16 +19,20 @@ const TriggersTab = lazy(() =>
 const PipelinesTab = lazy(() =>
   import("./dataengine/PipelinesTab").then((m) => ({ default: m.PipelinesTab })),
 );
+const TelemetryTab = lazy(() =>
+  import("./dataengine/TelemetryTab").then((m) => ({ default: m.TelemetryTab })),
+);
 
 /* ── Tab definitions ── */
 
-type DataEngineTab = "dashboard" | "functions" | "triggers" | "pipelines";
+type DataEngineTab = "dashboard" | "functions" | "triggers" | "pipelines" | "telemetry";
 
 const TABS: { key: DataEngineTab; label: string }[] = [
   { key: "dashboard", label: "Dashboard" },
   { key: "functions", label: "Functions" },
   { key: "triggers", label: "Triggers" },
   { key: "pipelines", label: "Pipelines" },
+  { key: "telemetry", label: "Telemetry" },
 ];
 
 /* ── Loading skeleton for tab panels ── */
@@ -116,6 +120,7 @@ function DataEngineContent() {
           {tab === "functions" && <FunctionsTab />}
           {tab === "triggers" && <TriggersTab />}
           {tab === "pipelines" && <PipelinesTab />}
+          {tab === "telemetry" && <TelemetryTab />}
         </Suspense>
       </div>
     </section>
