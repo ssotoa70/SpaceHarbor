@@ -1,7 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { DataEnginePage } from "./DataEnginePage";
+
+function renderWithRouter(ui: React.ReactElement) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 // Mock PermissionGate to always render children
 vi.mock("../components/PermissionGate", () => ({
@@ -52,7 +57,7 @@ describe("DataEnginePage", () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: true, hasPassword: true },
     });
-    render(<DataEnginePage />);
+    renderWithRouter(<DataEnginePage />);
     const gate = screen.getByTestId("permission-gate");
     expect(gate).toHaveAttribute("data-permission", "admin:system_config");
   });
@@ -61,7 +66,7 @@ describe("DataEnginePage", () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: false, hasPassword: false },
     });
-    render(<DataEnginePage />);
+    renderWithRouter(<DataEnginePage />);
     await waitFor(() => {
       expect(screen.getByText("VAST DataEngine Not Configured")).toBeInTheDocument();
     });
@@ -71,7 +76,7 @@ describe("DataEnginePage", () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: true, hasPassword: false },
     });
-    render(<DataEnginePage />);
+    renderWithRouter(<DataEnginePage />);
     await waitFor(() => {
       expect(screen.getByText("VAST DataEngine Not Configured")).toBeInTheDocument();
     });
@@ -81,7 +86,7 @@ describe("DataEnginePage", () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: true, hasPassword: true },
     });
-    render(<DataEnginePage />);
+    renderWithRouter(<DataEnginePage />);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "Dashboard" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Functions" })).toBeInTheDocument();
@@ -95,7 +100,7 @@ describe("DataEnginePage", () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: true, hasPassword: true },
     });
-    render(<DataEnginePage />);
+    renderWithRouter(<DataEnginePage />);
     await waitFor(() => {
       expect(screen.getByTestId("dashboard-tab")).toBeInTheDocument();
     });
@@ -109,7 +114,7 @@ describe("DataEnginePage", () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: true, hasPassword: true },
     });
-    render(<DataEnginePage />);
+    renderWithRouter(<DataEnginePage />);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "Functions" })).toBeInTheDocument();
     });
@@ -123,7 +128,7 @@ describe("DataEnginePage", () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: true, hasPassword: true },
     });
-    render(<DataEnginePage />);
+    renderWithRouter(<DataEnginePage />);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "Triggers" })).toBeInTheDocument();
     });
@@ -137,7 +142,7 @@ describe("DataEnginePage", () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: true, hasPassword: true },
     });
-    render(<DataEnginePage />);
+    renderWithRouter(<DataEnginePage />);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "Pipelines" })).toBeInTheDocument();
     });
@@ -151,7 +156,7 @@ describe("DataEnginePage", () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: true, hasPassword: true },
     });
-    render(<DataEnginePage />);
+    renderWithRouter(<DataEnginePage />);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "Telemetry" })).toBeInTheDocument();
     });

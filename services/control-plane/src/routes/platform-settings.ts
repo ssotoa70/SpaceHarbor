@@ -204,9 +204,15 @@ interface ScimConfigStored {
 
 interface OperationalSettings {
   vastDatabase: {
+    url: string | null;
     vmsVip: string | null;
     cnodeVips: string | null;
     accessKeyId: string | null;
+    secretKey: string | null; // write-only; never returned to clients
+  };
+  vastEventBroker: {
+    url: string | null;
+    topic: string | null;
   };
   vastDataEngine: {
     url: string | null;
@@ -224,7 +230,8 @@ interface OperationalSettings {
 }
 
 const defaultOperationalSettings: OperationalSettings = {
-  vastDatabase: { vmsVip: null, cnodeVips: null, accessKeyId: null },
+  vastDatabase: { url: null, vmsVip: null, cnodeVips: null, accessKeyId: null, secretKey: null },
+  vastEventBroker: { url: null, topic: null },
   vastDataEngine: { url: null, tenant: null, username: null, password: null },
   storage: { endpoints: [], nfsConnectors: [], smbConnectors: [] },
   ldap: null,
@@ -247,8 +254,9 @@ function loadOperationalStore(store: SettingsStore): void {
   const saved = store.get("platform.operational") as unknown as OperationalSettings | null;
   if (saved) {
     operationalStore = {
-      vastDatabase: saved.vastDatabase ?? defaultOperationalSettings.vastDatabase,
-      vastDataEngine: saved.vastDataEngine ?? defaultOperationalSettings.vastDataEngine,
+      vastDatabase: { ...defaultOperationalSettings.vastDatabase, ...saved.vastDatabase },
+      vastEventBroker: { ...defaultOperationalSettings.vastEventBroker, ...saved.vastEventBroker },
+      vastDataEngine: { ...defaultOperationalSettings.vastDataEngine, ...saved.vastDataEngine },
       storage: {
         endpoints: saved.storage?.endpoints ?? [],
         nfsConnectors: saved.storage?.nfsConnectors ?? [],
@@ -258,6 +266,30 @@ function loadOperationalStore(store: SettingsStore): void {
       scim: saved.scim ?? null,
     };
   }
+}
+
+/**
+ * Get the configured VAST Database URL.
+ * Operational store (set via Settings UI) takes precedence over env var.
+ */
+export function getVastDatabaseUrl(): string | null {
+  return operationalStore.vastDatabase.url || process.env.VAST_DATABASE_URL || null;
+}
+
+/**
+ * Get the configured VAST Event Broker URL.
+ * Operational store (set via Settings UI) takes precedence over env var.
+ */
+export function getVastEventBrokerUrl(): string | null {
+  return operationalStore.vastEventBroker.url || process.env.VAST_EVENT_BROKER_URL || null;
+}
+
+/**
+ * Get the configured VAST Event Broker topic.
+ * Operational store (set via Settings UI) takes precedence over env var.
+ */
+export function getVastEventBrokerTopic(): string {
+  return operationalStore.vastEventBroker.topic || process.env.VAST_EVENT_BROKER_TOPIC || "spaceharbor.dataengine.completed";
 }
 
 /**
@@ -309,16 +341,16 @@ function maskEndpoint(value: string | undefined | null): string | null {
   return value.slice(0, 20) + "***";
 }
 
-/** Build a TrinoClient from env vars, or null if not configured. */
+/** Build a TrinoClient from operational store / env vars, or null if not configured. */
 function buildTrinoFromEnv(): TrinoClient | null {
-  const dbUrl = process.env.VAST_DATABASE_URL;
+  const dbUrl = getVastDatabaseUrl();
   if (!dbUrl) return null;
   try {
     const url = new URL(dbUrl);
     return new TrinoClient({
       endpoint: `${url.protocol}//${url.host}`,
-      accessKey: url.username || process.env.VAST_ACCESS_KEY || "",
-      secretKey: url.password || process.env.VAST_SECRET_KEY || "",
+      accessKey: url.username || operationalStore.vastDatabase.accessKeyId || process.env.VAST_ACCESS_KEY || "",
+      secretKey: url.password || operationalStore.vastDatabase.secretKey || process.env.VAST_SECRET_KEY || "",
     });
   } catch {
     return null;
@@ -362,7 +394,7 @@ export async function registerPlatformSettingsRoutes(
         const iamFlags = resolveIamFlags();
 
         // VAST Database
-        const dbUrl = process.env.VAST_DATABASE_URL;
+        const dbUrl = getVastDatabaseUrl();
         const dbConfigured = !!dbUrl;
         let dbStatus: PlatformSettings["vastDatabase"]["status"] = "disconnected";
         let tablesDeployed = false;
@@ -390,8 +422,8 @@ export async function registerPlatformSettingsRoutes(
         }
 
         // VAST Event Broker
-        const brokerUrl = process.env.VAST_EVENT_BROKER_URL ?? null;
-        const brokerTopic = process.env.VAST_EVENT_BROKER_TOPIC ?? "spaceharbor.dataengine.completed";
+        const brokerUrl = getVastEventBrokerUrl();
+        const brokerTopic = getVastEventBrokerTopic();
         const brokerConfigured = !!brokerUrl;
 
         // VAST DataEngine
@@ -509,6 +541,9 @@ export async function registerPlatformSettingsRoutes(
         // Persist VAST Database operational fields
         const dbBody = body["vastDatabase"] as Record<string, unknown> | undefined;
         if (dbBody) {
+          if (typeof dbBody["endpoint"] === "string" || dbBody["endpoint"] === null) {
+            operationalStore.vastDatabase.url = (dbBody["endpoint"] as string | null) || null;
+          }
           if (typeof dbBody["vmsVip"] === "string" || dbBody["vmsVip"] === null) {
             operationalStore.vastDatabase.vmsVip = (dbBody["vmsVip"] as string | null) || null;
           }
@@ -517,6 +552,21 @@ export async function registerPlatformSettingsRoutes(
           }
           if (typeof dbBody["accessKeyId"] === "string" || dbBody["accessKeyId"] === null) {
             operationalStore.vastDatabase.accessKeyId = (dbBody["accessKeyId"] as string | null) || null;
+          }
+          // Only overwrite secretKey if a non-empty value is provided (write-only field)
+          if (typeof dbBody["secretKey"] === "string" && dbBody["secretKey"] !== "") {
+            operationalStore.vastDatabase.secretKey = dbBody["secretKey"];
+          }
+        }
+
+        // Persist VAST Event Broker operational fields
+        const brokerBody = body["vastEventBroker"] as Record<string, unknown> | undefined;
+        if (brokerBody) {
+          if (typeof brokerBody["brokerUrl"] === "string" || brokerBody["brokerUrl"] === null) {
+            operationalStore.vastEventBroker.url = (brokerBody["brokerUrl"] as string | null) || null;
+          }
+          if (typeof brokerBody["topic"] === "string" || brokerBody["topic"] === null) {
+            operationalStore.vastEventBroker.topic = (brokerBody["topic"] as string | null) || null;
           }
         }
 
@@ -595,9 +645,9 @@ export async function registerPlatformSettingsRoutes(
 
         // Re-read current settings to return fresh state
         const iamFlags = resolveIamFlags();
-        const dbUrl = process.env.VAST_DATABASE_URL;
-        const brokerUrl = process.env.VAST_EVENT_BROKER_URL ?? null;
-        const brokerTopic = process.env.VAST_EVENT_BROKER_TOPIC ?? "spaceharbor.dataengine.completed";
+        const dbUrl = getVastDatabaseUrl();
+        const brokerUrl = getVastEventBrokerUrl();
+        const brokerTopic = getVastEventBrokerTopic();
         const dataEngineUrl = getVastDataEngineUrl();
         const s3Endpoint = process.env.SPACEHARBOR_S3_ENDPOINT ?? process.env.AWS_S3_ENDPOINT ?? null;
         const s3Bucket = process.env.SPACEHARBOR_S3_BUCKET ?? process.env.AWS_S3_BUCKET ?? null;
@@ -734,13 +784,13 @@ export async function registerPlatformSettingsRoutes(
         }
 
         if (service === "event_broker") {
-          const brokerUrl = process.env.VAST_EVENT_BROKER_URL;
+          const brokerUrl = getVastEventBrokerUrl();
           return reply.send({
             service,
             status: brokerUrl ? "ok" : "error",
             message: brokerUrl
               ? "Event broker URL is configured"
-              : "VAST_EVENT_BROKER_URL is not configured",
+              : "Event broker URL is not configured. Set it in Settings or via VAST_EVENT_BROKER_URL env var.",
           } satisfies ConnectionTestResult);
         }
 

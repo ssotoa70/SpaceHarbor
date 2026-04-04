@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Badge } from "../design-system/Badge";
 import { Button } from "../design-system/Button";
+import { Card } from "../design-system/Card";
+import { PermissionGate } from "../components/PermissionGate";
 import { generateId } from "../utils/id";
 import {
   fetchPlatformSettings,
@@ -417,7 +419,7 @@ function ScimSection({ settings }: { settings: PlatformSettings }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-export function SettingsPage() {
+function SettingsContent() {
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
   const [schemaStatus, setSchemaStatus] = useState<SchemaStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -438,9 +440,9 @@ export function SettingsPage() {
   const [dePassword, setDePassword] = useState("");
   const [s3Endpoints, setS3Endpoints] = useState<S3EndpointConfig[]>([]);
 
-  // Connection test state
+  // Connection test state — per-section inline results
   const [testingService, setTestingService] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, ConnectionTestResult>>({});
 
   // Schema deploy state
   const [confirmDeploy, setConfirmDeploy] = useState(false);
@@ -533,12 +535,13 @@ export function SettingsPage() {
 
   const handleTestConnection = useCallback(async (service: string) => {
     setTestingService(service);
-    setTestResult(null);
+    // Clear previous result for this service
+    setTestResults((prev) => { const next = { ...prev }; delete next[service]; return next; });
     try {
       const result = await testServiceConnection(service);
-      setTestResult(result);
+      setTestResults((prev) => ({ ...prev, [service]: result }));
     } catch {
-      setTestResult({ service, status: "error", message: "Request failed" });
+      setTestResults((prev) => ({ ...prev, [service]: { service, status: "error", message: "Request failed" } }));
     } finally {
       setTestingService(null);
     }
@@ -609,26 +612,24 @@ export function SettingsPage() {
 
   if (!settings) return null;
 
-  const TestResultBanner = testResult ? (
-    <div
-      className={`mb-4 p-3 rounded-[var(--radius-ah-md)] text-sm flex items-center gap-2 ${
-        testResult.status === "ok"
-          ? "bg-[var(--color-ah-success-muted)]/20 text-[var(--color-ah-success)] border border-[var(--color-ah-success-muted)]"
-          : "bg-[var(--color-ah-danger-muted)]/20 text-[var(--color-ah-danger)] border border-[var(--color-ah-danger-muted)]"
-      }`}
-      data-testid="test-result-banner"
-    >
-      <StatusDot status={testResult.status === "ok" ? "ok" : "error"} />
-      <span className="font-medium">{testResult.service}:</span>
-      <span>{testResult.message}</span>
-      <button
-        className="ml-auto text-xs opacity-60 hover:opacity-100 cursor-pointer"
-        onClick={() => setTestResult(null)}
+  /** Inline test result rendered below each section's Test Connection button. */
+  function InlineTestResult({ service }: { service: string }) {
+    const result = testResults[service];
+    if (!result) return null;
+    return (
+      <div
+        className={`mt-2 p-2 rounded-[var(--radius-ah-sm)] text-xs flex items-center gap-2 ${
+          result.status === "ok"
+            ? "bg-[var(--color-ah-success)]/10 text-[var(--color-ah-success)] border border-[var(--color-ah-success)]/30"
+            : "bg-[var(--color-ah-danger)]/10 text-[var(--color-ah-danger)] border border-[var(--color-ah-danger)]/30"
+        }`}
+        data-testid={`test-result-${service}`}
       >
-        Dismiss
-      </button>
-    </div>
-  ) : null;
+        <StatusDot status={result.status === "ok" ? "ok" : "error"} />
+        <span>{result.message}</span>
+      </div>
+    );
+  }
 
   const DeployBanner = deployMessage ? (
     <div
@@ -671,7 +672,6 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {TestResultBanner}
       {DeployBanner}
 
       <ConfirmDialog
@@ -749,6 +749,7 @@ export function SettingsPage() {
               Tests: GET /v1/info + SHOW CATALOGS
             </span>
           </div>
+          <InlineTestResult service="vast_database" />
         </SectionCard>
 
         {/* 2. VAST Event Broker */}
@@ -780,6 +781,7 @@ export function SettingsPage() {
               {testingService === "event_broker" ? "Testing..." : "Test Connection"}
             </Button>
           </div>
+          <InlineTestResult service="event_broker" />
         </SectionCard>
 
         {/* 3. VAST DataEngine */}
@@ -829,6 +831,7 @@ export function SettingsPage() {
               {testingService === "data_engine" ? "Testing..." : "Test Connection"}
             </Button>
           </div>
+          <InlineTestResult service="data_engine" />
         </SectionCard>
 
         {/* 4. Object Storage (S3) — Multi-endpoint */}
@@ -964,15 +967,35 @@ export function SettingsPage() {
             <Button variant="secondary" onClick={async () => {
               try {
                 const r = await testLdapConnection();
-                setTestResult({ service: "ldap", status: r.status as "ok" | "error", message: r.message });
-              } catch { setTestResult({ service: "ldap", status: "error", message: "LDAP test failed" }); }
+                setTestResults((prev) => ({ ...prev, ldap: { service: "ldap", status: r.status as "ok" | "error", message: r.message } }));
+              } catch { setTestResults((prev) => ({ ...prev, ldap: { service: "ldap", status: "error", message: "LDAP test failed" } })); }
             }}>Test Connection</Button>
           </div>
+          <InlineTestResult service="ldap" />
         </SectionCard>
 
         {/* 8. SCIM User Sync (editable) */}
         <ScimSection settings={settings} />
       </div>
     </div>
+  );
+}
+
+export function SettingsPage() {
+  return (
+    <PermissionGate
+      permission="admin:system_config"
+      fallback={
+        <div className="max-w-4xl mx-auto p-6">
+          <Card className="py-8 text-center">
+            <p className="text-sm text-[var(--color-ah-text-muted)]">
+              You do not have permission to access Platform Settings.
+            </p>
+          </Card>
+        </div>
+      }
+    >
+      <SettingsContent />
+    </PermissionGate>
   );
 }
