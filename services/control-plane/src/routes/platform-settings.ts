@@ -868,12 +868,12 @@ export async function registerPlatformSettingsRoutes(
               return reply.send({ service, status: "ok", message: `Connected to ${endpoint} — bucket "${bucket}" accessible` } satisfies ConnectionTestResult);
             }
             if (res.status === 403) {
-              return reply.send({ service, status: "ok", message: `Endpoint ${endpoint} reachable — bucket "${bucket}" returned 403 (check credentials)` } satisfies ConnectionTestResult);
+              return reply.send({ service, status: "error", message: `Endpoint ${endpoint} reachable but access denied — bucket "${bucket}" returned 403 (check credentials)` } satisfies ConnectionTestResult);
             }
             if (res.status === 404) {
               return reply.send({ service, status: "error", message: `Endpoint reachable but bucket "${bucket}" not found (404)` } satisfies ConnectionTestResult);
             }
-            return reply.send({ service, status: "ok", message: `Endpoint reachable — HTTP ${res.status}` } satisfies ConnectionTestResult);
+            return reply.send({ service, status: "error", message: `Endpoint reachable but returned unexpected HTTP ${res.status}` } satisfies ConnectionTestResult);
           } catch (err) {
             return reply.send({
               service,
