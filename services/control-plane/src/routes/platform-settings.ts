@@ -93,6 +93,9 @@ export interface PlatformSettings {
     cnodeVips: string | null;
     accessKeyId: string | null;
     hasSecretKey: boolean;
+    /** S3 bucket with DATABASE protocol enabled */
+    bucket: string | null;
+    /** Schema name within the bucket */
     schema: string | null;
   };
   vastEventBroker: {
@@ -211,7 +214,8 @@ interface OperationalSettings {
     cnodeVips: string | null;
     accessKeyId: string | null;
     secretKey: string | null; // write-only; never returned to clients
-    schema: string | null;   // e.g. "sergio-db/spaceharbor" — bucket/schema path for Trino
+    bucket: string | null;   // S3 bucket with DATABASE protocol enabled (e.g. "sergio-db")
+    schema: string | null;   // Schema name within the bucket (e.g. "spaceharbor")
   };
   vastEventBroker: {
     url: string | null;
@@ -233,7 +237,7 @@ interface OperationalSettings {
 }
 
 const defaultOperationalSettings: OperationalSettings = {
-  vastDatabase: { url: null, vmsVip: null, cnodeVips: null, accessKeyId: null, secretKey: null, schema: null },
+  vastDatabase: { url: null, vmsVip: null, cnodeVips: null, accessKeyId: null, secretKey: null, bucket: null, schema: null },
   vastEventBroker: { url: null, topic: null },
   vastDataEngine: { url: null, tenant: null, username: null, password: null },
   storage: { endpoints: [], nfsConnectors: [], smbConnectors: [] },
@@ -272,19 +276,40 @@ function loadOperationalStore(store: SettingsStore): void {
 }
 
 /**
- * Get the configured VAST Database URL.
- * Operational store (set via Settings UI) takes precedence over env var.
+ * Get the configured VAST Database endpoint URL.
+ * Priority: operational store > VAST_DB_ENDPOINT env > VAST_DATABASE_URL env > S3 endpoint fallback.
  */
 export function getVastDatabaseUrl(): string | null {
-  return operationalStore.vastDatabase.url || process.env.VAST_DATABASE_URL || null;
+  return operationalStore.vastDatabase.url
+    || process.env.VAST_DB_ENDPOINT
+    || process.env.VAST_DATABASE_URL
+    || process.env.SPACEHARBOR_S3_ENDPOINT
+    || null;
 }
 
 /**
- * Get the configured VAST Database schema (bucket/schema path for Trino).
- * Operational store (set via Settings UI) takes precedence over env var.
+ * Get the configured VAST Database bucket (database-enabled view).
+ * Priority: operational store > VAST_DB_BUCKET env.
+ */
+export function getVastDatabaseBucket(): string | null {
+  return operationalStore.vastDatabase.bucket || process.env.VAST_DB_BUCKET || null;
+}
+
+/**
+ * Get the configured VAST Database schema name.
+ * Priority: operational store > VAST_DB_SCHEMA env > default "spaceharbor".
  */
 export function getVastDatabaseSchema(): string {
-  return operationalStore.vastDatabase.schema || process.env.VAST_SCHEMA || "spaceharbor/production";
+  return operationalStore.vastDatabase.schema || process.env.VAST_DB_SCHEMA || "spaceharbor";
+}
+
+/**
+ * Get the full schema path for SQL queries: "bucket/schema".
+ */
+export function getVastDatabaseSchemaPath(): string {
+  const bucket = getVastDatabaseBucket();
+  const schema = getVastDatabaseSchema();
+  return bucket ? `${bucket}/${schema}` : `spaceharbor/${schema}`;
 }
 
 /**
@@ -358,10 +383,22 @@ function buildTrinoFromEnv(): TrinoClient | null {
   if (!dbUrl) return null;
   try {
     const url = new URL(dbUrl);
+    const accessKey = operationalStore.vastDatabase.accessKeyId
+      || process.env.VAST_DB_ACCESS_KEY
+      || url.username
+      || process.env.VAST_ACCESS_KEY
+      || "";
+    const secretKey = operationalStore.vastDatabase.secretKey
+      || process.env.VAST_DB_SECRET_KEY
+      || url.password
+      || process.env.VAST_SECRET_KEY
+      || "";
+    const schemaPath = getVastDatabaseSchemaPath();
     return new TrinoClient({
       endpoint: `${url.protocol}//${url.host}`,
-      accessKey: url.username || operationalStore.vastDatabase.accessKeyId || process.env.VAST_ACCESS_KEY || "",
-      secretKey: url.password || operationalStore.vastDatabase.secretKey || process.env.VAST_SECRET_KEY || "",
+      accessKey,
+      secretKey,
+      schema: schemaPath,
     });
   } catch {
     return null;
@@ -419,7 +456,7 @@ export async function registerPlatformSettingsRoutes(
 
               if (health.reachable) {
                 try {
-                  const schema = getVastDatabaseSchema();
+                  const schema = getVastDatabaseSchemaPath();
                   await trino.query(`SELECT MAX(version) AS v FROM vast."${schema}".schema_version`);
                   tablesDeployed = true;
                 } catch {
@@ -470,6 +507,7 @@ export async function registerPlatformSettingsRoutes(
             cnodeVips: operationalStore.vastDatabase.cnodeVips,
             accessKeyId: operationalStore.vastDatabase.accessKeyId,
             hasSecretKey: !!operationalStore.vastDatabase.secretKey,
+            bucket: getVastDatabaseBucket(),
             schema: getVastDatabaseSchema(),
           },
           vastEventBroker: {
@@ -569,6 +607,9 @@ export async function registerPlatformSettingsRoutes(
           // Only overwrite secretKey if a non-empty value is provided (write-only field)
           if (typeof dbBody["secretKey"] === "string" && dbBody["secretKey"] !== "") {
             operationalStore.vastDatabase.secretKey = dbBody["secretKey"];
+          }
+          if (typeof dbBody["bucket"] === "string" || dbBody["bucket"] === null) {
+            operationalStore.vastDatabase.bucket = (dbBody["bucket"] as string | null) || null;
           }
           if (typeof dbBody["schema"] === "string" || dbBody["schema"] === null) {
             operationalStore.vastDatabase.schema = (dbBody["schema"] as string | null) || null;
@@ -685,6 +726,7 @@ export async function registerPlatformSettingsRoutes(
             cnodeVips: operationalStore.vastDatabase.cnodeVips,
             accessKeyId: operationalStore.vastDatabase.accessKeyId,
             hasSecretKey: !!operationalStore.vastDatabase.secretKey,
+            bucket: getVastDatabaseBucket(),
             schema: getVastDatabaseSchema(),
           },
           vastEventBroker: {
@@ -790,13 +832,13 @@ export async function registerPlatformSettingsRoutes(
             return reply.send({
               service,
               status: "ok",
-              message: "Trino connection successful",
+              message: "VAST Database connection successful",
             } satisfies ConnectionTestResult);
           } catch (err) {
             return reply.send({
               service,
               status: "error",
-              message: `Trino connection failed: ${err instanceof Error ? err.message : String(err)}`,
+              message: `VAST Database connection failed: ${err instanceof Error ? err.message : String(err)}`,
             } satisfies ConnectionTestResult);
           }
         }
@@ -938,7 +980,7 @@ export async function registerPlatformSettingsRoutes(
         }
 
         try {
-          const schema = getVastDatabaseSchema();
+          const schema = getVastDatabaseSchemaPath();
 
           // Determine current version
           let currentVersion = 0;
@@ -1009,7 +1051,7 @@ export async function registerPlatformSettingsRoutes(
 
         if (trino) {
           try {
-            const schema = getVastDatabaseSchema();
+            const schema = getVastDatabaseSchemaPath();
             const result = await trino.query(
               `SELECT MAX(version) AS max_ver FROM vast."${schema}".schema_version`,
             );

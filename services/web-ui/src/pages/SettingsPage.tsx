@@ -433,6 +433,7 @@ function SettingsContent() {
   const [dbCnodeVips, setDbCnodeVips] = useState("");
   const [dbAccessKeyId, setDbAccessKeyId] = useState("");
   const [dbSecretKey, setDbSecretKey] = useState("");
+  const [dbBucket, setDbBucket] = useState("");
   const [dbSchema, setDbSchema] = useState("");
   const [brokerUrl, setBrokerUrl] = useState("");
   const [brokerTopic, setBrokerTopic] = useState("");
@@ -467,6 +468,7 @@ function SettingsContent() {
       setDbCnodeVips(s.vastDatabase.cnodeVips ?? "");
       setDbAccessKeyId(s.vastDatabase.accessKeyId ?? "");
       setDbSecretKey(s.vastDatabase.hasSecretKey ? "--------" : "");
+      setDbBucket(s.vastDatabase.bucket ?? "");
       setDbSchema(s.vastDatabase.schema ?? "");
       setBrokerUrl(s.vastEventBroker.brokerUrl ?? "");
       setBrokerTopic(s.vastEventBroker.topic ?? "");
@@ -509,6 +511,7 @@ function SettingsContent() {
           vmsVip: dbVmsVip || null,
           cnodeVips: dbCnodeVips || null,
           accessKeyId: dbAccessKeyId || null,
+          bucket: dbBucket || null,
           schema: dbSchema || null,
           // Only send secretKey if user actually changed it (not the masked placeholder)
           ...(dbSecretKey && dbSecretKey !== "--------" ? { secretKey: dbSecretKey } : {}),
@@ -538,7 +541,7 @@ function SettingsContent() {
     } finally {
       setSaving(false);
     }
-  }, [settings, dbEndpoint, dbVmsVip, dbCnodeVips, dbAccessKeyId, dbSecretKey, dbSchema, brokerUrl, brokerTopic, deUrl, deTenant, deUsername, dePassword, s3Endpoints]);
+  }, [settings, dbEndpoint, dbVmsVip, dbCnodeVips, dbAccessKeyId, dbSecretKey, dbBucket, dbSchema, brokerUrl, brokerTopic, deUrl, deTenant, deUsername, dePassword, s3Endpoints]);
 
   const handleTestConnection = useCallback(async (service: string) => {
     setTestingService(service);
@@ -729,14 +732,20 @@ function SettingsContent() {
               type="password"
             />
             <ConfigInput
-              label="Database Schema (bucket/schema)"
+              label="Database Bucket"
+              value={dbBucket}
+              onChange={(v) => { setDbBucket(v); markDirty(); }}
+              placeholder="sergio-db"
+            />
+            <ConfigInput
+              label="Schema Name"
               value={dbSchema}
               onChange={(v) => { setDbSchema(v); markDirty(); }}
-              placeholder="sergio-db/spaceharbor"
+              placeholder="spaceharbor"
             />
           </div>
           <p className="text-[10px] text-[var(--color-ah-text-subtle)] mt-1">
-            The schema field specifies the S3 bucket and schema path where tables are created (e.g. "my-bucket/spaceharbor").
+            The bucket must be a Database-enabled view with S3 and DATABASE protocols. Tables will be created in the specified schema within that bucket.
           </p>
           {schemaStatus && (
             <div className="mt-2 space-y-1">
@@ -769,7 +778,7 @@ function SettingsContent() {
               {deploying ? "Deploying..." : "Deploy Schema"}
             </Button>
             <span className="ml-auto text-[10px] text-[var(--color-ah-text-subtle)]">
-              Tests: GET /v1/info + SHOW CATALOGS
+              Tests: SELECT 1 via VAST Database SQL endpoint
             </span>
           </div>
           <InlineTestResult service="vast_database" />

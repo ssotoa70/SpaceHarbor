@@ -1375,7 +1375,9 @@ export interface PlatformSettings {
     accessKeyId: string | null;
     /** True if secret access key is stored. Value is never returned. */
     hasSecretKey: boolean;
-    /** Database schema path: bucket/schema (e.g. "sergio-db/spaceharbor") */
+    /** S3 bucket with DATABASE protocol enabled (e.g. "sergio-db") */
+    bucket: string | null;
+    /** Schema name within the bucket (e.g. "spaceharbor") */
     schema: string | null;
   };
   vastEventBroker: {
