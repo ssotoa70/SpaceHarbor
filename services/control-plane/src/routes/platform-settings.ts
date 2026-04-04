@@ -92,6 +92,8 @@ export interface PlatformSettings {
     vmsVip: string | null;
     cnodeVips: string | null;
     accessKeyId: string | null;
+    hasSecretKey: boolean;
+    schema: string | null;
   };
   vastEventBroker: {
     configured: boolean;
@@ -209,6 +211,7 @@ interface OperationalSettings {
     cnodeVips: string | null;
     accessKeyId: string | null;
     secretKey: string | null; // write-only; never returned to clients
+    schema: string | null;   // e.g. "sergio-db/spaceharbor" — bucket/schema path for Trino
   };
   vastEventBroker: {
     url: string | null;
@@ -230,7 +233,7 @@ interface OperationalSettings {
 }
 
 const defaultOperationalSettings: OperationalSettings = {
-  vastDatabase: { url: null, vmsVip: null, cnodeVips: null, accessKeyId: null, secretKey: null },
+  vastDatabase: { url: null, vmsVip: null, cnodeVips: null, accessKeyId: null, secretKey: null, schema: null },
   vastEventBroker: { url: null, topic: null },
   vastDataEngine: { url: null, tenant: null, username: null, password: null },
   storage: { endpoints: [], nfsConnectors: [], smbConnectors: [] },
@@ -274,6 +277,14 @@ function loadOperationalStore(store: SettingsStore): void {
  */
 export function getVastDatabaseUrl(): string | null {
   return operationalStore.vastDatabase.url || process.env.VAST_DATABASE_URL || null;
+}
+
+/**
+ * Get the configured VAST Database schema (bucket/schema path for Trino).
+ * Operational store (set via Settings UI) takes precedence over env var.
+ */
+export function getVastDatabaseSchema(): string {
+  return operationalStore.vastDatabase.schema || process.env.VAST_SCHEMA || "spaceharbor/production";
 }
 
 /**
@@ -408,7 +419,7 @@ export async function registerPlatformSettingsRoutes(
 
               if (health.reachable) {
                 try {
-                  const schema = process.env.VAST_SCHEMA ?? "spaceharbor/production";
+                  const schema = getVastDatabaseSchema();
                   await trino.query(`SELECT MAX(version) AS v FROM vast."${schema}".schema_version`);
                   tablesDeployed = true;
                 } catch {
@@ -458,6 +469,8 @@ export async function registerPlatformSettingsRoutes(
             vmsVip: operationalStore.vastDatabase.vmsVip,
             cnodeVips: operationalStore.vastDatabase.cnodeVips,
             accessKeyId: operationalStore.vastDatabase.accessKeyId,
+            hasSecretKey: !!operationalStore.vastDatabase.secretKey,
+            schema: getVastDatabaseSchema(),
           },
           vastEventBroker: {
             configured: brokerConfigured,
@@ -556,6 +569,9 @@ export async function registerPlatformSettingsRoutes(
           // Only overwrite secretKey if a non-empty value is provided (write-only field)
           if (typeof dbBody["secretKey"] === "string" && dbBody["secretKey"] !== "") {
             operationalStore.vastDatabase.secretKey = dbBody["secretKey"];
+          }
+          if (typeof dbBody["schema"] === "string" || dbBody["schema"] === null) {
+            operationalStore.vastDatabase.schema = (dbBody["schema"] as string | null) || null;
           }
         }
 
@@ -668,6 +684,8 @@ export async function registerPlatformSettingsRoutes(
             vmsVip: operationalStore.vastDatabase.vmsVip,
             cnodeVips: operationalStore.vastDatabase.cnodeVips,
             accessKeyId: operationalStore.vastDatabase.accessKeyId,
+            hasSecretKey: !!operationalStore.vastDatabase.secretKey,
+            schema: getVastDatabaseSchema(),
           },
           vastEventBroker: {
             configured: !!brokerUrl,
@@ -920,7 +938,7 @@ export async function registerPlatformSettingsRoutes(
         }
 
         try {
-          const schema = process.env.VAST_SCHEMA ?? "spaceharbor/production";
+          const schema = getVastDatabaseSchema();
 
           // Determine current version
           let currentVersion = 0;
@@ -991,7 +1009,7 @@ export async function registerPlatformSettingsRoutes(
 
         if (trino) {
           try {
-            const schema = process.env.VAST_SCHEMA ?? "spaceharbor/production";
+            const schema = getVastDatabaseSchema();
             const result = await trino.query(
               `SELECT MAX(version) AS max_ver FROM vast."${schema}".schema_version`,
             );

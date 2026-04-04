@@ -1373,6 +1373,10 @@ export interface PlatformSettings {
     cnodeVips: string | null;
     /** Operational: VAST S3/Trino access key ID (non-secret) */
     accessKeyId: string | null;
+    /** True if secret access key is stored. Value is never returned. */
+    hasSecretKey: boolean;
+    /** Database schema path: bucket/schema (e.g. "sergio-db/spaceharbor") */
+    schema: string | null;
   };
   vastEventBroker: {
     configured: boolean;

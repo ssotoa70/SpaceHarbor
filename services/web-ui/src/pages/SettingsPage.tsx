@@ -432,6 +432,8 @@ function SettingsContent() {
   const [dbVmsVip, setDbVmsVip] = useState("");
   const [dbCnodeVips, setDbCnodeVips] = useState("");
   const [dbAccessKeyId, setDbAccessKeyId] = useState("");
+  const [dbSecretKey, setDbSecretKey] = useState("");
+  const [dbSchema, setDbSchema] = useState("");
   const [brokerUrl, setBrokerUrl] = useState("");
   const [brokerTopic, setBrokerTopic] = useState("");
   const [deUrl, setDeUrl] = useState("");
@@ -464,6 +466,8 @@ function SettingsContent() {
       setDbVmsVip(s.vastDatabase.vmsVip ?? "");
       setDbCnodeVips(s.vastDatabase.cnodeVips ?? "");
       setDbAccessKeyId(s.vastDatabase.accessKeyId ?? "");
+      setDbSecretKey(s.vastDatabase.hasSecretKey ? "--------" : "");
+      setDbSchema(s.vastDatabase.schema ?? "");
       setBrokerUrl(s.vastEventBroker.brokerUrl ?? "");
       setBrokerTopic(s.vastEventBroker.topic ?? "");
       setDeUrl(s.vastDataEngine.url ?? "");
@@ -505,6 +509,9 @@ function SettingsContent() {
           vmsVip: dbVmsVip || null,
           cnodeVips: dbCnodeVips || null,
           accessKeyId: dbAccessKeyId || null,
+          schema: dbSchema || null,
+          // Only send secretKey if user actually changed it (not the masked placeholder)
+          ...(dbSecretKey && dbSecretKey !== "--------" ? { secretKey: dbSecretKey } : {}),
         },
         vastEventBroker: { ...settings.vastEventBroker, brokerUrl: brokerUrl || null, topic: brokerTopic || null },
         vastDataEngine: {
@@ -531,7 +538,7 @@ function SettingsContent() {
     } finally {
       setSaving(false);
     }
-  }, [settings, dbEndpoint, dbVmsVip, dbCnodeVips, dbAccessKeyId, brokerUrl, brokerTopic, deUrl, deTenant, deUsername, dePassword, s3Endpoints]);
+  }, [settings, dbEndpoint, dbVmsVip, dbCnodeVips, dbAccessKeyId, dbSecretKey, dbSchema, brokerUrl, brokerTopic, deUrl, deTenant, deUsername, dePassword, s3Endpoints]);
 
   const handleTestConnection = useCallback(async (service: string) => {
     setTestingService(service);
@@ -714,7 +721,23 @@ function SettingsContent() {
               onChange={(v) => { setDbAccessKeyId(v); markDirty(); }}
               placeholder="VAST access key ID"
             />
+            <ConfigInput
+              label="Secret Access Key"
+              value={dbSecretKey}
+              onChange={(v) => { setDbSecretKey(v); markDirty(); }}
+              placeholder="Enter secret access key"
+              type="password"
+            />
+            <ConfigInput
+              label="Database Schema (bucket/schema)"
+              value={dbSchema}
+              onChange={(v) => { setDbSchema(v); markDirty(); }}
+              placeholder="sergio-db/spaceharbor"
+            />
           </div>
+          <p className="text-[10px] text-[var(--color-ah-text-subtle)] mt-1">
+            The schema field specifies the S3 bucket and schema path where tables are created (e.g. "my-bucket/spaceharbor").
+          </p>
           {schemaStatus && (
             <div className="mt-2 space-y-1">
               <ConfigRow
