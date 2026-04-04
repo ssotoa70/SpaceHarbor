@@ -843,38 +843,38 @@ export async function registerPlatformSettingsRoutes(
             } satisfies ConnectionTestResult);
           }
 
-          // Actually test connectivity: attempt HEAD on the bucket
+          // Test connectivity with proper AWS SigV4 authentication via HeadBucket
           try {
-            const url = new URL(bucket.startsWith("/") ? `${endpoint}${bucket}` : `${endpoint}/${bucket}`);
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 5000);
-            const res = await fetch(url.toString(), {
-              method: "HEAD",
-              signal: controller.signal,
-              headers: accessKey ? { "x-amz-content-sha256": "UNSIGNED-PAYLOAD" } : {},
-            }).catch((err: Error) => err);
-            clearTimeout(timeout);
+            const { S3Client, HeadBucketCommand } = await import("@aws-sdk/client-s3");
+            const useSsl = stored?.useSsl ?? endpoint.startsWith("https");
+            const s3 = new S3Client({
+              endpoint: endpoint,
+              region: stored?.region || "us-east-1",
+              credentials: accessKey && secretKey
+                ? { accessKeyId: accessKey, secretAccessKey: secretKey }
+                : undefined,
+              forcePathStyle: stored?.pathStyle ?? true,
+              tls: useSsl,
+              requestHandler: { requestTimeout: 5000 } as never,
+            });
 
-            if (res instanceof Error) {
-              return reply.send({
-                service,
-                status: "error",
-                message: `Connection failed: ${res.message}`,
-              } satisfies ConnectionTestResult);
-            }
+            await s3.send(new HeadBucketCommand({ Bucket: bucket }));
+            s3.destroy();
+            return reply.send({ service, status: "ok", message: `Connected to ${endpoint} — bucket "${bucket}" accessible` } satisfies ConnectionTestResult);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const name = (err as { name?: string })?.name ?? "";
+            const statusCode = (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
 
-            // S3 returns 200, 301, 403 (valid endpoint, auth issue), or 404 (bucket not found)
-            if (res.status === 200 || res.status === 301) {
-              return reply.send({ service, status: "ok", message: `Connected to ${endpoint} — bucket "${bucket}" accessible` } satisfies ConnectionTestResult);
-            }
-            if (res.status === 403) {
+            if (statusCode === 403 || name === "AccessDenied" || name === "SignatureDoesNotMatch") {
               return reply.send({ service, status: "error", message: `Endpoint ${endpoint} reachable but access denied — bucket "${bucket}" returned 403 (check credentials)` } satisfies ConnectionTestResult);
             }
-            if (res.status === 404) {
+            if (statusCode === 404 || name === "NotFound" || name === "NoSuchBucket") {
               return reply.send({ service, status: "error", message: `Endpoint reachable but bucket "${bucket}" not found (404)` } satisfies ConnectionTestResult);
             }
-            return reply.send({ service, status: "error", message: `Endpoint reachable but returned unexpected HTTP ${res.status}` } satisfies ConnectionTestResult);
-          } catch (err) {
+            if (statusCode === 301 || name === "PermanentRedirect") {
+              return reply.send({ service, status: "ok", message: `Endpoint ${endpoint} reachable — bucket "${bucket}" exists (redirected)` } satisfies ConnectionTestResult);
+            }
             return reply.send({
               service,
               status: "error",
