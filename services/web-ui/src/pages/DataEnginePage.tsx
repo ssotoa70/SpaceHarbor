@@ -62,8 +62,8 @@ function DataEngineContent() {
     try {
       const settings = await fetchPlatformSettings();
       const de = settings.vastDataEngine;
-      // Connected if URL is configured AND VMS credentials are stored
-      setConnected(de.configured && de.hasPassword === true);
+      // Connected if URL is configured (credentials checked at proxy time)
+      setConnected(de.configured);
     } catch (err) {
       // If we can't fetch settings (e.g. no auth), assume connected and let proxy routes fail gracefully
       setCheckError(err instanceof Error ? err.message : "Failed to check DataEngine connection");

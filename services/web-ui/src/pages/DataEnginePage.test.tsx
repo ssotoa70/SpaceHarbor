@@ -72,13 +72,13 @@ describe("DataEnginePage", () => {
     });
   });
 
-  it("shows ConnectionBanner when credentials are missing", async () => {
+  it("shows tabs when URL configured but credentials missing", async () => {
     mockFetchSettings.mockResolvedValue({
       vastDataEngine: { configured: true, hasPassword: false },
     });
     renderWithRouter(<DataEnginePage />);
     await waitFor(() => {
-      expect(screen.getByText("VAST DataEngine Not Configured")).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Dashboard" })).toBeInTheDocument();
     });
   });
 
