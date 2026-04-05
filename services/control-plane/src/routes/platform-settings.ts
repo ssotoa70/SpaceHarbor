@@ -818,23 +818,65 @@ export async function registerPlatformSettingsRoutes(
         const { service } = request.body;
 
         if (service === "vast_database") {
-          const trino = buildTrinoFromEnv();
-          if (!trino) {
+          const dbUrl = getVastDatabaseUrl();
+          const bucket = getVastDatabaseBucket();
+
+          if (!dbUrl) {
             return reply.send({
               service,
               status: "error",
-              message: "VAST_DATABASE_URL is not configured",
+              message: "VAST Database endpoint is not configured. Set it in Settings or via VAST_DB_ENDPOINT env var.",
+            } satisfies ConnectionTestResult);
+          }
+          if (!bucket) {
+            return reply.send({
+              service,
+              status: "error",
+              message: "Database bucket is not configured. Specify the Database-enabled S3 bucket in Settings.",
             } satisfies ConnectionTestResult);
           }
 
+          // Test connectivity via S3 HeadBucket — VAST Database buckets are S3 buckets with DATABASE protocol
           try {
-            await trino.query("SELECT 1");
+            const { setVastTlsSkip, restoreVastTls } = await import("../vast/vast-fetch.js");
+            setVastTlsSkip();
+            const { S3Client, HeadBucketCommand } = await import("@aws-sdk/client-s3");
+            const accessKey = operationalStore.vastDatabase.accessKeyId
+              || process.env.VAST_DB_ACCESS_KEY || process.env.VAST_ACCESS_KEY || "";
+            const secretKey = operationalStore.vastDatabase.secretKey
+              || process.env.VAST_DB_SECRET_KEY || process.env.VAST_SECRET_KEY || "";
+
+            const s3 = new S3Client({
+              endpoint: dbUrl,
+              region: "us-east-1",
+              credentials: accessKey && secretKey
+                ? { accessKeyId: accessKey, secretAccessKey: secretKey }
+                : undefined,
+              forcePathStyle: true,
+              requestHandler: { requestTimeout: 5000 } as never,
+            });
+
+            await s3.send(new HeadBucketCommand({ Bucket: bucket }));
+            s3.destroy();
+            restoreVastTls();
+            const schema = getVastDatabaseSchema();
             return reply.send({
               service,
               status: "ok",
-              message: "VAST Database connection successful",
+              message: `Connected to VAST Database — bucket "${bucket}" accessible (schema: ${schema})`,
             } satisfies ConnectionTestResult);
           } catch (err) {
+            const { restoreVastTls: restore } = await import("../vast/vast-fetch.js");
+            restore();
+            const name = (err as { name?: string })?.name ?? "";
+            const statusCode = (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+
+            if (statusCode === 403 || name === "AccessDenied" || name === "SignatureDoesNotMatch") {
+              return reply.send({ service, status: "error", message: `Endpoint reachable but access denied for bucket "${bucket}" (check credentials)` } satisfies ConnectionTestResult);
+            }
+            if (statusCode === 404 || name === "NotFound" || name === "NoSuchBucket") {
+              return reply.send({ service, status: "error", message: `Endpoint reachable but bucket "${bucket}" not found — create it with DATABASE protocol enabled` } satisfies ConnectionTestResult);
+            }
             return reply.send({
               service,
               status: "error",

@@ -16,4 +16,8 @@ USER app
 
 EXPOSE 8080
 
+# Accept self-signed VAST cluster certificates by default.
+# Override with SPACEHARBOR_VAST_SKIP_TLS=false for production with valid CAs.
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
+
 CMD ["npm", "run", "start"]

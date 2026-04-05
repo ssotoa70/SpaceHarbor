@@ -122,8 +122,11 @@ export class VmsTokenManager {
       }
       return { ok: false, message: `VMS returned HTTP ${response.status}` };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, message: `VMS connection failed: ${msg}` };
+      const cause = (err as { cause?: { code?: string } })?.cause;
+      const detail = cause?.code
+        ? `${cause.code} — check the URL and ensure the VAST cluster certificate is trusted`
+        : (err instanceof Error ? err.message : String(err));
+      return { ok: false, message: `VMS connection failed: ${detail}` };
     }
   }
 
