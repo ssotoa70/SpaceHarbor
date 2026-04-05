@@ -1017,60 +1017,93 @@ export async function registerPlatformSettingsRoutes(
       },
       async (_request, reply) => {
         if (denyUnlessAdmin(_request, reply)) return;
-        const trino = buildTrinoFromEnv();
-        if (!trino) {
+
+        const bucket = getVastDatabaseBucket();
+        const schema = getVastDatabaseSchema();
+
+        // For vastdb SDK, prefer VMS VIP (direct cluster endpoint) over S3 gateway
+        const vmsVip = operationalStore.vastDatabase.vmsVip;
+        const dbUrl = vmsVip ? `http://${vmsVip}` : getVastDatabaseUrl();
+
+        if (!dbUrl || !bucket) {
           return reply.status(503).send({
             code: "SERVICE_UNAVAILABLE",
-            message: "No Trino client available (VAST_DATABASE_URL not configured)",
+            message: "VAST Database endpoint (VMS VIP) and bucket must be configured before deploying schema.",
             requestId: _request.id,
             details: null,
           });
         }
 
+        const accessKey = operationalStore.vastDatabase.accessKeyId
+          || process.env.VAST_DB_ACCESS_KEY || process.env.VAST_ACCESS_KEY || "";
+        const secretKey = operationalStore.vastDatabase.secretKey
+          || process.env.VAST_DB_SECRET_KEY || process.env.VAST_SECRET_KEY || "";
+
+        if (!accessKey || !secretKey) {
+          return reply.status(503).send({
+            code: "SERVICE_UNAVAILABLE",
+            message: "VAST Database access key and secret key must be configured.",
+            requestId: _request.id,
+            details: null,
+          });
+        }
+
+        // Run the vastdb Python migration script
         try {
-          const schema = getVastDatabaseSchemaPath();
+          const { execFile } = await import("node:child_process");
+          const { promisify } = await import("node:util");
+          const execFileAsync = promisify(execFile);
 
-          // Determine current version
-          let currentVersion = 0;
+          const scriptPath = new URL("../db/vast-migrate.py", import.meta.url).pathname;
+
+          const { stdout, stderr } = await execFileAsync("python3", [
+            scriptPath,
+            "--endpoint", dbUrl,
+            "--access-key", accessKey,
+            "--secret-key", secretKey,
+            "--bucket", bucket,
+            "--schema", schema,
+          ], {
+            timeout: 120_000, // 2 minutes
+            env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+          });
+
+          if (stderr) {
+            _request.log.info({ stderr: stderr.trim() }, "vast-migrate progress");
+          }
+
+          // Parse JSON output from the last line of stdout
+          const lines = stdout.trim().split("\n");
+          const lastLine = lines[lines.length - 1];
+          let result: { status: string; message: string; tables_created?: number; tables_existing?: number };
           try {
-            const result = await trino.query(
-              `SELECT MAX(version) AS max_ver FROM vast."${schema}".schema_version`,
-            );
-            if (result.data.length > 0 && result.data[0][0] != null) {
-              currentVersion = result.data[0][0] as number;
-            }
+            result = JSON.parse(lastLine);
           } catch {
-            // Table doesn't exist yet
+            result = { status: "ok", message: stdout.trim() };
           }
 
-          const pending = migrations.filter((m) => m.version > currentVersion);
-          if (pending.length === 0) {
+          if (result.status === "error") {
             return reply.send({
-              status: "ok",
+              status: "error",
               migrationsApplied: 0,
-              message: "Schema is already up to date",
+              message: result.message,
             } satisfies SchemaDeployResult);
-          }
-
-          // Apply pending migrations
-          let applied = 0;
-          for (const mig of pending) {
-            for (const sql of mig.statements) {
-              await trino.query(sql);
-            }
-            applied++;
           }
 
           return reply.send({
             status: "ok",
-            migrationsApplied: applied,
-            message: `Applied ${applied} migration(s). Schema is now at version ${pending[pending.length - 1].version}.`,
+            migrationsApplied: result.tables_created ?? 0,
+            message: result.message,
           } satisfies SchemaDeployResult);
         } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Include stderr if available (Python traceback)
+          const stderr = (err as { stderr?: string })?.stderr;
+          const detail = stderr ? `${msg}\n${stderr.trim()}` : msg;
           return reply.send({
             status: "error",
             migrationsApplied: 0,
-            message: `Migration failed: ${err instanceof Error ? err.message : String(err)}`,
+            message: `Schema deployment failed: ${detail}`,
           } satisfies SchemaDeployResult);
         }
       },

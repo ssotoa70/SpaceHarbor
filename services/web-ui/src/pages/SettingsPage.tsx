@@ -745,7 +745,7 @@ function SettingsContent() {
             />
           </div>
           <p className="text-[10px] text-[var(--color-ah-text-subtle)] mt-1">
-            The bucket must be a Database-enabled view with S3 and DATABASE protocols. Tables will be created in the specified schema within that bucket.
+            The VAST Endpoint (VMS VIP) is used for schema deployment via the VAST Database SDK. The bucket must be a Database-enabled view with S3 and DATABASE protocols.
           </p>
           {schemaStatus && (
             <div className="mt-2 space-y-1">

@@ -2,6 +2,10 @@ FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7
 
 WORKDIR /app
 
+# Install Python + vastdb for VAST Database schema migrations
+RUN apk add --no-cache python3 py3-pip \
+    && pip3 install --break-system-packages vastdb
+
 COPY package*.json ./
 RUN npm ci
 
