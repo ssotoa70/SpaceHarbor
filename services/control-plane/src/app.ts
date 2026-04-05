@@ -318,12 +318,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   app.setErrorHandler(async (error, request, reply) => {
-    app.log.error(error, "unhandled route error");
-    reply.status(500).send({
-      code: "INTERNAL_ERROR",
-      message: "internal server error",
+    // Fastify validation errors and empty-body errors carry a statusCode — respect it
+    const status = error.statusCode ?? 500;
+    if (status >= 500) {
+      app.log.error(error, "unhandled route error");
+    } else {
+      app.log.warn(error, "client error");
+    }
+    reply.status(status).send({
+      code: status >= 500 ? "INTERNAL_ERROR" : "BAD_REQUEST",
+      message: status >= 500 ? "internal server error" : (error.message || "bad request"),
       requestId: request.id,
-      details: null
+      details: null,
     });
   });
 

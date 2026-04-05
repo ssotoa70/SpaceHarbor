@@ -1544,6 +1544,7 @@ export async function deploySchema(): Promise<SchemaDeployResult> {
   const response = await fetch(`${API_BASE_URL}/api/v1/platform/settings/deploy-schema`, {
     method: "POST",
     headers: withAuth({ "content-type": "application/json" }),
+    body: "{}",
   });
   if (!response.ok) {
     throw new ApiRequestError(response.status, "Schema deployment failed");
