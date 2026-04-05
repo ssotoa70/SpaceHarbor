@@ -79,13 +79,13 @@ export class TrinoClient {
   constructor(config: TrinoClientConfig) {
     this.endpoint = config.endpoint.replace(/\/+$/, "");
 
-    // Reject plaintext HTTP in production — credentials would be exposed
+    // Warn about plaintext HTTP in production — credentials would be exposed
     if (process.env.NODE_ENV === "production") {
       const url = new URL(this.endpoint);
       if (url.protocol === "http:") {
-        throw new Error(
-          "SECURITY: Trino endpoint must use HTTPS in production. " +
-          `Configured endpoint: ${this.endpoint}`
+        console.warn(
+          `WARNING: VAST Database endpoint uses plaintext HTTP — credentials may be exposed. ` +
+          `Configured endpoint: ${this.endpoint}`,
         );
       }
     }

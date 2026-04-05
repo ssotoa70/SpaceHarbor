@@ -5,6 +5,8 @@ services:
     container_name: spaceharbor-control-plane
     environment:
       NODE_ENV: ${NODE_ENV:-development}
+      # Accept self-signed VAST cluster certificates (set to '1' for production with valid certs)
+      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
       PORT: 8080
       SPACEHARBOR_PERSISTENCE_BACKEND: ${SPACEHARBOR_PERSISTENCE_BACKEND:-local}
       SPACEHARBOR_SETTINGS_PATH: /data/settings.json
