@@ -818,8 +818,10 @@ export async function registerPlatformSettingsRoutes(
         const { service } = request.body;
 
         if (service === "vast_database") {
-          const dbUrl = getVastDatabaseUrl();
           const bucket = getVastDatabaseBucket();
+          // Prefer VMS VIP (direct cluster endpoint) for database operations
+          const vmsVip = operationalStore.vastDatabase.vmsVip;
+          const dbUrl = vmsVip ? `http://${vmsVip}` : getVastDatabaseUrl();
 
           if (!dbUrl) {
             return reply.send({
