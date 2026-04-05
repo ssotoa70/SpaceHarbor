@@ -3,8 +3,11 @@ FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7
 WORKDIR /app
 
 # Install Python + vastdb for VAST Database schema migrations
+# Install without adbc_driver_manager (needs C++ compiler) — not needed for table creation
 RUN apk add --no-cache python3 py3-pip \
-    && pip3 install --break-system-packages vastdb
+    && pip3 install --break-system-packages --no-deps vastdb \
+    && pip3 install --break-system-packages pyarrow aws-requests-auth flatbuffers \
+       requests xmltodict backoff==2.2.1 numpy pandas protobuf sqlglot ibis-framework
 
 COPY package*.json ./
 RUN npm ci
