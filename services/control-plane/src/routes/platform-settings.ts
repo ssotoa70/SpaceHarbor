@@ -370,13 +370,6 @@ export interface SchemaStatus {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Mask a string after the first 20 characters. */
-function maskEndpoint(value: string | undefined | null): string | null {
-  if (!value) return null;
-  if (value.length <= 20) return value;
-  return value.slice(0, 20) + "***";
-}
-
 /** Build a TrinoClient from operational store / env vars, or null if not configured. */
 function buildTrinoFromEnv(): TrinoClient | null {
   const dbUrl = getVastDatabaseUrl();
@@ -497,10 +490,13 @@ export async function registerPlatformSettingsRoutes(
           ({ secretAccessKey: _omit, ...rest }) => rest,
         );
 
+        // Admin-only route: return full (unmasked) URLs so the settings
+        // form can round-trip values without corruption.  Secrets (passwords,
+        // secret keys) are still omitted — only URL strings are unmasked.
         const settings: PlatformSettings = {
           vastDatabase: {
             configured: dbConfigured,
-            endpoint: maskEndpoint(dbUrl),
+            endpoint: dbUrl ?? null,
             status: dbConfigured ? dbStatus : "disconnected",
             tablesDeployed,
             vmsVip: operationalStore.vastDatabase.vmsVip,
@@ -512,13 +508,13 @@ export async function registerPlatformSettingsRoutes(
           },
           vastEventBroker: {
             configured: brokerConfigured,
-            brokerUrl: maskEndpoint(brokerUrl),
+            brokerUrl: brokerUrl ?? null,
             topic: brokerConfigured ? brokerTopic : null,
             status: brokerConfigured ? "connected" : "not_configured",
           },
           vastDataEngine: {
             configured: deConfigured,
-            url: maskEndpoint(dataEngineUrl),
+            url: dataEngineUrl ?? null,
             status: deConfigured ? "connected" : "not_configured",
             tenant: operationalStore.vastDataEngine.tenant,
             username: operationalStore.vastDataEngine.username,
@@ -526,14 +522,14 @@ export async function registerPlatformSettingsRoutes(
           },
           authentication: {
             mode: authMode,
-            oidcIssuer: maskEndpoint(oidcIssuer),
-            jwksUri: maskEndpoint(jwksUri),
+            oidcIssuer: oidcIssuer,
+            jwksUri: jwksUri,
             iamEnabled: iamFlags.iamEnabled,
             shadowMode: iamFlags.shadowMode,
             rolloutRing: iamFlags.rolloutRing,
           },
           storage: {
-            s3Endpoint: maskEndpoint(s3Endpoint),
+            s3Endpoint: s3Endpoint,
             s3Bucket: s3Bucket,
             configured: s3Configured,
             endpoints: s3EndpointsForResponse,
@@ -719,7 +715,7 @@ export async function registerPlatformSettingsRoutes(
         const settings: PlatformSettings = {
           vastDatabase: {
             configured: !!dbUrl,
-            endpoint: maskEndpoint(dbUrl),
+            endpoint: dbUrl ?? null,
             status: dbUrl ? "connected" : "disconnected",
             tablesDeployed: false,
             vmsVip: operationalStore.vastDatabase.vmsVip,
@@ -731,13 +727,13 @@ export async function registerPlatformSettingsRoutes(
           },
           vastEventBroker: {
             configured: !!brokerUrl,
-            brokerUrl: maskEndpoint(brokerUrl),
+            brokerUrl: brokerUrl ?? null,
             topic: brokerUrl ? brokerTopic : null,
             status: brokerUrl ? "connected" : "not_configured",
           },
           vastDataEngine: {
             configured: !!dataEngineUrl,
-            url: maskEndpoint(dataEngineUrl),
+            url: dataEngineUrl ?? null,
             status: dataEngineUrl ? "connected" : "not_configured",
             tenant: operationalStore.vastDataEngine.tenant,
             username: operationalStore.vastDataEngine.username,
@@ -745,14 +741,14 @@ export async function registerPlatformSettingsRoutes(
           },
           authentication: {
             mode: jwksUri ? "oidc" : "local",
-            oidcIssuer: maskEndpoint(oidcIssuer),
-            jwksUri: maskEndpoint(jwksUri),
+            oidcIssuer: oidcIssuer,
+            jwksUri: jwksUri,
             iamEnabled: iamFlags.iamEnabled,
             shadowMode: iamFlags.shadowMode,
             rolloutRing: iamFlags.rolloutRing,
           },
           storage: {
-            s3Endpoint: maskEndpoint(s3Endpoint),
+            s3Endpoint: s3Endpoint,
             s3Bucket: s3Bucket,
             configured: !!(s3Endpoint && s3Bucket),
             endpoints: s3EndpointsForResponse,

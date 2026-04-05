@@ -456,10 +456,14 @@ function SettingsContent() {
     try {
       setLoading(true);
       setError(null);
-      const [s, ss] = await Promise.all([
-        fetchPlatformSettings(),
-        fetchSchemaStatus(),
-      ]);
+      const s = await fetchPlatformSettings();
+      // Schema status is non-critical — don't let it block the page
+      let ss: SchemaStatus | null = null;
+      try {
+        ss = await fetchSchemaStatus();
+      } catch {
+        // VAST DB may be unreachable; page must still load so admins can configure it
+      }
       setSettings(s);
       setSchemaStatus(ss);
       // Populate editable fields (only fields backed by PlatformSettings API)
@@ -504,36 +508,32 @@ function SettingsContent() {
     if (!settings) return;
     setSaving(true);
     try {
+      // Only send editable fields — omit response-only fields (configured, status, etc.)
       const updated = await savePlatformSettings({
         vastDatabase: {
-          ...settings.vastDatabase,
           endpoint: dbEndpoint || null,
           vmsVip: dbVmsVip || null,
           cnodeVips: dbCnodeVips || null,
           accessKeyId: dbAccessKeyId || null,
           bucket: dbBucket || null,
           schema: dbSchema || null,
-          // Only send secretKey if user actually changed it (not the masked placeholder)
           ...(dbSecretKey && dbSecretKey !== "--------" ? { secretKey: dbSecretKey } : {}),
         },
-        vastEventBroker: { ...settings.vastEventBroker, brokerUrl: brokerUrl || null, topic: brokerTopic || null },
+        vastEventBroker: { brokerUrl: brokerUrl || null, topic: brokerTopic || null },
         vastDataEngine: {
-          ...settings.vastDataEngine,
           url: deUrl || null,
           tenant: deTenant || null,
           username: deUsername || null,
-          // Only send password if user actually changed it (not the masked placeholder)
           ...(dePassword && dePassword !== "--------" ? { password: dePassword } : {}),
         },
         storage: {
-          ...settings.storage,
           endpoints: s3Endpoints,
           s3Endpoint: s3Endpoints[0]?.endpoint ?? null,
           s3Bucket: s3Endpoints[0]?.bucket ?? null,
           nfsConnectors: settings.storage?.nfsConnectors ?? [],
           smbConnectors: settings.storage?.smbConnectors ?? [],
         },
-      });
+      } as Partial<PlatformSettings>);
       setSettings(updated);
       setDirty(false);
     } catch (err) {
