@@ -7,6 +7,8 @@
  * The browser never sees VMS tokens — they stay server-side only.
  */
 
+import { vastFetch } from "./vast-fetch.js";
+
 export interface VmsCredentials {
   username: string;
   password: string;
@@ -40,7 +42,7 @@ export class VmsTokenManager {
   constructor(
     baseUrl: string,
     credentials: VmsCredentials,
-    fetchFn: typeof fetch = fetch,
+    fetchFn: typeof fetch = vastFetch,
   ) {
     // Strip trailing slash for consistent URL construction
     this.baseUrl = baseUrl.replace(/\/+$/, "");

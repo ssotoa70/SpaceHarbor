@@ -11,6 +11,7 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { sendError } from "../http/errors.js";
 import type { VmsTokenManager } from "./vms-token-manager.js";
+import { vastFetch } from "./vast-fetch.js";
 
 export interface ProxyContext {
   tokenManager: VmsTokenManager;
@@ -34,7 +35,7 @@ export async function proxyToVast(
   vastPath: string,
   ctx: ProxyContext,
 ): Promise<void> {
-  const doFetch = ctx.fetchFn ?? fetch;
+  const doFetch = ctx.fetchFn ?? vastFetch;
 
   // Build VAST target URL
   const url = new URL(vastPath, ctx.vastBaseUrl);

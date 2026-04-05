@@ -1,9 +1,12 @@
 /**
- * Shared Trino REST client for VAST Database.
+ * VAST Database SQL client.
  *
- * Implements the Trino REST API v1/statement protocol with proper nextUri
- * polling, Basic auth, and configurable timeouts.
+ * Implements the Trino-compatible REST API v1/statement protocol with
+ * proper nextUri polling, Basic auth, and configurable timeouts.
+ * Uses vastFetch for TLS-safe connections to VAST clusters.
  */
+
+import { vastFetch } from "../vast/vast-fetch.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -111,7 +114,7 @@ export class TrinoClient {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const response = await fetch(url, {
+      const response = await vastFetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -190,7 +193,7 @@ export class TrinoClient {
       const timer = setTimeout(() => controller.abort(), 5_000);
 
       try {
-        const res = await fetch(`${this.endpoint}/v1/info`, {
+        const res = await vastFetch(`${this.endpoint}/v1/info`, {
           headers: { Authorization: this.authHeader },
           signal: controller.signal
         });
@@ -217,7 +220,7 @@ export class TrinoClient {
   ): Promise<Response> {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      const res = await fetch(url, init);
+      const res = await vastFetch(url, init);
       if (res.status < 500 || attempt === this.maxRetries) {
         return res;
       }

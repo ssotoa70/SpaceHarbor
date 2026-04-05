@@ -905,6 +905,9 @@ export async function registerPlatformSettingsRoutes(
 
           // Test connectivity with proper AWS SigV4 authentication via HeadBucket
           try {
+            // Temporarily disable TLS verification for VAST self-signed certs
+            const { setVastTlsSkip, restoreVastTls } = await import("../vast/vast-fetch.js");
+            setVastTlsSkip();
             const { S3Client, HeadBucketCommand } = await import("@aws-sdk/client-s3");
             const useSsl = stored?.useSsl ?? endpoint.startsWith("https");
             const s3 = new S3Client({
@@ -920,8 +923,11 @@ export async function registerPlatformSettingsRoutes(
 
             await s3.send(new HeadBucketCommand({ Bucket: bucket }));
             s3.destroy();
+            restoreVastTls();
             return reply.send({ service, status: "ok", message: `Connected to ${endpoint} — bucket "${bucket}" accessible` } satisfies ConnectionTestResult);
           } catch (err) {
+            const { restoreVastTls: restore } = await import("../vast/vast-fetch.js");
+            restore();
             const msg = err instanceof Error ? err.message : String(err);
             const name = (err as { name?: string })?.name ?? "";
             const statusCode = (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
