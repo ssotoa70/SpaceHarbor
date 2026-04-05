@@ -50,10 +50,13 @@ export const platformSettingsResponseSchema = {
         endpoint: { anyOf: [{ type: "string" }, { type: "null" }] },
         status: { type: "string", enum: ["connected", "disconnected", "error"] },
         tablesDeployed: { type: "boolean" },
-        // Operational fields — present in response when set, never masked
+        // Operational fields — present in response when set
         vmsVip: { anyOf: [{ type: "string" }, { type: "null" }] },
         cnodeVips: { anyOf: [{ type: "string" }, { type: "null" }] },
         accessKeyId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        hasSecretKey: { type: "boolean" },
+        bucket: { anyOf: [{ type: "string" }, { type: "null" }] },
+        schema: { anyOf: [{ type: "string" }, { type: "null" }] },
       },
     },
     vastEventBroker: {
@@ -73,8 +76,9 @@ export const platformSettingsResponseSchema = {
         configured: { type: "boolean" },
         url: { anyOf: [{ type: "string" }, { type: "null" }] },
         status: { type: "string", enum: ["connected", "disconnected", "not_configured"] },
-        // tenant is operational config, not a secret
         tenant: { anyOf: [{ type: "string" }, { type: "null" }] },
+        username: { anyOf: [{ type: "string" }, { type: "null" }] },
+        hasPassword: { type: "boolean" },
       },
     },
     authentication: {
