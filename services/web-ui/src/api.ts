@@ -365,7 +365,7 @@ export interface IngestResult {
   job: { id: string; assetId: string; status: string; sourceUri: string };
 }
 
-export async function ingestAsset(input: { title: string; sourceUri: string; projectId?: string }): Promise<IngestResult> {
+export async function ingestAsset(input: { title: string; sourceUri: string; projectId?: string; fileSizeBytes?: number }): Promise<IngestResult> {
   const response = await fetch(`${API_BASE_URL}/api/v1/assets/ingest`, {
     method: "POST",
     headers: withAuth({
@@ -2351,5 +2351,180 @@ export async function fetchDataEnginePipelineRuns(
     return (await response.json()) as DataEnginePipelineStep[];
   } catch {
     return [];
+  }
+}
+
+/* ── Storage Browse ── */
+
+export interface StorageEndpoint {
+  id: string;
+  label: string;
+  endpoint: string;
+  bucket: string;
+  region: string;
+}
+
+export interface StorageBrowseFile {
+  key: string;
+  sizeBytes: number;
+  lastModified: string;
+  inferredMediaType: string;
+  sourceUri: string;
+}
+
+export interface StorageBrowseFolder {
+  prefix: string;
+}
+
+export interface StorageBrowseResult {
+  endpointId: string;
+  bucket: string;
+  prefix: string;
+  files: StorageBrowseFile[];
+  folders: StorageBrowseFolder[];
+  truncated: boolean;
+  continuationToken?: string;
+}
+
+export async function fetchStorageEndpoints(): Promise<StorageEndpoint[]> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/storage/endpoints`,
+      { headers: withAuth() },
+    );
+    if (!response.ok) return [];
+    const body = (await response.json()) as { endpoints: StorageEndpoint[] };
+    return body.endpoints;
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchStorageBrowse(options: {
+  endpointId?: string;
+  prefix?: string;
+  maxKeys?: number;
+  continuationToken?: string;
+}): Promise<StorageBrowseResult | null> {
+  try {
+    const params = new URLSearchParams();
+    if (options.endpointId) params.set("endpointId", options.endpointId);
+    if (options.prefix) params.set("prefix", options.prefix);
+    if (options.maxKeys) params.set("maxKeys", String(options.maxKeys));
+    if (options.continuationToken) params.set("continuationToken", options.continuationToken);
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/storage/browse?${params.toString()}`,
+      { headers: withAuth() },
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as StorageBrowseResult;
+  } catch {
+    return null;
+  }
+}
+
+/* ── EXR Metadata ── */
+
+export interface ExrFileMetadata {
+  file_id: string;
+  file_path: string;
+  size_bytes: number;
+  multipart_count: number;
+  is_deep: boolean;
+  frame_number: number | null;
+  inspection_timestamp: string;
+  inspection_count: number;
+  [key: string]: unknown;
+}
+
+export interface ExrPartMetadata {
+  part_index: number;
+  width: number;
+  height: number;
+  compression: string;
+  color_space: string;
+  is_deep: boolean;
+  pixel_aspect_ratio: number;
+  [key: string]: unknown;
+}
+
+export interface ExrChannelMetadata {
+  channel_name: string;
+  layer_name: string;
+  component_name: string;
+  channel_type: string;
+  part_index: number;
+  [key: string]: unknown;
+}
+
+export interface ExrMetadataLookupResult {
+  found: boolean;
+  file?: ExrFileMetadata;
+  parts?: ExrPartMetadata[];
+  channels?: ExrChannelMetadata[];
+  summary?: {
+    resolution: string;
+    compression: string;
+    colorSpace: string;
+    channelCount: number;
+    isDeep: boolean;
+    frameNumber: number | null;
+  };
+}
+
+export interface ExrMetadataStats {
+  totalFiles: number;
+  totalParts: number;
+  totalChannels: number;
+  totalAttributes: number;
+  schema: string;
+}
+
+export async function fetchExrMetadataFiles(options?: {
+  pathPrefix?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ files: ExrFileMetadata[]; total: number }> {
+  try {
+    const params = new URLSearchParams();
+    if (options?.pathPrefix) params.set("pathPrefix", options.pathPrefix);
+    if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.offset) params.set("offset", String(options.offset));
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/exr-metadata/files?${params.toString()}`,
+      { headers: withAuth() },
+    );
+    if (!response.ok) return { files: [], total: 0 };
+    return (await response.json()) as { files: ExrFileMetadata[]; total: number };
+  } catch {
+    return { files: [], total: 0 };
+  }
+}
+
+export async function fetchExrMetadataLookup(path: string): Promise<ExrMetadataLookupResult> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/exr-metadata/lookup?path=${encodeURIComponent(path)}`,
+      { headers: withAuth() },
+    );
+    if (!response.ok) return { found: false };
+    return (await response.json()) as ExrMetadataLookupResult;
+  } catch {
+    return { found: false };
+  }
+}
+
+export async function fetchExrMetadataStats(): Promise<ExrMetadataStats | null> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/exr-metadata/stats`,
+      { headers: withAuth() },
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as ExrMetadataStats;
+  } catch {
+    return null;
   }
 }

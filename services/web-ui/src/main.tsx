@@ -100,6 +100,9 @@ const UsersRolesPage = React.lazy(() =>
 const AuditTrailPage = React.lazy(() =>
   import("./pages/AuditTrailPage").then((m) => ({ default: m.AuditTrailPage }))
 );
+const StorageBrowserPage = React.lazy(() =>
+  import("./pages/StorageBrowserPage").then((m) => ({ default: m.StorageBrowserPage }))
+);
 
 /* ── Suspense wrapper ── */
 
@@ -150,6 +153,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="library/assets/:id" element={<Lazy><AssetDetail /></Lazy>} />
             <Route path="library/hierarchy" element={<Lazy><HierarchyBrowser /></Lazy>} />
             <Route path="library/materials" element={<Lazy><MaterialBrowser /></Lazy>} />
+            <Route path="library/storage" element={<Lazy><StorageBrowserPage /></Lazy>} />
 
             {/* ── WORK section ── */}
             <Route path="work/queue" element={<Lazy><MyQueuePage /></Lazy>} />

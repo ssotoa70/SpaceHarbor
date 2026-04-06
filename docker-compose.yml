@@ -14,7 +14,9 @@ services:
       SPACEHARBOR_API_KEY: ${SPACEHARBOR_API_KEY:-}
       # Per-service credentials: control-plane accepts ALL service keys (A2 remediation)
       SPACEHARBOR_API_KEYS: ${SPACEHARBOR_API_KEY_CONTROL_PLANE:-},${SPACEHARBOR_API_KEY_MEDIA_WORKER:-},${SPACEHARBOR_API_KEY_SCANNER:-},${SPACEHARBOR_API_KEY_OPENASSETIO:-}
-      VAST_DATABASE_URL: ${VAST_DATABASE_URL:-}
+      # VAST Database URL: defaults to the Trino microservice.
+      # Override with a customer Trino or VAST SQL endpoint if available.
+      VAST_DATABASE_URL: ${VAST_DATABASE_URL:-http://trino:8080}
       VAST_EVENT_BROKER_URL: ${VAST_EVENT_BROKER_URL:-}
       VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL:-}
       VAST_DATA_ENGINE_URL: ${VAST_DATA_ENGINE_URL:-${VAST_DATAENGINE_URL:-}}
@@ -38,6 +40,14 @@ services:
       SPACEHARBOR_LEASE_REAPING_ENABLED: ${SPACEHARBOR_LEASE_REAPING_ENABLED:-true}
       SPACEHARBOR_LEASE_REAPING_INTERVAL_SECONDS: ${SPACEHARBOR_LEASE_REAPING_INTERVAL_SECONDS:-30}
       SPACEHARBOR_MAX_JOB_ATTEMPTS: ${SPACEHARBOR_MAX_JOB_ATTEMPTS:-3}
+      # S3 storage (used by ingest tagging and storage browse)
+      SPACEHARBOR_S3_ENDPOINT: ${SPACEHARBOR_S3_ENDPOINT:-}
+      SPACEHARBOR_S3_BUCKET: ${SPACEHARBOR_S3_BUCKET:-}
+      SPACEHARBOR_S3_REGION: ${SPACEHARBOR_S3_REGION:-us-east-1}
+      SPACEHARBOR_S3_ACCESS_KEY_ID: ${SPACEHARBOR_S3_ACCESS_KEY_ID:-}
+      SPACEHARBOR_S3_SECRET_ACCESS_KEY: ${SPACEHARBOR_S3_SECRET_ACCESS_KEY:-}
+      # EXR metadata schema (exr-inspector tables)
+      EXR_METADATA_SCHEMA: ${EXR_METADATA_SCHEMA:-sergio-db/exr_metadata_2}
     ports:
       - "8080:8080"
     volumes:
@@ -45,6 +55,9 @@ services:
     networks:
       - frontend
       - backend
+    depends_on:
+      trino:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
       interval: 10s
@@ -198,6 +211,40 @@ services:
         limits:
           memory: 4G
           cpus: '4.0'
+
+  trino:
+    build:
+      context: ./services/trino
+    container_name: spaceharbor-trino
+    environment:
+      # VAST S3 gateway endpoint — the only required setting.
+      # Set this in .env to enable VAST Database queries.
+      VAST_S3_ENDPOINT: ${VAST_S3_ENDPOINT:-}
+      VAST_ACCESS_KEY_ID: ${VAST_ACCESS_KEY:-}
+      VAST_SECRET_ACCESS_KEY: ${VAST_SECRET_KEY:-}
+      # Optional: CNode VIPs for faster data reads (comma-separated)
+      VAST_DATA_ENDPOINTS: ${VAST_DATA_ENDPOINTS:-}
+      VAST_REGION: ${VAST_REGION:-us-east-1}
+      TRINO_MEMORY: ${TRINO_MEMORY:-1G}
+    ports:
+      - "8090:8080"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/v1/info || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    tmpfs:
+      - /tmp
+      - /data/trino
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
 
   web-ui:
     build:

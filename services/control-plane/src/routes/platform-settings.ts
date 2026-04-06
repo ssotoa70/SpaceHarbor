@@ -279,13 +279,20 @@ function loadOperationalStore(store: SettingsStore): void {
 /**
  * Get the configured VAST Database endpoint URL.
  * Priority: operational store > VAST_DB_ENDPOINT env > VAST_DATABASE_URL env > S3 endpoint fallback.
+ * Bare hostnames/IPs (no protocol) are normalized to https://.
  */
 export function getVastDatabaseUrl(): string | null {
-  return operationalStore.vastDatabase.url
+  const raw = operationalStore.vastDatabase.url
     || process.env.VAST_DB_ENDPOINT
     || process.env.VAST_DATABASE_URL
     || process.env.SPACEHARBOR_S3_ENDPOINT
     || null;
+  if (!raw) return null;
+  // Normalize bare hostnames/IPs to valid URLs
+  if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
+    return `https://${raw}`;
+  }
+  return raw;
 }
 
 /**
@@ -371,8 +378,30 @@ export interface SchemaStatus {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Get VAST Database credentials from operational store or env vars.
+ */
+export function getVastDatabaseCredentials(): { accessKey: string; secretKey: string } {
+  const accessKey = operationalStore.vastDatabase.accessKeyId
+    || process.env.VAST_DB_ACCESS_KEY
+    || process.env.VAST_ACCESS_KEY
+    || "";
+  const secretKey = operationalStore.vastDatabase.secretKey
+    || process.env.VAST_DB_SECRET_KEY
+    || process.env.VAST_SECRET_KEY
+    || "";
+  return { accessKey, secretKey };
+}
+
+/**
+ * Get all configured S3 storage endpoints from the operational store.
+ */
+export function getStorageEndpoints(): ReadonlyArray<Omit<S3EndpointStored, "secretAccessKey"> & { secretAccessKey: string }> {
+  return operationalStore.storage.endpoints;
+}
+
 /** Build a TrinoClient from operational store / env vars, or null if not configured. */
-function buildTrinoFromEnv(): TrinoClient | null {
+export function buildTrinoFromSettings(): TrinoClient | null {
   const dbUrl = getVastDatabaseUrl();
   if (!dbUrl) return null;
   try {
@@ -442,7 +471,7 @@ export async function registerPlatformSettingsRoutes(
         let tablesDeployed = false;
 
         if (dbConfigured) {
-          const trino = buildTrinoFromEnv();
+          const trino = buildTrinoFromSettings();
           if (trino) {
             try {
               const health = await trino.healthCheck();
@@ -1133,7 +1162,7 @@ export async function registerPlatformSettingsRoutes(
       },
       async (_request, reply) => {
         if (denyUnlessAdmin(_request, reply)) return;
-        const trino = buildTrinoFromEnv();
+        const trino = buildTrinoFromSettings();
         const totalMigrations = migrations.length;
 
         let currentVersion = 0;

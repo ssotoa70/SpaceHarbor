@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 
-import { fetchAsset, fetchAssetAudit, type AssetRow, type AuditRow } from "../api";
+import {
+  fetchAsset,
+  fetchAssetAudit,
+  fetchExrMetadataLookup,
+  type AssetRow,
+  type AuditRow,
+  type ExrMetadataLookupResult,
+} from "../api";
 import { Badge, Button, Card, Skeleton } from "../design-system";
 
 const statusVariant = (s: string) => {
@@ -15,6 +22,7 @@ export function AssetDetail() {
   const { id } = useParams<{ id: string }>();
   const [asset, setAsset] = useState<AssetRow | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -23,6 +31,10 @@ export function AssetDetail() {
       setAsset(a);
       setAudit(auditRows);
       setLoading(false);
+      // If asset has an EXR source, look up rich metadata from exr-inspector tables
+      if (a?.sourceUri?.toLowerCase().endsWith(".exr")) {
+        fetchExrMetadataLookup(a.sourceUri).then(setExrMeta);
+      }
     });
   }, [id]);
 
@@ -113,6 +125,61 @@ export function AssetDetail() {
               )}
             </dl>
           </Card>
+
+          {/* EXR Metadata from exr-inspector */}
+          {exrMeta?.found && exrMeta.summary && (
+            <Card>
+              <h2 className="text-sm font-semibold mb-3">EXR Metadata</h2>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-[var(--color-ah-text-muted)]">Resolution</dt>
+                  <dd>{exrMeta.summary.resolution}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-[var(--color-ah-text-muted)]">Compression</dt>
+                  <dd>{exrMeta.summary.compression}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-[var(--color-ah-text-muted)]">Color Space</dt>
+                  <dd>{exrMeta.summary.colorSpace}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-[var(--color-ah-text-muted)]">Channels</dt>
+                  <dd>{exrMeta.summary.channelCount}</dd>
+                </div>
+                {exrMeta.summary.isDeep && (
+                  <div className="flex justify-between">
+                    <dt className="text-[var(--color-ah-text-muted)]">Type</dt>
+                    <dd><Badge variant="info">Deep</Badge></dd>
+                  </div>
+                )}
+                {exrMeta.summary.frameNumber != null && (
+                  <div className="flex justify-between">
+                    <dt className="text-[var(--color-ah-text-muted)]">Frame</dt>
+                    <dd>{exrMeta.summary.frameNumber}</dd>
+                  </div>
+                )}
+              </dl>
+
+              {/* Channel list */}
+              {exrMeta.channels && exrMeta.channels.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-[var(--color-ah-border-muted)]">
+                  <h3 className="text-xs font-semibold text-[var(--color-ah-text-muted)] mb-2">AOVs / Channels</h3>
+                  <div className="flex flex-wrap gap-1">
+                    {exrMeta.channels.map((ch) => (
+                      <span
+                        key={`${ch.part_index}-${ch.channel_name}`}
+                        className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-300"
+                        title={`${ch.layer_name || ""}${ch.layer_name ? "." : ""}${ch.component_name} (${ch.channel_type})`}
+                      >
+                        {ch.channel_name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+          )}
         </div>
       </div>
     </section>

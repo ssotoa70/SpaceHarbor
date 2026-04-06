@@ -47,6 +47,8 @@ import { registerWorkRoutes } from "./routes/work.js";
 import { registerShotRoutes } from "./routes/shots.js";
 import { registerDeliveryRoutes } from "./routes/delivery.js";
 import { registerNavBadgeRoutes } from "./routes/nav-badges.js";
+import { registerStorageBrowseRoutes } from "./routes/storage-browse.js";
+import { registerExrMetadataRoutes } from "./routes/exr-metadata.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 import { TrinoClient } from "./db/trino-client.js";
@@ -66,7 +68,7 @@ import { csrfHook } from "./iam/csrf.js";
 import { FunctionRegistry, ExrInspectorFunction, OiioProxyFunction } from "./data-engine/index.js";
 import { registerDataEngineRoutes } from "./routes/dataengine.js";
 import { registerDataEngineProxyRoutes } from "./routes/dataengine-proxy.js";
-import { getVastDataEngineUrl, getVastDataEngineCredentials } from "./routes/platform-settings.js";
+import { getVastDataEngineUrl, getVastDataEngineCredentials, buildTrinoFromSettings } from "./routes/platform-settings.js";
 
 // Augment Fastify request with identity
 declare module "fastify" {
@@ -369,6 +371,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerDeliveryRoutes(app, persistence, prefixes);
     void registerNavBadgeRoutes(app, persistence, prefixes);
 
+    // S3 storage browse — direct file discovery without Trino
+    void registerStorageBrowseRoutes(app, prefixes);
+
     // DataEngine function catalogue + pipeline listing
     void registerDataEngineRoutes(app, functionRegistry, prefixes);
 
@@ -387,22 +392,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // C.10: VAST Catalog routes (read-only, require VAST Database connection)
     // Phase 1.2: Wire IAM persistence — use PersistentRoleBindingService when VAST DB is available
-    const persistBackend = process.env.SPACEHARBOR_PERSISTENCE_BACKEND?.trim().toLowerCase();
-    const dbUrl = process.env.VAST_DATABASE_URL;
-    let catalogTrino: import("./db/trino-client.js").TrinoClient | null = null;
-    if (dbUrl && persistBackend !== "local") {
-      try {
-        const url = new URL(dbUrl);
-        catalogTrino = new TrinoClient({
-          endpoint: `${url.protocol}//${url.host}`,
-          accessKey: url.username || process.env.VAST_ACCESS_KEY || "",
-          secretKey: url.password || process.env.VAST_SECRET_KEY || "",
-        });
-      } catch {
-        // Invalid URL — catalog routes will return 503
-      }
-    }
+    // Uses buildTrinoFromSettings() which checks: platform settings store > env vars.
+    // This allows the admin to configure VAST Database via the Settings UI without
+    // requiring env var changes and container restarts.
+    const catalogTrino = buildTrinoFromSettings();
     void registerCatalogRoutes(app, catalogTrino, prefixes);
+
+    // EXR metadata routes — query exr-inspector tables via Trino
+    void registerExrMetadataRoutes(app, catalogTrino, prefixes);
 
     // Phase: Analytics dashboard endpoints (cached, fallback to in-memory)
     void registerAnalyticsRoutes(app, persistence, catalogTrino, prefixes);

@@ -41,6 +41,13 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
     section: "LIBRARY",
     icon: "M4 2l8 2v8l-8 2V2zM4 6l8 2",
   },
+  {
+    id: "storage",
+    to: "/library/storage",
+    label: "Storage",
+    section: "LIBRARY",
+    icon: "M2 4h12v2H2zM2 8h12v2H2zM2 12h12v2H2z",
+  },
 
   // ── WORK ──
   {
