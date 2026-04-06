@@ -627,7 +627,10 @@ export async function registerPlatformSettingsRoutes(
         const deBody = body["vastDataEngine"] as Record<string, unknown> | undefined;
         if (deBody) {
           if (typeof deBody["url"] === "string" || deBody["url"] === null) {
-            operationalStore.vastDataEngine.url = (deBody["url"] as string | null) || null;
+            // Strip hash fragments — users may paste VMS web UI URLs like
+            // https://vast.example.com/#/login/tenant
+            const rawUrl = (deBody["url"] as string | null) || null;
+            operationalStore.vastDataEngine.url = rawUrl?.includes("#") ? rawUrl.split("#")[0].replace(/\/+$/, "") : rawUrl;
           }
           if (typeof deBody["tenant"] === "string" || deBody["tenant"] === null) {
             operationalStore.vastDataEngine.tenant = (deBody["tenant"] as string | null) || null;
@@ -815,9 +818,9 @@ export async function registerPlatformSettingsRoutes(
 
         if (service === "vast_database") {
           const bucket = getVastDatabaseBucket();
-          // Prefer VMS VIP (direct cluster endpoint) for database operations
-          const vmsVip = operationalStore.vastDatabase.vmsVip;
-          const dbUrl = vmsVip ? `http://${vmsVip}` : getVastDatabaseUrl();
+          // Use the S3 gateway endpoint for HeadBucket (not VMS VIP which may
+          // serve S3 on a different port or with different signature context).
+          const dbUrl = getVastDatabaseUrl();
 
           if (!dbUrl) {
             return reply.send({
@@ -913,9 +916,14 @@ export async function registerPlatformSettingsRoutes(
             } satisfies ConnectionTestResult);
           }
 
+          // Strip URL hash fragments — users may paste the VMS web UI URL
+          // (e.g. https://vast.example.com/#/login/tenant) but the API base
+          // is just the origin (https://vast.example.com).
+          const cleanUrl = deUrl.includes("#") ? deUrl.split("#")[0] : deUrl;
+
           // Actually test VMS authentication
           const { VmsTokenManager } = await import("../vast/vms-token-manager.js");
-          const tokenManager = new VmsTokenManager(deUrl, creds);
+          const tokenManager = new VmsTokenManager(cleanUrl, creds);
           const result = await tokenManager.testConnection();
           return reply.send({
             service,
