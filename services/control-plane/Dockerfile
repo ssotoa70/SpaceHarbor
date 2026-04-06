@@ -1,13 +1,12 @@
-FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa
+FROM node:20-slim@sha256:4a7f0c6a92093750c7aa3aee2a0c4a09e40f12ccd720e7cafa545a2a6d7dac95
 
 WORKDIR /app
 
-# Install Python + vastdb for VAST Database schema migrations
-# Install without adbc_driver_manager (needs C++ compiler) — not needed for table creation
-RUN apk add --no-cache python3 py3-pip \
-    && pip3 install --break-system-packages --no-deps vastdb \
-    && pip3 install --break-system-packages pyarrow aws-requests-auth flatbuffers \
-       requests xmltodict backoff==2.2.1 numpy pandas protobuf sqlglot ibis-framework
+# Install Python + vastdb SDK for VAST Database schema migrations.
+# Debian-slim has pre-built wheels for adbc_driver_manager (required by vastdb).
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip wget \
+    && pip3 install --break-system-packages vastdb pyarrow \
+    && apt-get purge -y --auto-remove && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 RUN npm ci
@@ -16,7 +15,7 @@ COPY tsconfig.json ./
 COPY src ./src
 
 # Create non-root user and settings data directory
-RUN addgroup -S app && adduser -S app -G app \
+RUN groupadd -r app && useradd -r -g app app \
     && mkdir -p /data && chown -R app:app /app /data
 
 USER app

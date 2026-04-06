@@ -429,8 +429,6 @@ function SettingsContent() {
 
   // Editable form state for VAST services (only fields backed by PlatformSettings)
   const [dbEndpoint, setDbEndpoint] = useState("");
-  const [dbVmsVip, setDbVmsVip] = useState("");
-  const [dbCnodeVips, setDbCnodeVips] = useState("");
   const [dbAccessKeyId, setDbAccessKeyId] = useState("");
   const [dbSecretKey, setDbSecretKey] = useState("");
   const [dbBucket, setDbBucket] = useState("");
@@ -468,8 +466,6 @@ function SettingsContent() {
       setSchemaStatus(ss);
       // Populate editable fields (only fields backed by PlatformSettings API)
       setDbEndpoint(s.vastDatabase.endpoint ?? "");
-      setDbVmsVip(s.vastDatabase.vmsVip ?? "");
-      setDbCnodeVips(s.vastDatabase.cnodeVips ?? "");
       setDbAccessKeyId(s.vastDatabase.accessKeyId ?? "");
       setDbSecretKey(s.vastDatabase.hasSecretKey ? "--------" : "");
       setDbBucket(s.vastDatabase.bucket ?? "");
@@ -512,8 +508,6 @@ function SettingsContent() {
       const updated = await savePlatformSettings({
         vastDatabase: {
           endpoint: dbEndpoint || null,
-          vmsVip: dbVmsVip || null,
-          cnodeVips: dbCnodeVips || null,
           accessKeyId: dbAccessKeyId || null,
           bucket: dbBucket || null,
           schema: dbSchema || null,
@@ -541,7 +535,7 @@ function SettingsContent() {
     } finally {
       setSaving(false);
     }
-  }, [settings, dbEndpoint, dbVmsVip, dbCnodeVips, dbAccessKeyId, dbSecretKey, dbBucket, dbSchema, brokerUrl, brokerTopic, deUrl, deTenant, deUsername, dePassword, s3Endpoints]);
+  }, [settings, dbEndpoint, dbAccessKeyId, dbSecretKey, dbBucket, dbSchema, brokerUrl, brokerTopic, deUrl, deTenant, deUsername, dePassword, s3Endpoints]);
 
   const handleTestConnection = useCallback(async (service: string) => {
     setTestingService(service);
@@ -701,22 +695,10 @@ function SettingsContent() {
         >
           <div className="grid grid-cols-2 gap-3">
             <ConfigInput
-              label="Database Endpoint URL"
+              label="S3 Gateway Endpoint"
               value={dbEndpoint}
               onChange={(v) => { setDbEndpoint(v); markDirty(); }}
-              placeholder="https://<VAST_VIP>:8443"
-            />
-            <ConfigInput
-              label="VAST Endpoint (VMS VIP)"
-              value={dbVmsVip}
-              onChange={(v) => { setDbVmsVip(v); markDirty(); }}
-              placeholder="192.168.1.10"
-            />
-            <ConfigInput
-              label="Data Endpoints (CNode VIPs)"
-              value={dbCnodeVips}
-              onChange={(v) => { setDbCnodeVips(v); markDirty(); }}
-              placeholder="192.168.1.20,192.168.1.21"
+              placeholder="http://vast-s3-gateway:8080"
             />
             <ConfigInput
               label="Access Key ID"
@@ -745,7 +727,7 @@ function SettingsContent() {
             />
           </div>
           <p className="text-[10px] text-[var(--color-ah-text-subtle)] mt-1">
-            The VAST Endpoint (VMS VIP) is used for schema deployment via the VAST Database SDK. The bucket must be a Database-enabled view with S3 and DATABASE protocols.
+            The S3 Gateway Endpoint is used for connectivity tests and schema deployment. The bucket must have DATABASE protocol enabled.
           </p>
           {schemaStatus && (
             <div className="mt-2 space-y-1">

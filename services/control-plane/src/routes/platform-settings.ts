@@ -1026,15 +1026,12 @@ export async function registerPlatformSettingsRoutes(
 
         const bucket = getVastDatabaseBucket();
         const schema = getVastDatabaseSchema();
-
-        // For vastdb SDK, prefer VMS VIP (direct cluster endpoint) over S3 gateway
-        const vmsVip = operationalStore.vastDatabase.vmsVip;
-        const dbUrl = vmsVip ? `http://${vmsVip}` : getVastDatabaseUrl();
+        const dbUrl = getVastDatabaseUrl();
 
         if (!dbUrl || !bucket) {
           return reply.status(503).send({
             code: "SERVICE_UNAVAILABLE",
-            message: "VAST Database endpoint (VMS VIP) and bucket must be configured before deploying schema.",
+            message: "VAST Database S3 gateway endpoint and bucket must be configured before deploying schema.",
             requestId: _request.id,
             details: null,
           });
