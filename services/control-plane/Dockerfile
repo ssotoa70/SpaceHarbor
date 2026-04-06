@@ -2,14 +2,20 @@ FROM node:20-slim@sha256:1e85773c98c31d4fe5b545e4cb17379e617b348832fb3738b22a08f
 
 WORKDIR /app
 
-# Install Python + vastdb SDK for VAST Database schema migrations.
-# Debian-slim has pre-built wheels for adbc_driver_manager (required by vastdb).
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip wget \
+# Install build tools (required by @confluentinc/kafka-javascript native module)
+# and Python + vastdb SDK for VAST Database schema migrations.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-dev wget \
+    build-essential g++ make \
     && pip3 install --break-system-packages vastdb pyarrow \
-    && apt-get purge -y --auto-remove && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 RUN npm ci
+
+# Remove build tools after npm ci to keep image smaller
+RUN apt-get update && apt-get purge -y --auto-remove build-essential g++ make python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY tsconfig.json ./
 COPY src ./src
