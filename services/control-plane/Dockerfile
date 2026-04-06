@@ -14,8 +14,8 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 
-# Create non-root user and settings data directory
-RUN groupadd -r app && useradd -r -g app app \
+# Create non-root user (UID 100 matches Alpine's adduser -S for volume compat)
+RUN groupadd -g 101 app && useradd -u 100 -g app app \
     && mkdir -p /data && chown -R app:app /app /data
 
 USER app

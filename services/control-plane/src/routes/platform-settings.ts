@@ -261,7 +261,8 @@ function loadOperationalStore(store: SettingsStore): void {
   const saved = store.get("platform.operational") as unknown as OperationalSettings | null;
   if (saved) {
     operationalStore = {
-      vastDatabase: { ...defaultOperationalSettings.vastDatabase, ...saved.vastDatabase },
+      // Clear deprecated fields (vmsVip, cnodeVips removed from UI)
+      vastDatabase: { ...defaultOperationalSettings.vastDatabase, ...saved.vastDatabase, vmsVip: null, cnodeVips: null },
       vastEventBroker: { ...defaultOperationalSettings.vastEventBroker, ...saved.vastEventBroker },
       vastDataEngine: { ...defaultOperationalSettings.vastDataEngine, ...saved.vastDataEngine },
       storage: {
@@ -1026,10 +1027,11 @@ export async function registerPlatformSettingsRoutes(
 
         const bucket = getVastDatabaseBucket();
         const schema = getVastDatabaseSchema();
-        // vastdb SDK uses ADBC and needs a direct cluster VIP, not the S3 gateway.
-        // Prefer the stored VMS VIP; fall back to the database endpoint URL.
-        const vmsVip = operationalStore.vastDatabase.vmsVip;
-        const dbUrl = vmsVip ? `http://${vmsVip}` : getVastDatabaseUrl();
+        // Use the database endpoint URL configured by the user.
+        // The vastdb SDK uses ADBC — the endpoint must be a direct cluster VIP,
+        // not an S3 gateway behind nginx. If the user configures an S3 proxy
+        // the error message from vastdb will make this clear.
+        const dbUrl = getVastDatabaseUrl();
 
         if (!dbUrl || !bucket) {
           return reply.status(503).send({
