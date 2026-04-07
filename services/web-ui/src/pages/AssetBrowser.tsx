@@ -307,7 +307,7 @@ function MediaPreview({ asset, onClose }: MediaPreviewProps) {
             <img src={asset.thumbnail.uri} alt={asset.title} className="max-w-full max-h-full rounded" />
           ) : (
             <div className="flex flex-col items-center gap-3 text-gray-500">
-              <span className="text-6xl">{mediaType === "image" ? "&#127912;" : mediaType === "video" ? "&#127910;" : "&#128196;"}</span>
+              <span className="text-6xl">{mediaType === "image" ? "\uD83C\uDFA8" : mediaType === "video" ? "\uD83C\uDFA6" : "\uD83D\uDCC4"}</span>
               <span className="text-sm">No preview available</span>
               <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-600">{asset.sourceUri}</span>
             </div>
