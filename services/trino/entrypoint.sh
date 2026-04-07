@@ -39,6 +39,7 @@ cat > "${CONFIG_DIR}/jvm.config" <<EOF
 -XX:+HeapDumpOnOutOfMemoryError
 -XX:+ExitOnOutOfMemoryError
 -Djdk.attach.allowAttachSelf=true
+--add-opens=java.base/java.nio=ALL-UNNAMED
 EOF
 
 # --- Config properties (single-node coordinator) ---
