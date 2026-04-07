@@ -113,7 +113,7 @@ export async function registerExrMetadataRoutes(
           );
           const total = Number(countResult.data[0]?.[0] ?? 0);
 
-          // Get files with pagination
+          // Get files with pagination (exclude vector columns — unsupported by Trino Arrow)
           const result = await trino.query(`
             SELECT
               file_id,
@@ -180,9 +180,14 @@ export async function registerExrMetadataRoutes(
 
         try {
           // Fetch file, parts, channels, attributes in parallel
+          // Note: exclude vector columns (metadata_embedding, channel_fingerprint)
+          // — Trino VAST connector doesn't support FixedSizeList Arrow type.
           const [fileResult, partsResult, channelsResult, attrsResult] = await Promise.all([
             trino.query(`
-              SELECT * FROM ${table("files")}
+              SELECT file_id, file_path, file_path_normalized, header_hash,
+                     size_bytes, mtime, multipart_count, is_deep,
+                     frame_number, inspection_timestamp, inspection_count, last_inspected
+              FROM ${table("files")}
               WHERE file_id = '${safeId}'
               LIMIT 1
             `),
@@ -298,9 +303,12 @@ export async function registerExrMetadataRoutes(
         const safeOriginal = sanitize(path);
 
         try {
-          // Try both normalized and original path
+          // Try both normalized and original path (exclude vector columns)
           const fileResult = await trino.query(`
-            SELECT * FROM ${table("files")}
+            SELECT file_id, file_path, file_path_normalized, size_bytes,
+                   multipart_count, is_deep, frame_number,
+                   inspection_timestamp, inspection_count
+            FROM ${table("files")}
             WHERE file_path = '${safePath}'
                OR file_path = '${safeOriginal}'
                OR file_path_normalized = '${safePath}'
