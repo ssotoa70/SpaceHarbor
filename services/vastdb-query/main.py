@@ -229,11 +229,13 @@ def exr_lookup(
             # Try to find by file_path on parts table (no vector columns)
             all_parts = table_to_records(parts_tbl, limit=10000)
 
-            # Search for matching file
+            # Search for matching file — try exact path, normalized, and filename
+            filename = path.rsplit("/", 1)[-1] if "/" in path else path
             matched_file_id = None
             for p in all_parts:
                 fp = str(p.get("file_path", ""))
-                if fp == normalized or fp == path or fp.endswith(path.split("/")[-1]):
+                fp_name = fp.rsplit("/", 1)[-1] if "/" in fp else fp
+                if fp == normalized or fp == path or fp_name == filename:
                     matched_file_id = p.get("file_id")
                     break
 
