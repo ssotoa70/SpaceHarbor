@@ -3,9 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Skeleton } from "../design-system";
 import {
   fetchVersionDetail,
+  fetchExrMetadataLookup,
   devAdvanceAsset,
   type VersionDetailInfo,
   type VersionDetailHistoryEvent,
+  type ExrMetadataLookupResult,
 } from "../api";
 import type { AssetRow } from "../types";
 import { formatTC } from "../utils/timecode";
@@ -273,50 +275,93 @@ function TabBar({ activeTab, onTabChange }: { activeTab: TabId; onTabChange: (t:
 function InfoTab({
   info,
   asset,
+  exrMeta,
   onAdvanced,
 }: {
   info: VersionDetailInfo | null;
   asset: AssetRow;
+  exrMeta?: ExrMetadataLookupResult | null;
   onAdvanced?: (updatedAsset: AssetRow) => void;
 }) {
   // When no version detail is available (asset ingested without VFX hierarchy),
-  // show basic asset metadata instead of infinite skeleton placeholders.
+  // show data from the asset record + EXR metadata from exr-inspector.
   if (!info && !asset.currentVersionId) {
     const mt = inferMediaType(asset.title, asset.sourceUri);
     const statusLabel = STATUS_LABELS[asset.status] ?? asset.status;
+    const exr = exrMeta?.found ? exrMeta : null;
+    const summary = exr?.summary;
+    const prod = asset.productionMetadata;
+
     return (
       <div className="flex flex-col h-full">
         <div className="flex-1 overflow-auto px-4 pb-4">
           <div className="mt-3 mb-1">
             <h3 className="text-[13px] font-semibold text-[var(--color-ah-text)] truncate">{asset.title}</h3>
             <p className="font-[var(--font-ah-mono)] text-[10px] text-[var(--color-ah-accent)] tracking-wide mt-0.5">
-              {mt.toUpperCase()} FILE
+              {mt.toUpperCase()}{summary ? " SEQUENCE" : " FILE"}
+              {prod?.sequence || prod?.shot
+                ? ` \u00b7 ${[prod.sequence, prod.shot].filter(Boolean).join(" / ")}`
+                : ""}
             </p>
           </div>
-          <SectionHeader title="File Info" />
+
+          {/* SEQUENCE section — populated from EXR metadata when available */}
+          <SectionHeader title="Sequence" />
           <dl>
-            <StatusRow label="Status" statusLabel={statusLabel} />
-            <MetaRow label="Source" value={asset.sourceUri} copyable />
-            <MetaRow label="Media Type" value={mt} />
-            {asset.metadata?.file_size_bytes != null && (
-              <MetaRow label="File Size" value={formatFileSize(asset.metadata.file_size_bytes)} />
+            {summary?.frameNumber != null && (
+              <MetaRow label="Frame" value={String(summary.frameNumber)} />
             )}
-            {asset.createdAt && <MetaRow label="Ingested" value={new Date(asset.createdAt).toLocaleString()} />}
-            <MetaRow label="Asset ID" value={asset.id} copyable />
-            {asset.jobId && <MetaRow label="Job ID" value={asset.jobId} copyable />}
+            <MetaRow label="Resolution" value={summary?.resolution !== "unknown" ? summary?.resolution : null} />
+            <MetaRow label="Channels" value={summary?.channelCount ? channelLabel(summary.channelCount) : null} accent={!!summary?.channelCount && summary.channelCount > 3} />
+            <MetaRow label="Compression" value={summary?.compression !== "unknown" ? summary?.compression : null} />
+            {summary?.isDeep && <MetaRow label="Type" value="Deep EXR" />}
           </dl>
-          {asset.metadata && Object.keys(asset.metadata).length > 0 && (
+
+          {/* COLOR SCIENCE — from EXR metadata */}
+          {summary?.colorSpace && summary.colorSpace !== "unknown" && (
             <>
-              <SectionHeader title="Metadata" />
+              <SectionHeader title="Color Science" />
               <dl>
-                {Object.entries(asset.metadata).map(([k, v]) =>
-                  v != null && k !== "fileSizeBytes" ? (
-                    <MetaRow key={k} label={k} value={String(v)} />
-                  ) : null
-                )}
+                <MetaRow label="Colorspace" value={summary.colorSpace} accent />
               </dl>
             </>
           )}
+
+          {/* PRODUCTION */}
+          <SectionHeader title="Production" />
+          <dl>
+            <MetaRow label="Project" value={prod?.show} />
+            <MetaRow label="Sequence" value={prod?.sequence} />
+            <MetaRow label="Shot" value={prod?.shot} accent />
+            <StatusRow label="Status" statusLabel={statusLabel} />
+            {asset.metadata?.file_size_bytes != null && (
+              <MetaRow label="Size" value={formatFileSize(asset.metadata.file_size_bytes)} />
+            )}
+            {asset.createdAt && <MetaRow label="Ingested" value={new Date(asset.createdAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })} />}
+          </dl>
+
+          {/* STORAGE */}
+          <SectionHeader title="Storage" />
+          <dl>
+            <MetaRow label="Source" value={asset.sourceUri} copyable />
+            <MetaRow label="Asset ID" value={asset.id} copyable />
+            {asset.jobId && <MetaRow label="Job ID" value={asset.jobId} copyable />}
+          </dl>
+        </div>
+
+        {/* Action buttons */}
+        <div className="shrink-0 border-t border-[var(--color-ah-border)] p-3 space-y-2 bg-[var(--color-ah-bg-raised)]">
+          <button type="button"
+            onClick={() => window.open(`rvlink://${asset.sourceUri}`, "_blank")}
+            className="w-full py-2 rounded-[var(--radius-ah-md)] bg-[var(--color-ah-accent)] text-[var(--color-ah-bg)] text-xs font-semibold tracking-wide cursor-pointer hover:brightness-110 transition-all flex items-center justify-center gap-2"
+          >
+            <span className="text-sm">&#9655;</span> Open in RV Player
+          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <ActionBtn icon="&#128203;" label="Copy Path" onClick={() => void navigator.clipboard.writeText(asset.sourceUri)} />
+            <ActionBtn icon="&#8635;" label="Re-ingest" />
+          </div>
+          <DevAdvanceButton asset={asset} onAdvanced={onAdvanced} />
         </div>
       </div>
     );
@@ -570,10 +615,110 @@ function HistoryTab({ events }: { events: VersionDetailHistoryEvent[] | null }) 
 // Placeholder tab
 // ---------------------------------------------------------------------------
 
-function PlaceholderTab({ label }: { label: string }) {
+// ---------------------------------------------------------------------------
+// AovsTab — AOV Layer Map from EXR metadata
+// ---------------------------------------------------------------------------
+
+const LAYER_COLORS = [
+  "#a855f7", "#3b82f6", "#f59e0b", "#22c55e", "#ef4444", "#06b6d4", "#ec4899", "#8b5cf6",
+];
+
+function AovsTab({ exrMeta }: { exrMeta: ExrMetadataLookupResult | null }) {
+  if (!exrMeta?.found || !exrMeta.channels || exrMeta.channels.length === 0) {
+    return (
+      <div className="p-4 text-xs text-[var(--color-ah-text-subtle)]">
+        {exrMeta === null ? "Loading EXR metadata..." : "No AOV data available. EXR metadata not found for this asset."}
+      </div>
+    );
+  }
+
+  // Group channels by layer
+  const layerMap = new Map<string, typeof exrMeta.channels>();
+  for (const ch of exrMeta.channels!) {
+    const layer = ch.layer_name || "(root)";
+    if (!layerMap.has(layer)) layerMap.set(layer, []);
+    layerMap.get(layer)!.push(ch);
+  }
+
+  const layers = [...layerMap.entries()];
+
   return (
-    <div className="flex items-center justify-center h-48 text-xs text-[var(--color-ah-text-subtle)]">
-      {label} — Coming soon
+    <div className="overflow-auto px-4 py-3" style={{ maxHeight: "calc(100vh - 200px)" }}>
+      <h3 className="text-[13px] font-semibold text-[var(--color-ah-text)]">AOV Layer Map</h3>
+      <p className="font-[var(--font-ah-mono)] text-[10px] text-[var(--color-ah-accent)] tracking-wide mt-0.5 mb-3">
+        {layers.length} LAYERS &middot; MULTI-CHANNEL EXR
+      </p>
+
+      <SectionHeader title="Layers" />
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="text-[var(--color-ah-text-subtle)] font-[var(--font-ah-mono)]">
+            <th className="text-left py-1 font-medium">LAYER</th>
+            <th className="text-left py-1 font-medium">CHANNELS</th>
+            <th className="text-left py-1 font-medium">DEPTH</th>
+          </tr>
+        </thead>
+        <tbody>
+          {layers.map(([layer, channels], i) => {
+            const components = channels.map((c) => c.component_name || c.channel_name).join("");
+            const depth = channels[0]?.channel_type ?? "";
+            const depthLabel = depth === "HALF" ? "16f" : depth === "FLOAT" ? "32f" : depth === "UINT" ? "32u" : depth;
+            return (
+              <tr key={layer} className="border-t border-[var(--color-ah-border-muted)]">
+                <td className="py-1.5 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: LAYER_COLORS[i % LAYER_COLORS.length] }} />
+                  <span className="font-[var(--font-ah-mono)] text-[var(--color-ah-text)]">{layer}</span>
+                </td>
+                <td className="py-1.5 font-[var(--font-ah-mono)] text-[var(--color-ah-text-muted)]">{components}</td>
+                <td className="py-1.5 font-[var(--font-ah-mono)] text-[var(--color-ah-text-muted)]">{depthLabel}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// VastTab — VAST Storage info
+// ---------------------------------------------------------------------------
+
+function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLookupResult | null }) {
+  return (
+    <div className="overflow-auto px-4 py-3" style={{ maxHeight: "calc(100vh - 200px)" }}>
+      <SectionHeader title="VAST Storage" />
+      <dl>
+        <MetaRow label="Path" value={asset.sourceUri} copyable />
+        {asset.elementPath && <MetaRow label="Element" value={asset.elementPath} copyable />}
+        <MetaRow label="Protocol" value="S3" />
+        {asset.metadata?.file_size_bytes != null && (
+          <MetaRow label="Size" value={formatFileSize(asset.metadata.file_size_bytes)} />
+        )}
+      </dl>
+
+      <SectionHeader title="DataEngine Jobs" />
+      {exrMeta?.found ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-3 py-2 rounded bg-[var(--color-ah-bg)] border border-green-500/30">
+            <span className="text-[11px] font-[var(--font-ah-mono)] text-[var(--color-ah-text)]">exr-metadata</span>
+            <span className="text-[10px] font-[var(--font-ah-mono)] text-green-400">done</span>
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-[var(--color-ah-text-subtle)]">
+          No DataEngine results yet. EXR metadata will appear here once the exr-inspector function has processed this file.
+        </p>
+      )}
+
+      <SectionHeader title="Asset IDs" />
+      <dl>
+        <MetaRow label="Asset ID" value={asset.id} copyable />
+        {asset.jobId && <MetaRow label="Job ID" value={asset.jobId} copyable />}
+        {exrMeta?.found && exrMeta.file?.file_id && (
+          <MetaRow label="EXR File ID" value={String(exrMeta.file.file_id)} copyable />
+        )}
+      </dl>
     </div>
   );
 }
@@ -587,6 +732,7 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
   const [activeTab, setActiveTab] = useState<TabId>("info");
   const [info, setInfo] = useState<VersionDetailInfo | null>(null);
   const [history, setHistory] = useState<VersionDetailHistoryEvent[] | null>(null);
+  const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
   const [loadingInfo, setLoadingInfo] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -612,6 +758,12 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
     });
   }, [asset.currentVersionId]);
 
+  // Fetch EXR metadata from exr-inspector tables (non-blocking background)
+  useEffect(() => {
+    if (!asset.sourceUri) return;
+    void fetchExrMetadataLookup(asset.sourceUri).then(setExrMeta);
+  }, [asset.sourceUri]);
+
   // Fetch history (lazy)
   useEffect(() => {
     if (activeTab !== "history" || !asset.currentVersionId) return;
@@ -624,7 +776,7 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
   }, [activeTab, asset.currentVersionId, history]);
 
   // Reset on asset change
-  useEffect(() => { setInfo(null); setHistory(null); setActiveTab("info"); }, [asset.id]);
+  useEffect(() => { setInfo(null); setHistory(null); setExrMeta(null); setActiveTab("info"); }, [asset.id]);
 
   return (
     <div ref={panelRef} tabIndex={-1}
@@ -633,13 +785,25 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
     >
       <PanelHeader asset={asset} info={info} onClose={onClose} />
       <FrameBar info={info} />
+
+      {/* AOV tag pills — show channel layers from EXR metadata */}
+      {exrMeta?.found && exrMeta.channels && exrMeta.channels.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-4 py-2 border-b border-[var(--color-ah-border-muted)]">
+          {[...new Set(exrMeta.channels.map((c) => c.layer_name || c.channel_name))].map((name) => (
+            <span key={name}
+              className="px-2 py-0.5 rounded-full text-[10px] font-[var(--font-ah-mono)] border border-[var(--color-ah-border)] text-[var(--color-ah-text-muted)] bg-[var(--color-ah-bg)]"
+            >{name}</span>
+          ))}
+        </div>
+      )}
+
       <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
 
       <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`} className="flex-1 overflow-hidden">
-        {activeTab === "info" && <InfoTab info={loadingInfo ? null : info} asset={asset} onAdvanced={onAdvanced} />}
+        {activeTab === "info" && <InfoTab info={loadingInfo ? null : info} asset={asset} exrMeta={exrMeta} onAdvanced={onAdvanced} />}
         {activeTab === "history" && <HistoryTab events={loadingHistory ? null : history} />}
-        {activeTab === "aovs" && <PlaceholderTab label="AOVs" />}
-        {activeTab === "vast" && <PlaceholderTab label="VAST Storage" />}
+        {activeTab === "aovs" && <AovsTab exrMeta={exrMeta} />}
+        {activeTab === "vast" && <VastTab asset={asset} exrMeta={exrMeta} />}
       </div>
     </div>
   );
