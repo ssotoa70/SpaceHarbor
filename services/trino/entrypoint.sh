@@ -69,7 +69,6 @@ num_of_splits=64
 num_of_subsplits=10
 vast.http-client.request-timeout=60m
 vast.http-client.idle-timeout=60m
-vast.http-client.max-connections=100
 vast.http-client.max-connections-per-server=50
 EOF
 
