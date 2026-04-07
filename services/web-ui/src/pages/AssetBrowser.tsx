@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchExrMetadataLookup, type AssetRow, type AssetDependencyData, type UnregisteredFile, type ExrMetadataLookupResult } from "../api";
+import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchExrMetadataLookup, fetchPresignedUrl, type AssetRow, type AssetDependencyData, type UnregisteredFile, type ExrMetadataLookupResult } from "../api";
 import { Badge, Button, Input, Skeleton } from "../design-system";
 import { AssetDetailPanel } from "../components/AssetDetailPanel";
 
@@ -21,6 +21,85 @@ import {
 } from "../utils/media-types";
 
 export type ViewMode = "gallery" | "list" | "compact";
+
+// ---------------------------------------------------------------------------
+// Sequence grouping — detect EXR frame sequences and group them
+// ---------------------------------------------------------------------------
+
+const FRAME_PATTERN = /^(.+?)(\d{3,8})(\.[^.]+)$/;
+
+interface AssetSequence {
+  kind: "sequence";
+  key: string;
+  baseName: string;       // e.g. "pixar_"
+  ext: string;            // e.g. ".exr"
+  pattern: string;        // e.g. "pixar_####.exr"
+  frameStart: number;
+  frameEnd: number;
+  frameCount: number;
+  padding: number;
+  assets: AssetRow[];
+  representative: AssetRow; // middle frame for detail panel
+}
+
+interface AssetSingle {
+  kind: "single";
+  key: string;
+  asset: AssetRow;
+}
+
+type AssetEntry = AssetSequence | AssetSingle;
+
+function groupIntoSequences(assets: AssetRow[]): AssetEntry[] {
+  const seqMap = new Map<string, { baseName: string; ext: string; padding: number; frames: Array<{ num: number; asset: AssetRow }> }>();
+  const singles: AssetRow[] = [];
+
+  for (const asset of assets) {
+    const match = FRAME_PATTERN.exec(asset.title);
+    if (match) {
+      const [, base, frameStr, ext] = match;
+      const key = `${base}|${ext}`;
+      if (!seqMap.has(key)) {
+        seqMap.set(key, { baseName: base, ext, padding: frameStr.length, frames: [] });
+      }
+      seqMap.get(key)!.frames.push({ num: parseInt(frameStr, 10), asset });
+    } else {
+      singles.push(asset);
+    }
+  }
+
+  const entries: AssetEntry[] = [];
+
+  for (const [, seq] of seqMap) {
+    if (seq.frames.length < 2) {
+      // Single frame — not a sequence
+      singles.push(seq.frames[0].asset);
+      continue;
+    }
+    seq.frames.sort((a, b) => a.num - b.num);
+    const hashes = "#".repeat(seq.padding);
+    const middleIdx = Math.floor(seq.frames.length / 2);
+    entries.push({
+      kind: "sequence",
+      key: `seq-${seq.baseName}${seq.ext}`,
+      baseName: seq.baseName,
+      ext: seq.ext,
+      pattern: `${seq.baseName}${hashes}${seq.ext}`,
+      frameStart: seq.frames[0].num,
+      frameEnd: seq.frames[seq.frames.length - 1].num,
+      frameCount: seq.frames.length,
+      padding: seq.padding,
+      assets: seq.frames.map((f) => f.asset),
+      representative: seq.frames[middleIdx].asset,
+    });
+  }
+
+  for (const asset of singles) {
+    entries.push({ kind: "single", key: asset.id, asset });
+  }
+
+  return entries;
+}
 
 const statusVariant = (s: string) => {
   if (s === "completed" || s === "qc_approved") return "success" as const;
@@ -181,6 +260,80 @@ function ThumbnailCard({ asset, selected, onSelect, onPreview, onDetail }: Thumb
   );
 }
 
+// ---------------------------------------------------------------------------
+// SequenceCard — grouped EXR sequence thumbnail card (like Frame.io)
+// ---------------------------------------------------------------------------
+
+interface SequenceCardProps {
+  sequence: AssetSequence;
+  onPreview: (asset: AssetRow) => void;
+  onDetail: (asset: AssetRow) => void;
+}
+
+function SequenceCard({ sequence, onPreview, onDetail }: SequenceCardProps) {
+  const gradient = getThumbGradient("image");
+  const rep = sequence.representative;
+  const totalSize = sequence.assets.reduce((sum, a) => sum + (a.metadata?.file_size_bytes ?? 0), 0);
+
+  return (
+    <div
+      className="relative cursor-pointer transition-all overflow-hidden rounded-[9px] border border-[var(--color-ah-border)] hover:border-[var(--color-ah-accent)]/40 hover:shadow-[0_4px_22px_rgba(0,0,0,.45),0_0_14px_rgba(6,182,212,.09)] hover:-translate-y-0.5 bg-[var(--color-ah-bg-raised)]"
+      onClick={() => onDetail(rep)}
+      onDoubleClick={() => onPreview(rep)}
+    >
+      {/* Thumbnail area */}
+      <div
+        className="relative aspect-video flex items-center justify-center overflow-hidden"
+        style={{ background: gradient }}
+      >
+        {rep.thumbnail?.uri ? (
+          <LazyThumbnail src={rep.thumbnail.uri} alt={sequence.pattern} className="w-full h-full object-cover" />
+        ) : (
+          <div className="flex flex-col items-center gap-1">
+            <MediaTypeIcon type="image" size={36} className="text-[var(--color-ah-text-muted)]" />
+            <span className="font-[var(--font-ah-mono)] text-[9px] text-[var(--color-ah-text-subtle)]">
+              {sequence.frameCount} frames
+            </span>
+          </div>
+        )}
+
+        {/* EXR SEQ badge */}
+        <span
+          className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-medium tracking-wider font-[var(--font-ah-mono)]"
+          style={{ color: "#a855f7", backgroundColor: "rgba(168,85,247,0.12)", borderColor: "rgba(168,85,247,0.25)", borderWidth: 1 }}
+        >
+          EXR SEQ
+        </span>
+
+        {/* Frame range — bottom */}
+        <div className="absolute bottom-0 inset-x-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent">
+          <span className="font-[var(--font-ah-mono)] text-[10px] text-gray-300">
+            {sequence.frameStart}&ndash;{sequence.frameEnd} &middot; {sequence.frameCount} frames
+          </span>
+        </div>
+      </div>
+
+      {/* Card body */}
+      <div className="px-2.5 py-2 space-y-0.5">
+        <div className="text-xs font-medium text-[var(--color-ah-text)] truncate">{sequence.pattern}</div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-[var(--font-ah-mono)] bg-[var(--color-ah-bg)] border border-[var(--color-ah-border)] text-[var(--color-ah-text-muted)]">
+            {sequence.frameCount} frames
+          </span>
+          {totalSize > 0 && (
+            <span className="font-[var(--font-ah-mono)] text-[10px] text-[var(--color-ah-text-muted)]">
+              {formatFileSize(totalSize)}
+            </span>
+          )}
+        </div>
+        <div className="font-[var(--font-ah-mono)] text-[9px] text-[var(--color-ah-accent)]/60 truncate">
+          {extractVastPath(rep.sourceUri).replace(/[^/]+$/, sequence.pattern)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface MediaPreviewProps {
   asset: AssetRow;
   onClose: () => void;
@@ -196,6 +349,7 @@ function attrDisplayValue(attr: { value_text?: string | null; value_float?: numb
 function MediaPreview({ asset, onClose }: MediaPreviewProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -205,6 +359,14 @@ function MediaPreview({ asset, onClose }: MediaPreviewProps) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Load presigned URL for media preview (video files can be streamed directly)
+  useEffect(() => {
+    const mt = inferMediaType(asset.title, asset.sourceUri);
+    if ((mt === "video" || mt === "image") && asset.sourceUri.startsWith("s3://")) {
+      void fetchPresignedUrl(asset.sourceUri).then(setPreviewUrl);
+    }
+  }, [asset.sourceUri, asset.title]);
 
   // Load EXR metadata
   useEffect(() => {
@@ -305,10 +467,14 @@ function MediaPreview({ asset, onClose }: MediaPreviewProps) {
             <video src={asset.proxy.uri} controls className="max-w-full max-h-full rounded" />
           ) : asset.thumbnail?.uri ? (
             <img src={asset.thumbnail.uri} alt={asset.title} className="max-w-full max-h-full rounded" />
+          ) : previewUrl && mediaType === "video" ? (
+            <video src={previewUrl} controls className="max-w-full max-h-full rounded" />
+          ) : previewUrl && mediaType === "image" && !asset.title.toLowerCase().endsWith(".exr") ? (
+            <img src={previewUrl} alt={asset.title} className="max-w-full max-h-full rounded" />
           ) : (
             <div className="flex flex-col items-center gap-3 text-gray-500">
               <span className="text-6xl">{mediaType === "image" ? "\uD83C\uDFA8" : mediaType === "video" ? "\uD83C\uDFA6" : "\uD83D\uDCC4"}</span>
-              <span className="text-sm">No preview available</span>
+              <span className="text-sm">{previewUrl === null && asset.sourceUri.startsWith("s3://") ? "Loading preview..." : "No preview available"}</span>
               <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-600">{asset.sourceUri}</span>
             </div>
           )}
@@ -802,6 +968,9 @@ export function AssetBrowser() {
       return a.title.localeCompare(b.title);
     });
 
+  // Group EXR sequences for gallery mode
+  const entries = groupIntoSequences(filtered);
+
   const panelOpen = detailAsset !== null;
 
   const isGallery = viewMode === "gallery";
@@ -922,23 +1091,32 @@ export function AssetBrowser() {
             />
           )}
 
-          {/* ── Gallery mode: plain CSS Grid, no virtualizer ── */}
+          {/* ── Gallery mode: plain CSS Grid with sequence grouping ── */}
           {isGallery && (
             <div
               className="grid gap-[11px] mt-1"
               style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}
               data-testid="gallery-grid"
             >
-              {filtered.map((asset) => (
-                <ThumbnailCard
-                  key={asset.id}
-                  asset={asset}
-                  selected={selected.has(asset.id)}
-                  onSelect={toggleSelect}
-                  onPreview={setPreviewAsset}
-                  onDetail={setDetailAsset}
-                />
-              ))}
+              {entries.map((entry) =>
+                entry.kind === "sequence" ? (
+                  <SequenceCard
+                    key={entry.key}
+                    sequence={entry}
+                    onPreview={setPreviewAsset}
+                    onDetail={setDetailAsset}
+                  />
+                ) : (
+                  <ThumbnailCard
+                    key={entry.key}
+                    asset={entry.asset}
+                    selected={selected.has(entry.asset.id)}
+                    onSelect={toggleSelect}
+                    onPreview={setPreviewAsset}
+                    onDetail={setDetailAsset}
+                  />
+                )
+              )}
             </div>
           )}
 

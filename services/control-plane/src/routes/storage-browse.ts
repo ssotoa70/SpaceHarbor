@@ -8,7 +8,8 @@
 
 import type { FastifyInstance } from "fastify";
 
-import { S3Client, ListObjectsV2Command, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, ListObjectsV2Command, HeadObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
@@ -299,6 +300,82 @@ export async function registerStorageBrowseRoutes(
           }
           return sendError(request, reply, 503, "S3_HEAD_FAILED",
             err instanceof Error ? err.message : "Failed to get object metadata");
+        } finally {
+          restoreVastTls();
+        }
+      },
+    );
+
+    // --- GET /storage/presign --- Generate a presigned download URL for an S3 object
+    app.get<{
+      Querystring: { sourceUri: string; endpointId?: string; expiresIn?: number };
+    }>(
+      withPrefix(prefix, "/storage/presign"),
+      {
+        schema: {
+          tags: ["storage"],
+          operationId: prefix === "/api/v1" ? "v1StoragePresign" : "legacyStoragePresign",
+          summary: "Generate a presigned download URL for an S3 object",
+          querystring: {
+            type: "object",
+            required: ["sourceUri"],
+            properties: {
+              sourceUri: { type: "string", description: "S3 URI (s3://bucket/key)" },
+              endpointId: { type: "string", description: "S3 endpoint ID (auto-detected from URI if omitted)" },
+              expiresIn: { type: "number", minimum: 60, maximum: 86400, default: 3600 },
+            },
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                url: { type: "string" },
+                expiresAt: { type: "string" },
+                sourceUri: { type: "string" },
+              },
+            },
+            400: errorEnvelopeSchema,
+            503: errorEnvelopeSchema,
+          },
+        },
+      },
+      async (request, reply) => {
+        const { sourceUri, endpointId, expiresIn = 3600 } = request.query;
+
+        // Parse s3://bucket/key
+        const s3Match = sourceUri.match(/^s3:\/\/([^/]+)\/(.+)$/);
+        if (!s3Match) {
+          return sendError(request, reply, 400, "INVALID_URI",
+            "sourceUri must be in s3://bucket/key format");
+        }
+        const [, bucket, key] = s3Match;
+
+        const endpoints = getStorageEndpoints();
+        // Find endpoint matching the bucket, or by ID
+        const ep = endpointId
+          ? endpoints.find((e) => e.id === endpointId)
+          : endpoints.find((e) => e.bucket === bucket) ?? endpoints[0];
+
+        if (!ep) {
+          return sendError(request, reply, 503, "STORAGE_NOT_CONFIGURED",
+            "No matching S3 endpoint found for this bucket");
+        }
+
+        setVastTlsSkip();
+        try {
+          const s3 = makeS3Client(ep);
+          const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+          const url = await getSignedUrl(s3, command, { expiresIn });
+          s3.destroy();
+
+          return reply.send({
+            url,
+            expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+            sourceUri,
+          });
+        } catch (err) {
+          return sendError(request, reply, 503, "PRESIGN_FAILED",
+            err instanceof Error ? err.message : "Failed to generate presigned URL");
         } finally {
           restoreVastTls();
         }

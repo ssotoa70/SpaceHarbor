@@ -2553,3 +2553,21 @@ export async function fetchExrMetadataStats(): Promise<ExrMetadataStats | null> 
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// S3 Presigned URL — for media preview in browser
+// ---------------------------------------------------------------------------
+
+export async function fetchPresignedUrl(sourceUri: string): Promise<string | null> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/storage/presign?sourceUri=${encodeURIComponent(sourceUri)}`,
+      { headers: withAuth() },
+    );
+    if (!response.ok) return null;
+    const data = (await response.json()) as { url: string };
+    return data.url;
+  } catch {
+    return null;
+  }
+}

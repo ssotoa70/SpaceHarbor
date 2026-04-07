@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, PutObjectTaggingCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, PutObjectTaggingCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export interface S3Config {
@@ -60,6 +60,23 @@ export async function generateUploadUrl(
   return { url, key, expiresAt };
 }
 
+
+/**
+ * Generate a presigned GET URL for downloading/viewing an S3 object.
+ * Used by the web UI to preview media files (video, thumbnails) directly from S3.
+ */
+export async function generateDownloadUrl(
+  client: S3Client,
+  bucket: string,
+  key: string,
+  expiresInSeconds = 3600
+): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  });
+  return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+}
 
 /**
  * Apply S3 tags to an existing object.
