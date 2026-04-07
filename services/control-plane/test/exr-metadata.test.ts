@@ -21,19 +21,19 @@ describe("EXR Metadata Routes", () => {
   });
 
   describe("GET /api/v1/exr-metadata/files", () => {
-    it("returns 503 when Trino is not configured", async () => {
+    it("returns 503 when vastdb-query service is unreachable", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/exr-metadata/files",
       });
       assert.equal(res.statusCode, 503);
       const body = JSON.parse(res.body);
-      assert.equal(body.code, "TRINO_UNAVAILABLE");
+      assert.equal(body.code, "EXR_QUERY_FAILED");
     });
   });
 
   describe("GET /api/v1/exr-metadata/files/:fileId", () => {
-    it("returns 503 when Trino is not configured", async () => {
+    it("returns 503 when vastdb-query service is unreachable", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/exr-metadata/files/test-file-id",
@@ -43,7 +43,7 @@ describe("EXR Metadata Routes", () => {
   });
 
   describe("GET /api/v1/exr-metadata/lookup", () => {
-    it("returns 503 when Trino is not configured", async () => {
+    it("returns 503 when vastdb-query service is unreachable", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/exr-metadata/lookup?path=/test/file.exr",
@@ -53,7 +53,7 @@ describe("EXR Metadata Routes", () => {
   });
 
   describe("GET /api/v1/exr-metadata/stats", () => {
-    it("returns 503 when Trino is not configured", async () => {
+    it("returns 503 when vastdb-query service is unreachable", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/exr-metadata/stats",
