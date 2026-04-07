@@ -105,7 +105,7 @@ export class TrinoClient {
     this.user = config.user ?? "spaceharbor";
     this.schema = config.schema ?? "spaceharbor/production";
     this.catalog = config.catalog ?? "vast";
-    this.timeoutMs = config.timeoutMs ?? 30_000;
+    this.timeoutMs = config.timeoutMs ?? 120_000;
     this.pollIntervalMs = config.pollIntervalMs ?? 50;
     this.maxRetries = config.maxRetries ?? 3;
   }
