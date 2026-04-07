@@ -21,7 +21,7 @@ set -e
 CONFIG_DIR="/etc/trino"
 CATALOG_DIR="${CONFIG_DIR}/catalog"
 
-mkdir -p "${CATALOG_DIR}" "${CONFIG_DIR}" /data/trino 2>/dev/null || true
+mkdir -p "${CATALOG_DIR}" "${CONFIG_DIR}" /data/trino/var/run /data/trino/var/log 2>/dev/null || true
 
 # --- Node properties ---
 cat > "${CONFIG_DIR}/node.properties" <<EOF

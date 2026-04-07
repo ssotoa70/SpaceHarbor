@@ -11,6 +11,11 @@ FROM vastdataorg/trino-vast:475
 USER root
 COPY entrypoint.sh /usr/local/bin/spaceharbor-entrypoint.sh
 RUN chmod +x /usr/local/bin/spaceharbor-entrypoint.sh
+
+# Ensure data directories exist and are writable by trino user
+RUN mkdir -p /data/trino/var/run /data/trino/var/log && \
+    chown -R trino:trino /data/trino /etc/trino
+
 USER trino
 
 EXPOSE 8080

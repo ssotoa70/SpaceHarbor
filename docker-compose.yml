@@ -239,7 +239,6 @@ services:
     restart: unless-stopped
     tmpfs:
       - /tmp
-      - /data/trino
     deploy:
       resources:
         limits:
