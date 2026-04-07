@@ -260,6 +260,9 @@ def exr_lookup(
             all_channels = table_to_records(s.table("channels"), columns=CHANNELS_COLUMNS, limit=50000)
             channels = [c for c in all_channels if c.get("file_id") == matched_file_id]
 
+            all_attrs = table_to_records(s.table("attributes"), limit=50000)
+            attributes = [a for a in all_attrs if a.get("file_id") == matched_file_id]
+
         file_info = files[0] if files else {}
         first_part = parts[0] if parts else {}
 
@@ -278,6 +281,7 @@ def exr_lookup(
             "file": file_info,
             "parts": parts,
             "channels": channels,
+            "attributes": attributes,
             "summary": summary,
         }
     except HTTPException:

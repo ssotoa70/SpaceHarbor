@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, type AssetRow, type AssetDependencyData, type UnregisteredFile } from "../api";
+import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchExrMetadataLookup, type AssetRow, type AssetDependencyData, type UnregisteredFile, type ExrMetadataLookupResult } from "../api";
 import { Badge, Button, Input, Skeleton } from "../design-system";
 import { AssetDetailPanel } from "../components/AssetDetailPanel";
-import { AssetMetadataPanel } from "../components/AssetMetadataPanel";
+
 import { AssetSelectionToolbar } from "../components/AssetSelectionToolbar";
 import { CloseIcon } from "../components/CloseIcon";
 import { IngestPanel } from "../components/IngestPanel";
@@ -186,40 +186,192 @@ interface MediaPreviewProps {
   onClose: () => void;
 }
 
+function attrDisplayValue(attr: { value_text?: string | null; value_float?: number | null; value_int?: number | null }): string {
+  if (attr.value_text != null && attr.value_text !== "") return attr.value_text;
+  if (attr.value_float != null) return String(attr.value_float);
+  if (attr.value_int != null) return String(attr.value_int);
+  return "(empty)";
+}
+
 function MediaPreview({ asset, onClose }: MediaPreviewProps) {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
+      if (e.key === "i" || e.key === "I") setSidebarOpen((p) => !p);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Load EXR metadata
+  useEffect(() => {
+    if (asset.sourceUri) {
+      void fetchExrMetadataLookup(asset.sourceUri).then(setExrMeta);
+    }
+  }, [asset.sourceUri]);
+
+  const exr = exrMeta?.found ? exrMeta : null;
+  const summary = exr?.summary;
+  const firstPart = exr?.parts?.[0];
+  const mediaType = inferMediaType(asset.title, asset.sourceUri);
+
+  // Build dynamic fields for sidebar
+  const fields: Array<{ group: string; label: string; value: string }> = [];
+  const addField = (group: string, label: string, value: string | number | null | undefined) => {
+    if (value == null || value === "" || value === "unknown") return;
+    fields.push({ group, label, value: String(value) });
+  };
+
+  addField("File", "Filename", asset.title);
+  addField("File", "Source", asset.sourceUri);
+  if (asset.metadata?.file_size_bytes) addField("File", "Size", formatFileSize(asset.metadata.file_size_bytes));
+  else if (exr?.file?.size_bytes) addField("File", "Size", formatFileSize(exr.file.size_bytes));
+
+  if (summary) {
+    addField("Image", "Resolution", summary.resolution);
+    addField("Image", "Compression", summary.compression);
+    addField("Image", "Channels", String(summary.channelCount));
+    addField("Image", "Color Space", summary.colorSpace);
+    if (summary.isDeep) addField("Image", "Type", "Deep EXR");
+    if (summary.frameNumber != null) addField("Image", "Frame", String(summary.frameNumber));
+  }
+
+  if (firstPart) {
+    if (firstPart.render_software) addField("Technical", "Render Software", firstPart.render_software);
+    if (firstPart.display_window) addField("Technical", "Display Window", firstPart.display_window);
+    else if (firstPart.display_width) addField("Technical", "Display Window", `${firstPart.display_width}x${firstPart.display_height}`);
+    if (firstPart.data_window) addField("Technical", "Data Window", firstPart.data_window);
+    if (firstPart.pixel_aspect_ratio != null && firstPart.pixel_aspect_ratio !== 1) addField("Technical", "Pixel Aspect", String(firstPart.pixel_aspect_ratio));
+    if (firstPart.line_order) addField("Technical", "Line Order", firstPart.line_order);
+    if (firstPart.is_tiled) addField("Technical", "Tiling", `${firstPart.tile_width ?? "?"}x${firstPart.tile_height ?? "?"}`);
+    if (firstPart.multi_view) addField("Technical", "Multi-View", "Yes");
+  }
+
+  if (exr?.attributes) {
+    for (const attr of exr.attributes) {
+      addField("Attributes", attr.attr_name, attrDisplayValue(attr));
+    }
+  }
+
+  // Group fields
+  const grouped = new Map<string, typeof fields>();
+  for (const f of fields) {
+    if (!grouped.has(f.group)) grouped.set(f.group, []);
+    grouped.get(f.group)!.push(f);
+  }
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      className="fixed inset-0 z-50 flex bg-black/90"
       role="dialog"
       aria-label={`Preview: ${asset.title}`}
-      onClick={onClose}
     >
-      <div className="max-w-4xl w-full mx-4 bg-[var(--color-ah-bg-raised)] rounded-[var(--radius-ah-lg)] p-4 border border-[var(--color-ah-border)]" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center mb-3">
-          <h2 className="text-lg font-semibold">{asset.title}</h2>
-          <Button variant="ghost" onClick={onClose} aria-label="Close preview"><CloseIcon /></Button>
+      {/* Center stage — media viewer */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top bar */}
+        <div className="flex items-center justify-between px-4 py-3 bg-black/40">
+          <div className="flex items-center gap-3 min-w-0">
+            <h2 className="text-sm font-semibold text-white truncate">{asset.title}</h2>
+            {summary && (
+              <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-400 shrink-0">
+                {summary.resolution} &middot; {summary.compression}
+                {summary.colorSpace !== "unknown" ? ` \u00b7 ${summary.colorSpace}` : ""}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen((p) => !p)}
+              className={`px-2 py-1 rounded text-[10px] font-medium cursor-pointer transition-colors ${
+                sidebarOpen
+                  ? "bg-[var(--color-ah-accent)]/20 text-[var(--color-ah-accent)]"
+                  : "text-gray-400 hover:text-white"
+              }`}
+              title="Toggle info sidebar (I)"
+            >
+              {sidebarOpen ? "Hide Info" : "Show Info"}
+            </button>
+            <Button variant="ghost" onClick={onClose} aria-label="Close preview"><CloseIcon /></Button>
+          </div>
         </div>
-        <div className="aspect-video bg-black rounded-[var(--radius-ah-sm)] flex items-center justify-center">
+
+        {/* Media area */}
+        <div className="flex-1 flex items-center justify-center p-4">
           {asset.proxy?.uri ? (
-            <video src={asset.proxy.uri} controls className="w-full h-full" />
+            <video src={asset.proxy.uri} controls className="max-w-full max-h-full rounded" />
           ) : asset.thumbnail?.uri ? (
-            <img src={asset.thumbnail.uri} alt={asset.title} className="max-w-full max-h-full" />
+            <img src={asset.thumbnail.uri} alt={asset.title} className="max-w-full max-h-full rounded" />
           ) : (
-            <span className="text-[var(--color-ah-text-subtle)]">No media available</span>
+            <div className="flex flex-col items-center gap-3 text-gray-500">
+              <span className="text-6xl">{mediaType === "image" ? "&#127912;" : mediaType === "video" ? "&#127910;" : "&#128196;"}</span>
+              <span className="text-sm">No preview available</span>
+              <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-600">{asset.sourceUri}</span>
+            </div>
           )}
         </div>
-        <div className="mt-3 max-h-64 overflow-auto">
-          <AssetMetadataPanel asset={asset} variant="inline" />
+
+        {/* Bottom bar — actions */}
+        <div className="flex items-center justify-center gap-3 px-4 py-2 bg-black/40">
+          <button
+            type="button"
+            onClick={() => window.open(`rvlink://${asset.sourceUri}`, "_blank")}
+            className="px-3 py-1.5 rounded bg-[var(--color-ah-accent)] text-[var(--color-ah-bg)] text-[11px] font-semibold cursor-pointer hover:brightness-110 transition-all flex items-center gap-1.5"
+          >
+            <span>&#9655;</span> Open in RV
+          </button>
+          <button
+            type="button"
+            onClick={() => void navigator.clipboard.writeText(asset.sourceUri)}
+            className="px-3 py-1.5 rounded border border-gray-600 text-gray-300 text-[11px] font-medium cursor-pointer hover:bg-gray-800 transition-colors"
+          >
+            Copy Path
+          </button>
         </div>
       </div>
+
+      {/* Right sidebar — dynamic fields */}
+      {sidebarOpen && (
+        <div className="w-80 shrink-0 bg-[var(--color-ah-bg-raised)] border-l border-[var(--color-ah-border)] overflow-auto">
+          <div className="px-4 py-3 border-b border-[var(--color-ah-border)]">
+            <h3 className="text-[13px] font-semibold text-[var(--color-ah-text)]">All Fields</h3>
+            <span className="font-[var(--font-ah-mono)] text-[10px] text-[var(--color-ah-text-subtle)]">
+              {fields.length} fields
+            </span>
+          </div>
+          <div className="px-4 py-2">
+            {[...grouped.entries()].map(([group, gFields]) => (
+              <div key={group} className="mb-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="font-[var(--font-ah-mono)] text-[10px] font-medium tracking-[0.14em] text-[var(--color-ah-text-subtle)] uppercase">
+                    {group}
+                  </span>
+                  <span className="font-[var(--font-ah-mono)] text-[9px] text-[var(--color-ah-text-subtle)]">
+                    ({gFields.length})
+                  </span>
+                  <div className="flex-1 h-px bg-[var(--color-ah-border-muted)]" />
+                </div>
+                <dl>
+                  {gFields.map((f) => (
+                    <div key={f.label} className="flex items-baseline justify-between gap-2 py-[3px]">
+                      <dt className="font-[var(--font-ah-mono)] text-[11px] text-[var(--color-ah-text-subtle)] shrink-0">{f.label}</dt>
+                      <dd className="text-[11px] font-[var(--font-ah-mono)] text-[var(--color-ah-text)] text-right truncate">{f.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ))}
+            {fields.length === 0 && (
+              <p className="text-[11px] text-[var(--color-ah-text-subtle)] py-4">
+                {exrMeta === null ? "Loading metadata..." : "No metadata available."}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

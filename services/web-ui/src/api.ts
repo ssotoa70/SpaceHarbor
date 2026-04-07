@@ -2446,6 +2446,19 @@ export interface ExrPartMetadata {
   color_space: string;
   is_deep: boolean;
   pixel_aspect_ratio: number;
+  display_width?: number;
+  display_height?: number;
+  data_x_offset?: number;
+  data_y_offset?: number;
+  display_window?: string;
+  data_window?: string;
+  line_order?: string;
+  render_software?: string;
+  is_tiled?: boolean;
+  tile_width?: number;
+  tile_height?: number;
+  tile_depth?: string;
+  multi_view?: boolean;
   [key: string]: unknown;
 }
 
@@ -2458,11 +2471,23 @@ export interface ExrChannelMetadata {
   [key: string]: unknown;
 }
 
+export interface ExrAttributeMetadata {
+  file_id: string;
+  part_index: number;
+  attr_name: string;
+  attr_type: string;
+  value_text?: string | null;
+  value_int?: number | null;
+  value_float?: number | null;
+  [key: string]: unknown;
+}
+
 export interface ExrMetadataLookupResult {
   found: boolean;
   file?: ExrFileMetadata;
   parts?: ExrPartMetadata[];
   channels?: ExrChannelMetadata[];
+  attributes?: ExrAttributeMetadata[];
   summary?: {
     resolution: string;
     compression: string;

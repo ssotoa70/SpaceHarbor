@@ -8,16 +8,17 @@ import {
   type VersionDetailInfo,
   type VersionDetailHistoryEvent,
   type ExrMetadataLookupResult,
+  type ExrAttributeMetadata,
 } from "../api";
 import type { AssetRow } from "../types";
 import { formatTC } from "../utils/timecode";
-import { formatFileSize, inferMediaType } from "../utils/media-types";
+import { formatFileSize, formatDuration, inferMediaType } from "../utils/media-types";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type TabId = "info" | "aovs" | "vast" | "history";
+type TabId = "info" | "fields" | "aovs" | "streams" | "vast" | "history";
 
 interface AssetDetailPanelProps {
   asset: AssetRow;
@@ -76,6 +77,36 @@ function channelLabel(count: number | null): string | null {
   if (count === 3) return "RGB";
   if (count === 4) return "RGBA";
   return String(count);
+}
+
+// ---------------------------------------------------------------------------
+// Field count — for the "FIELDS (N)" tab label
+// ---------------------------------------------------------------------------
+
+function computeFieldCount(asset: AssetRow, exrMeta: ExrMetadataLookupResult | null, info: VersionDetailInfo | null): number {
+  let count = 0;
+  // Basic: title, sourceUri, id
+  count += 3;
+  if (asset.jobId) count++;
+  if (asset.metadata?.file_size_bytes) count++;
+  if (exrMeta?.found) {
+    if (exrMeta.file) count += 3; // file_id, size, inspected
+    if (exrMeta.summary) count += 5; // resolution, channels, compression, colorSpace, frameNumber
+    const fp = exrMeta.parts?.[0];
+    if (fp) {
+      if (fp.display_window || fp.display_width) count++;
+      if (fp.data_window || fp.data_x_offset != null) count++;
+      if (fp.pixel_aspect_ratio != null) count++;
+      if (fp.line_order) count++;
+      if (fp.render_software) count++;
+      if (fp.is_tiled) count++;
+      if (fp.multi_view) count++;
+    }
+    count += exrMeta.attributes?.length ?? 0;
+  } else if (info?.version) {
+    count += 5; // resolution, channels, compression, fps, bitDepth
+  }
+  return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,36 +265,50 @@ function FrameBar({ info }: { info: VersionDetailInfo | null }) {
 // Tab bar
 // ---------------------------------------------------------------------------
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: "info", label: "INFO" },
-  { id: "aovs", label: "AOVS" },
-  { id: "vast", label: "VAST" },
-  { id: "history", label: "HISTORY" },
-];
+type TabDef = { id: TabId; label: string | ((ctx: { fieldCount?: number }) => string) };
 
-function TabBar({ activeTab, onTabChange }: { activeTab: TabId; onTabChange: (t: TabId) => void }) {
+function getTabsForMediaType(mediaType: string): TabDef[] {
+  const base: TabDef[] = [
+    { id: "info", label: "INFO" },
+    { id: "fields", label: (ctx) => `FIELDS${ctx.fieldCount ? ` (${ctx.fieldCount})` : ""}` },
+  ];
+  if (mediaType === "image") {
+    base.push({ id: "aovs", label: "AOVS" });
+  } else if (mediaType === "video" || mediaType === "audio") {
+    base.push({ id: "streams", label: "STREAMS" });
+  }
+  base.push({ id: "vast", label: "VAST" });
+  base.push({ id: "history", label: "HISTORY" });
+  return base;
+}
+
+function TabBar({ activeTab, onTabChange, tabContext, tabs }: { activeTab: TabId; onTabChange: (t: TabId) => void; tabContext?: { fieldCount?: number }; tabs: TabDef[] }) {
+  const ctx = tabContext ?? {};
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const idx = TABS.findIndex((t) => t.id === activeTab);
-    if (e.key === "ArrowRight") { e.preventDefault(); onTabChange(TABS[(idx + 1) % TABS.length].id); }
-    else if (e.key === "ArrowLeft") { e.preventDefault(); onTabChange(TABS[(idx - 1 + TABS.length) % TABS.length].id); }
-  }, [activeTab, onTabChange]);
+    const idx = tabs.findIndex((t) => t.id === activeTab);
+    if (e.key === "ArrowRight") { e.preventDefault(); onTabChange(tabs[(idx + 1) % tabs.length].id); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); onTabChange(tabs[(idx - 1 + tabs.length) % tabs.length].id); }
+  }, [activeTab, onTabChange, tabs]);
 
   return (
     <div role="tablist" aria-label="Detail panel tabs" className="flex border-b border-[var(--color-ah-border)]" onKeyDown={handleKeyDown}>
-      {TABS.map((tab) => (
-        <button key={tab.id} role="tab" type="button"
-          aria-selected={activeTab === tab.id}
-          aria-controls={`tabpanel-${tab.id}`}
-          id={`tab-${tab.id}`}
-          tabIndex={activeTab === tab.id ? 0 : -1}
-          onClick={() => onTabChange(tab.id)}
-          className={`flex-1 px-3 py-2.5 text-[11px] font-medium tracking-[0.08em] cursor-pointer transition-colors ${
-            activeTab === tab.id
-              ? "text-[var(--color-ah-accent)] border-b-2 border-[var(--color-ah-accent)]"
-              : "text-[var(--color-ah-text-subtle)] hover:text-[var(--color-ah-text-muted)]"
-          }`}
-        >{tab.label}</button>
-      ))}
+      {tabs.map((tab) => {
+        const label = typeof tab.label === "function" ? tab.label(ctx) : tab.label;
+        return (
+          <button key={tab.id} role="tab" type="button"
+            aria-selected={activeTab === tab.id}
+            aria-controls={`tabpanel-${tab.id}`}
+            id={`tab-${tab.id}`}
+            tabIndex={activeTab === tab.id ? 0 : -1}
+            onClick={() => onTabChange(tab.id)}
+            className={`flex-1 px-2 py-2.5 text-[10px] font-medium tracking-[0.08em] cursor-pointer transition-colors ${
+              activeTab === tab.id
+                ? "text-[var(--color-ah-accent)] border-b-2 border-[var(--color-ah-accent)]"
+                : "text-[var(--color-ah-text-subtle)] hover:text-[var(--color-ah-text-muted)]"
+            }`}
+          >{label}</button>
+        );
+      })}
     </div>
   );
 }
@@ -290,6 +335,7 @@ function InfoTab({
     const statusLabel = STATUS_LABELS[asset.status] ?? asset.status;
     const exr = exrMeta?.found ? exrMeta : null;
     const summary = exr?.summary;
+    const firstPart = exr?.parts?.[0] ?? null;
     const prod = asset.productionMetadata;
 
     return (
@@ -305,25 +351,67 @@ function InfoTab({
             </p>
           </div>
 
-          {/* SEQUENCE section — populated from EXR metadata when available */}
-          <SectionHeader title="Sequence" />
-          <dl>
-            {summary?.frameNumber != null && (
-              <MetaRow label="Frame" value={String(summary.frameNumber)} />
-            )}
-            <MetaRow label="Resolution" value={summary?.resolution !== "unknown" ? summary?.resolution : null} />
-            <MetaRow label="Channels" value={summary?.channelCount ? channelLabel(summary.channelCount) : null} accent={!!summary?.channelCount && summary.channelCount > 3} />
-            <MetaRow label="Compression" value={summary?.compression !== "unknown" ? summary?.compression : null} />
-            {summary?.isDeep && <MetaRow label="Type" value="Deep EXR" />}
-          </dl>
-
-          {/* COLOR SCIENCE — from EXR metadata */}
-          {summary?.colorSpace && summary.colorSpace !== "unknown" && (
+          {/* Media-type-specific sections */}
+          {mt === "video" || mt === "audio" ? (
             <>
-              <SectionHeader title="Color Science" />
+              {/* VIDEO / AUDIO */}
+              <SectionHeader title="Media" />
               <dl>
-                <MetaRow label="Colorspace" value={summary.colorSpace} accent />
+                <MetaRow label="Codec" value={asset.metadata?.codec} accent />
+                {asset.metadata?.resolution && (
+                  <MetaRow label="Resolution" value={`${asset.metadata.resolution.width}x${asset.metadata.resolution.height}`} />
+                )}
+                <MetaRow label="Frame Rate" value={asset.metadata?.frame_rate ? `${asset.metadata.frame_rate} fps` : null} />
+                <MetaRow label="Bit Depth" value={asset.metadata?.bit_depth ? bitDepthLabel(asset.metadata.bit_depth) : null} />
+                <MetaRow label="Color Space" value={asset.metadata?.color_space} accent />
+                {asset.metadata?.frame_range && asset.metadata?.frame_rate && (
+                  <MetaRow label="Duration" value={formatDuration((asset.metadata.frame_range.end - asset.metadata.frame_range.start + 1) / asset.metadata.frame_rate)} />
+                )}
+                <MetaRow label="Pixel Aspect" value={asset.metadata?.pixel_aspect_ratio != null && asset.metadata.pixel_aspect_ratio !== 1 ? String(asset.metadata.pixel_aspect_ratio) : null} />
+                <MetaRow label="Compression" value={asset.metadata?.compression_type} />
               </dl>
+            </>
+          ) : (
+            <>
+              {/* IMAGE / EXR — populated from EXR metadata when available */}
+              <SectionHeader title="Sequence" />
+              <dl>
+                {summary?.frameNumber != null && (
+                  <MetaRow label="Frame" value={String(summary.frameNumber)} />
+                )}
+                <MetaRow label="Resolution" value={summary?.resolution !== "unknown" ? summary?.resolution : null} />
+                <MetaRow label="Channels" value={summary?.channelCount ? channelLabel(summary.channelCount) : null} accent={!!summary?.channelCount && summary.channelCount > 3} />
+                <MetaRow label="Compression" value={summary?.compression !== "unknown" ? summary?.compression : null} />
+                {summary?.isDeep && <MetaRow label="Type" value="Deep EXR" />}
+              </dl>
+
+              {/* COLOR SCIENCE — from EXR metadata */}
+              {summary?.colorSpace && summary.colorSpace !== "unknown" && (
+                <>
+                  <SectionHeader title="Color Science" />
+                  <dl>
+                    <MetaRow label="Colorspace" value={summary.colorSpace} accent />
+                  </dl>
+                </>
+              )}
+
+              {/* EXR TECHNICAL — rich parts data */}
+              {firstPart && (
+                <>
+                  <SectionHeader title="Technical" />
+                  <dl>
+                    <MetaRow label="Display Window" value={firstPart.display_window ?? (firstPart.display_width ? `${firstPart.display_width}x${firstPart.display_height}` : null)} />
+                    <MetaRow label="Data Window" value={firstPart.data_window ?? (firstPart.data_x_offset != null ? `offset ${firstPart.data_x_offset}, ${firstPart.data_y_offset}` : null)} />
+                    <MetaRow label="Pixel Aspect" value={firstPart.pixel_aspect_ratio != null && firstPart.pixel_aspect_ratio !== 1 ? String(firstPart.pixel_aspect_ratio) : null} />
+                    <MetaRow label="Line Order" value={firstPart.line_order} />
+                    <MetaRow label="Render Software" value={firstPart.render_software} accent />
+                    {firstPart.is_tiled && (
+                      <MetaRow label="Tiling" value={`${firstPart.tile_width ?? "?"}x${firstPart.tile_height ?? "?"}${firstPart.tile_depth ? ` (${firstPart.tile_depth})` : ""}`} />
+                    )}
+                    {firstPart.multi_view && <MetaRow label="Multi-View" value="Yes" accent />}
+                  </dl>
+                </>
+              )}
             </>
           )}
 
@@ -681,6 +769,189 @@ function AovsTab({ exrMeta }: { exrMeta: ExrMetadataLookupResult | null }) {
 }
 
 // ---------------------------------------------------------------------------
+// FieldsTab — Dynamic "All Fields" view (Frame.io style)
+// Groups: File Info, Image, Color Science, Technical, Render, Attributes
+// ---------------------------------------------------------------------------
+
+/** Categorize EXR attributes into display groups */
+const ATTR_GROUPS: Record<string, string[]> = {
+  "Color Science": ["chromaticities", "whiteLuminance", "adoptedNeutral", "renderingTransform", "lookModTransform"],
+  "Camera": ["camera", "lens", "focalLength", "aperture", "focus", "exposure", "isoSpeed", "shutterAngle"],
+  "Timecode": ["timecode", "timeCode", "keyCode", "framesPerSecond"],
+  "Render": ["renderer", "renderSoftware", "driverVersion", "hostname", "oiio"],
+};
+
+function categorizeAttr(name: string): string {
+  for (const [group, keywords] of Object.entries(ATTR_GROUPS)) {
+    if (keywords.some((kw) => name.toLowerCase().includes(kw.toLowerCase()))) return group;
+  }
+  return "Header Attributes";
+}
+
+function attrDisplayValue(attr: ExrAttributeMetadata): string {
+  if (attr.value_text != null && attr.value_text !== "") return attr.value_text;
+  if (attr.value_float != null) return String(attr.value_float);
+  if (attr.value_int != null) return String(attr.value_int);
+  return "(empty)";
+}
+
+function FieldsTab({
+  asset,
+  exrMeta,
+  info,
+}: {
+  asset: AssetRow;
+  exrMeta: ExrMetadataLookupResult | null;
+  info: VersionDetailInfo | null;
+}) {
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(["File Info", "Image", "Color Science", "Technical"]));
+
+  const toggleGroup = useCallback((group: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }, []);
+
+  // Build field groups from all available data
+  const groups = new Map<string, Array<{ label: string; value: string }>>();
+
+  const addField = (group: string, label: string, value: string | number | null | undefined) => {
+    if (value == null || value === "" || value === "unknown") return;
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group)!.push({ label, value: String(value) });
+  };
+
+  // File Info
+  addField("File Info", "Filename", asset.title);
+  addField("File Info", "Source URI", asset.sourceUri);
+  addField("File Info", "Asset ID", asset.id);
+  addField("File Info", "Job ID", asset.jobId);
+  if (exrMeta?.found && exrMeta.file) {
+    addField("File Info", "File ID", exrMeta.file.file_id);
+    addField("File Info", "Size", exrMeta.file.size_bytes ? formatFileSize(exrMeta.file.size_bytes) : null);
+    addField("File Info", "Multipart Count", exrMeta.file.multipart_count > 1 ? exrMeta.file.multipart_count : null);
+    addField("File Info", "Inspected", exrMeta.file.inspection_timestamp);
+  } else if (asset.metadata?.file_size_bytes) {
+    addField("File Info", "Size", formatFileSize(asset.metadata.file_size_bytes));
+  }
+
+  // Media-type-specific fields
+  const mt = inferMediaType(asset.title, asset.sourceUri);
+  const exr = exrMeta?.found ? exrMeta : null;
+  const summary = exr?.summary;
+  const firstPart = exr?.parts?.[0];
+  const v = info?.version;
+  const meta = asset.metadata;
+
+  if (mt === "video" || mt === "audio") {
+    // Video/Audio fields
+    addField("Video Stream", "Codec", meta?.codec);
+    if (meta?.resolution) addField("Video Stream", "Resolution", `${meta.resolution.width}x${meta.resolution.height}`);
+    addField("Video Stream", "Frame Rate", meta?.frame_rate ? `${meta.frame_rate} fps` : null);
+    addField("Video Stream", "Bit Depth", meta?.bit_depth ? bitDepthLabel(meta.bit_depth) : null);
+    addField("Video Stream", "Compression", meta?.compression_type);
+    addField("Video Stream", "Pixel Aspect", meta?.pixel_aspect_ratio != null && meta.pixel_aspect_ratio !== 1 ? String(meta.pixel_aspect_ratio) : null);
+    if (meta?.frame_range && meta?.frame_rate) {
+      addField("Video Stream", "Duration", formatDuration((meta.frame_range.end - meta.frame_range.start + 1) / meta.frame_rate));
+      addField("Video Stream", "Frame Range", `${meta.frame_range.start} \u2013 ${meta.frame_range.end}`);
+    }
+    addField("Color", "Color Space", meta?.color_space);
+    if (meta?.channels && meta.channels.length > 0) {
+      addField("Audio Stream", "Channels", meta.channels.join(", "));
+    }
+  } else if (summary) {
+    // EXR/Image fields from exr-inspector
+    addField("Image", "Resolution", summary.resolution);
+    addField("Image", "Channels", summary.channelCount ? channelLabel(summary.channelCount) : null);
+    addField("Image", "Compression", summary.compression);
+    addField("Image", "Deep", summary.isDeep ? "Yes" : null);
+    addField("Image", "Frame Number", summary.frameNumber);
+    addField("Color", "Color Space", summary.colorSpace);
+  } else if (v) {
+    addField("Image", "Resolution", resolutionTag(v.resolutionW, v.resolutionH));
+    addField("Image", "Channels", channelLabel(v.channelCount));
+    addField("Image", "Compression", v.compressionType);
+    addField("Image", "Bit Depth", bitDepthLabel(v.bitDepth));
+    addField("Image", "FPS", v.frameRate?.toFixed(2));
+    addField("Color", "Color Space", v.colorSpace);
+  }
+
+  // Technical — from EXR parts (only for images)
+  if (firstPart && mt === "image") {
+    addField("Technical", "Display Window", firstPart.display_window ?? (firstPart.display_width ? `${firstPart.display_width}x${firstPart.display_height}` : null));
+    addField("Technical", "Data Window", firstPart.data_window ?? (firstPart.data_x_offset != null ? `offset ${firstPart.data_x_offset}, ${firstPart.data_y_offset}` : null));
+    addField("Technical", "Pixel Aspect Ratio", firstPart.pixel_aspect_ratio != null ? String(firstPart.pixel_aspect_ratio) : null);
+    addField("Technical", "Line Order", firstPart.line_order);
+    addField("Technical", "Render Software", firstPart.render_software);
+    addField("Technical", "Tiled", firstPart.is_tiled ? `${firstPart.tile_width ?? "?"}x${firstPart.tile_height ?? "?"}${firstPart.tile_depth ? ` (${firstPart.tile_depth})` : ""}` : null);
+    addField("Technical", "Multi-View", firstPart.multi_view ? "Yes" : null);
+  }
+
+  // EXR header attributes — grouped by category
+  if (exr?.attributes && exr.attributes.length > 0) {
+    for (const attr of exr.attributes) {
+      const group = categorizeAttr(attr.attr_name);
+      addField(group, attr.attr_name, attrDisplayValue(attr));
+    }
+  }
+
+  // Total field count
+  let totalFields = 0;
+  for (const fields of groups.values()) totalFields += fields.length;
+
+  const groupEntries = [...groups.entries()];
+
+  return (
+    <div className="overflow-auto px-4 py-3" style={{ maxHeight: "calc(100vh - 200px)" }}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[13px] font-semibold text-[var(--color-ah-text)]">All Fields</h3>
+        <span className="font-[var(--font-ah-mono)] text-[10px] text-[var(--color-ah-text-subtle)]">
+          {totalFields} fields
+        </span>
+      </div>
+
+      {groupEntries.map(([group, fields]) => {
+        const expanded = expandedGroups.has(group);
+        return (
+          <div key={group} className="mb-1">
+            <button
+              type="button"
+              onClick={() => toggleGroup(group)}
+              className="w-full flex items-center gap-2 py-1.5 cursor-pointer group"
+            >
+              <span className="text-[10px] text-[var(--color-ah-text-subtle)] transition-transform" style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}>
+                &#9654;
+              </span>
+              <span className="font-[var(--font-ah-mono)] text-[10px] font-medium tracking-[0.14em] text-[var(--color-ah-text-subtle)] uppercase">
+                {group}
+              </span>
+              <span className="font-[var(--font-ah-mono)] text-[9px] text-[var(--color-ah-text-subtle)]">
+                ({fields.length})
+              </span>
+              <div className="flex-1 h-px bg-[var(--color-ah-border-muted)]" />
+            </button>
+            {expanded && (
+              <dl className="ml-3">
+                {fields.map((f) => (
+                  <MetaRow key={f.label} label={f.label} value={f.value} />
+                ))}
+              </dl>
+            )}
+          </div>
+        );
+      })}
+
+      {totalFields === 0 && (
+        <p className="text-[11px] text-[var(--color-ah-text-subtle)]">No metadata fields available.</p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // VastTab — VAST Storage info
 // ---------------------------------------------------------------------------
 
@@ -719,6 +990,75 @@ function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLook
           <MetaRow label="EXR File ID" value={String(exrMeta.file.file_id)} copyable />
         )}
       </dl>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StreamsTab — Video/Audio stream metadata
+// ---------------------------------------------------------------------------
+
+function StreamsTab({ asset }: { asset: AssetRow }) {
+  const meta = asset.metadata;
+  const ext = asset.title.split(".").pop()?.toLowerCase() ?? "";
+  const isVideo = ["mp4", "mov", "mxf", "avi", "mkv", "webm"].includes(ext);
+
+  return (
+    <div className="overflow-auto px-4 py-3" style={{ maxHeight: "calc(100vh - 200px)" }}>
+      {/* Container info */}
+      <SectionHeader title="Container" />
+      <dl>
+        <MetaRow label="Format" value={ext.toUpperCase()} />
+        <MetaRow label="Source" value={asset.sourceUri} copyable />
+        {meta?.file_size_bytes != null && <MetaRow label="Size" value={formatFileSize(meta.file_size_bytes)} />}
+      </dl>
+
+      {/* Video stream */}
+      {isVideo && (
+        <>
+          <SectionHeader title="Video Stream" />
+          <dl>
+            <MetaRow label="Codec" value={meta?.codec} accent />
+            {meta?.resolution && (
+              <MetaRow label="Resolution" value={`${meta.resolution.width}x${meta.resolution.height}`} />
+            )}
+            <MetaRow label="Frame Rate" value={meta?.frame_rate ? `${meta.frame_rate} fps` : null} />
+            <MetaRow label="Bit Depth" value={meta?.bit_depth ? bitDepthLabel(meta.bit_depth) : null} />
+            <MetaRow label="Pixel Aspect" value={meta?.pixel_aspect_ratio != null && meta.pixel_aspect_ratio !== 1 ? String(meta.pixel_aspect_ratio) : null} />
+            <MetaRow label="Color Space" value={meta?.color_space} accent />
+            {meta?.frame_range && (
+              <>
+                <MetaRow label="Frames" value={`${meta.frame_range.start} \u2013 ${meta.frame_range.end}`} />
+                {meta?.frame_rate && (
+                  <MetaRow label="Duration" value={formatDuration((meta.frame_range.end - meta.frame_range.start + 1) / meta.frame_rate)} />
+                )}
+              </>
+            )}
+          </dl>
+        </>
+      )}
+
+      {/* Audio stream */}
+      <SectionHeader title="Audio Stream" />
+      <dl>
+        {meta?.channels && meta.channels.length > 0 ? (
+          <MetaRow label="Channels" value={meta.channels.join(", ")} />
+        ) : (
+          <MetaRow label="Channels" value={isVideo ? "Stereo (assumed)" : null} />
+        )}
+        {!isVideo && meta?.codec && <MetaRow label="Codec" value={meta.codec} accent />}
+      </dl>
+
+      {/* Timecode */}
+      {meta?.frame_range && meta?.frame_rate && (
+        <>
+          <SectionHeader title="Timecode" />
+          <dl>
+            <MetaRow label="TC In" value={formatTC(meta.frame_range.start / meta.frame_rate, meta.frame_rate)} />
+            <MetaRow label="TC Out" value={formatTC(meta.frame_range.end / meta.frame_rate, meta.frame_rate)} />
+          </dl>
+        </>
+      )}
     </div>
   );
 }
@@ -775,6 +1115,10 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
     });
   }, [activeTab, asset.currentVersionId, history]);
 
+  // Media type detection
+  const mediaType = inferMediaType(asset.title, asset.sourceUri);
+  const tabs = getTabsForMediaType(mediaType);
+
   // Reset on asset change
   useEffect(() => { setInfo(null); setHistory(null); setExrMeta(null); setActiveTab("info"); }, [asset.id]);
 
@@ -786,8 +1130,8 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
       <PanelHeader asset={asset} info={info} onClose={onClose} />
       <FrameBar info={info} />
 
-      {/* AOV tag pills — show channel layers from EXR metadata */}
-      {exrMeta?.found && exrMeta.channels && exrMeta.channels.length > 0 && (
+      {/* AOV tag pills — show channel layers from EXR metadata (images only) */}
+      {mediaType === "image" && exrMeta?.found && exrMeta.channels && exrMeta.channels.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-4 py-2 border-b border-[var(--color-ah-border-muted)]">
           {[...new Set(exrMeta.channels.map((c) => c.layer_name || c.channel_name))].map((name) => (
             <span key={name}
@@ -797,10 +1141,12 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
         </div>
       )}
 
-      <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
+      <TabBar activeTab={activeTab} onTabChange={setActiveTab} tabContext={{ fieldCount: computeFieldCount(asset, exrMeta, info) }} tabs={tabs} />
 
       <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`} className="flex-1 overflow-hidden">
         {activeTab === "info" && <InfoTab info={loadingInfo ? null : info} asset={asset} exrMeta={exrMeta} onAdvanced={onAdvanced} />}
+        {activeTab === "fields" && <FieldsTab asset={asset} exrMeta={exrMeta} info={loadingInfo ? null : info} />}
+        {activeTab === "streams" && <StreamsTab asset={asset} />}
         {activeTab === "history" && <HistoryTab events={loadingHistory ? null : history} />}
         {activeTab === "aovs" && <AovsTab exrMeta={exrMeta} />}
         {activeTab === "vast" && <VastTab asset={asset} exrMeta={exrMeta} />}
