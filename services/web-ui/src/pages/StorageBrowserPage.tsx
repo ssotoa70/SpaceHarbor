@@ -40,6 +40,8 @@ export function StorageBrowserPage() {
   const [truncated, setTruncated] = useState(false);
   const [continuationToken, setContinuationToken] = useState<string | undefined>();
   const [ingesting, setIngesting] = useState<Set<string>>(new Set());
+  const [ingested, setIngested] = useState<Set<string>>(new Set());
+  const [ingestError, setIngestError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchStorageEndpoints().then((eps) => {
@@ -99,6 +101,7 @@ export function StorageBrowserPage() {
 
   const handleIngest = async (file: StorageBrowseFile) => {
     setIngesting((prev) => new Set(prev).add(file.key));
+    setIngestError(null);
     try {
       const filename = file.key.split("/").pop() ?? file.key;
       await ingestAsset({
@@ -106,6 +109,9 @@ export function StorageBrowserPage() {
         sourceUri: file.sourceUri,
         fileSizeBytes: file.sizeBytes,
       });
+      setIngested((prev) => new Set(prev).add(file.key));
+    } catch (err) {
+      setIngestError(`Failed to ingest ${file.key.split("/").pop()}: ${err instanceof Error ? err.message : "unknown error"}`);
     } finally {
       setIngesting((prev) => {
         const next = new Set(prev);
@@ -177,6 +183,20 @@ export function StorageBrowserPage() {
       {error && (
         <div className="bg-red-500/10 border border-red-500/30 rounded p-3 text-red-300 text-sm">
           {error}
+        </div>
+      )}
+
+      {ingestError && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded p-3 text-red-300 text-sm flex justify-between items-center">
+          <span>{ingestError}</span>
+          <button onClick={() => setIngestError(null)} className="text-red-400 hover:text-red-200 ml-2">x</button>
+        </div>
+      )}
+
+      {ingested.size > 0 && (
+        <div className="bg-green-500/10 border border-green-500/30 rounded p-3 text-green-300 text-sm flex justify-between items-center">
+          <span>Ingested {ingested.size} file{ingested.size > 1 ? "s" : ""} successfully</span>
+          <button onClick={() => setIngested(new Set())} className="text-green-400 hover:text-green-200 ml-2">x</button>
         </div>
       )}
 
@@ -255,13 +275,19 @@ export function StorageBrowserPage() {
                       : "-"}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <button
-                      onClick={() => handleIngest(file)}
-                      disabled={isIngesting}
-                      className="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {isIngesting ? "..." : "Ingest"}
-                    </button>
+                    {ingested.has(file.key) ? (
+                      <span className="text-xs px-2 py-1 rounded bg-green-600/20 text-green-300">
+                        Ingested
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleIngest(file)}
+                        disabled={isIngesting}
+                        className="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {isIngesting ? "..." : "Ingest"}
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

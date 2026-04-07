@@ -279,6 +279,49 @@ function InfoTab({
   asset: AssetRow;
   onAdvanced?: (updatedAsset: AssetRow) => void;
 }) {
+  // When no version detail is available (asset ingested without VFX hierarchy),
+  // show basic asset metadata instead of infinite skeleton placeholders.
+  if (!info && !asset.currentVersionId) {
+    const mt = inferMediaType(asset.title, asset.sourceUri);
+    const statusLabel = STATUS_LABELS[asset.status] ?? asset.status;
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex-1 overflow-auto px-4 pb-4">
+          <div className="mt-3 mb-1">
+            <h3 className="text-[13px] font-semibold text-[var(--color-ah-text)] truncate">{asset.title}</h3>
+            <p className="font-[var(--font-ah-mono)] text-[10px] text-[var(--color-ah-accent)] tracking-wide mt-0.5">
+              {mt.toUpperCase()} FILE
+            </p>
+          </div>
+          <SectionHeader title="File Info" />
+          <dl>
+            <StatusRow label="Status" statusLabel={statusLabel} />
+            <MetaRow label="Source" value={asset.sourceUri} copyable />
+            <MetaRow label="Media Type" value={mt} />
+            {asset.metadata?.file_size_bytes != null && (
+              <MetaRow label="File Size" value={formatFileSize(asset.metadata.file_size_bytes)} />
+            )}
+            {asset.createdAt && <MetaRow label="Ingested" value={new Date(asset.createdAt).toLocaleString()} />}
+            <MetaRow label="Asset ID" value={asset.id} copyable />
+            {asset.jobId && <MetaRow label="Job ID" value={asset.jobId} copyable />}
+          </dl>
+          {asset.metadata && Object.keys(asset.metadata).length > 0 && (
+            <>
+              <SectionHeader title="Metadata" />
+              <dl>
+                {Object.entries(asset.metadata).map(([k, v]) =>
+                  v != null && k !== "fileSizeBytes" ? (
+                    <MetaRow key={k} label={k} value={String(v)} />
+                  ) : null
+                )}
+              </dl>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (!info) {
     return (
       <div className="p-4 space-y-4">
