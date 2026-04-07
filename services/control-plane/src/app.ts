@@ -714,11 +714,28 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     }
 
     // Phase 2.3.1: Startup bootstrap — auto-create super_admin if users table is empty
+    // Wrapped in try/catch: if Trino is unreachable or tables don't exist yet,
+    // fall back to in-memory role binding and continue startup.
     const adminEmail = process.env.SPACEHARBOR_ADMIN_EMAIL?.trim();
-    const roleBindingSvc = (app as any).roleBindingService as RoleBindingService | PersistentRoleBindingService;
+    let roleBindingSvc = (app as any).roleBindingService as RoleBindingService | PersistentRoleBindingService;
 
     if (adminEmail && roleBindingSvc) {
-      const existingUsers = await Promise.resolve(roleBindingSvc.listUsers());
+      let existingUsers: unknown[] = [];
+      try {
+        existingUsers = await Promise.resolve(roleBindingSvc.listUsers());
+      } catch (trinoErr) {
+        app.log.warn(
+          `[bootstrap] Trino query failed during startup — falling back to in-memory IAM. ` +
+          `Error: ${(trinoErr as Error)?.message ?? trinoErr}. ` +
+          `Run "Deploy Schema" in Settings to create IAM tables.`
+        );
+        // Fall back to in-memory role binding
+        const fallback = new RoleBindingService();
+        (app as any).roleBindingService = fallback;
+        (app as any).roleBindingType = "in-memory";
+        roleBindingSvc = fallback;
+        setRoleBindingService(fallback);
+      }
       if (existingUsers.length === 0) {
         const { randomBytes: rb } = await import("node:crypto");
         let adminPassword = process.env.SPACEHARBOR_ADMIN_PASSWORD?.trim() || "";
@@ -748,7 +765,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // Phase 3: Dev bootstrap credentials only created in true development mode
     if (!adminEmail && isDev && roleBindingSvc) {
-      const existingUsers = await Promise.resolve(roleBindingSvc.listUsers());
+      let existingUsers: unknown[] = [];
+      try {
+        existingUsers = await Promise.resolve(roleBindingSvc.listUsers());
+      } catch {
+        // Trino tables not ready — fall back handled above
+      }
       if (existingUsers.length === 0) {
         const devEmail = "admin@spaceharbor.dev";
         const devPassword = "Admin1234!dev";
