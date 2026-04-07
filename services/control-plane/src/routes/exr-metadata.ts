@@ -107,26 +107,35 @@ export async function registerExrMetadataRoutes(
           : "";
 
         try {
-          // Get total count
+          // The 'files' table has vector columns (FixedSizeList) that the VAST Trino
+          // connector cannot handle at all — even COUNT(*) fails. Query through the
+          // 'parts' table instead (which has file_id and file_path but no vectors).
+          const partsWhere = pathPrefix
+            ? `WHERE p.file_path LIKE '${sanitize(pathPrefix)}%'`
+            : "";
+
           const countResult = await trino.query(
-            `SELECT COUNT(*) AS cnt FROM ${table("files")} ${whereClause}`
+            `SELECT COUNT(DISTINCT file_id) AS cnt FROM ${table("parts")} p ${partsWhere}`
           );
           const total = Number(countResult.data[0]?.[0] ?? 0);
 
-          // Get files with pagination (exclude vector columns — unsupported by Trino Arrow)
+          // Get file info from parts (part_index = 0 = primary part)
           const result = await trino.query(`
             SELECT
-              file_id,
-              file_path,
-              size_bytes,
-              multipart_count,
-              is_deep,
-              frame_number,
-              inspection_timestamp,
-              inspection_count
-            FROM ${table("files")}
-            ${whereClause}
-            ORDER BY file_path
+              p.file_id,
+              p.file_path,
+              p.width,
+              p.height,
+              p.compression,
+              p.color_space,
+              p.is_deep,
+              p.is_tiled,
+              p.render_software,
+              p.part_index
+            FROM ${table("parts")} p
+            WHERE p.part_index = 0
+            ${pathPrefix ? `AND p.file_path LIKE '${sanitize(pathPrefix)}%'` : ""}
+            ORDER BY p.file_path
             LIMIT ${limit}
             OFFSET ${offset}
           `);
@@ -179,20 +188,14 @@ export async function registerExrMetadataRoutes(
         const safeId = sanitize(fileId);
 
         try {
-          // Fetch file, parts, channels, attributes in parallel
-          // Note: exclude vector columns (metadata_embedding, channel_fingerprint)
-          // — Trino VAST connector doesn't support FixedSizeList Arrow type.
-          const [fileResult, partsResult, channelsResult, attrsResult] = await Promise.all([
-            trino.query(`
-              SELECT file_id, file_path, file_path_normalized, header_hash,
-                     size_bytes, mtime, multipart_count, is_deep,
-                     frame_number, inspection_timestamp, inspection_count, last_inspected
-              FROM ${table("files")}
-              WHERE file_id = '${safeId}'
-              LIMIT 1
-            `),
+          // Fetch parts, channels, attributes in parallel.
+          // Skip 'files' table — it has vector columns (FixedSizeList) that break
+          // the VAST Trino connector. Use 'parts' for file-level info instead.
+          // Skip 'channels' table directly — also has vector column. Use explicit columns.
+          const [partsResult, channelsResult, attrsResult] = await Promise.all([
             trino.query(`
               SELECT
+                file_id, file_path,
                 part_index, width, height,
                 display_width, display_height,
                 compression, color_space,
@@ -224,14 +227,15 @@ export async function registerExrMetadataRoutes(
             `),
           ]);
 
-          if (fileResult.rowCount === 0) {
+          if (partsResult.rowCount === 0) {
             return sendError(request, reply, 404, "NOT_FOUND",
               `EXR file not found: ${fileId}`);
           }
 
+          const parts = rowsToObjects(partsResult.columns, partsResult.data);
           return reply.send({
-            file: rowsToObjects(fileResult.columns, fileResult.data)[0],
-            parts: rowsToObjects(partsResult.columns, partsResult.data),
+            file: parts[0] ?? {},  // Primary part serves as file summary
+            parts,
             channels: rowsToObjects(channelsResult.columns, channelsResult.data),
             attributes: rowsToObjects(attrsResult.columns, attrsResult.data),
           });
@@ -303,27 +307,26 @@ export async function registerExrMetadataRoutes(
         const safeOriginal = sanitize(path);
 
         try {
-          // Try both normalized and original path (exclude vector columns)
-          const fileResult = await trino.query(`
-            SELECT file_id, file_path, file_path_normalized, size_bytes,
-                   multipart_count, is_deep, frame_number,
-                   inspection_timestamp, inspection_count
-            FROM ${table("files")}
-            WHERE file_path = '${safePath}'
-               OR file_path = '${safeOriginal}'
-               OR file_path_normalized = '${safePath}'
+          // Query through 'parts' table (no vector columns) to find by path.
+          // The parts table has file_path for correlation.
+          const partsResult = await trino.query(`
+            SELECT file_id, file_path, part_index, width, height,
+                   compression, color_space, is_deep, pixel_aspect_ratio
+            FROM ${table("parts")}
+            WHERE (file_path = '${safePath}' OR file_path = '${safeOriginal}')
+              AND part_index = 0
             LIMIT 1
           `);
 
-          if (fileResult.rowCount === 0) {
+          if (partsResult.rowCount === 0) {
             return reply.send({ found: false });
           }
 
-          const file = rowsToObjects(fileResult.columns, fileResult.data)[0];
+          const file = rowsToObjects(partsResult.columns, partsResult.data)[0];
           const fileId = String(file.file_id);
 
-          // Fetch parts and channels for summary
-          const [partsResult, channelsResult] = await Promise.all([
+          // Fetch all parts and channels for this file
+          const [allPartsResult, channelsResult] = await Promise.all([
             trino.query(`
               SELECT part_index, width, height, compression, color_space,
                      is_deep, pixel_aspect_ratio
@@ -339,7 +342,7 @@ export async function registerExrMetadataRoutes(
             `),
           ]);
 
-          const parts = rowsToObjects(partsResult.columns, partsResult.data);
+          const parts = rowsToObjects(allPartsResult.columns, allPartsResult.data);
           const channels = rowsToObjects(channelsResult.columns, channelsResult.data);
 
           // Build summary from first part
@@ -393,20 +396,21 @@ export async function registerExrMetadataRoutes(
         }
 
         try {
+          // Use parts and attributes tables only — files and channels tables have
+          // vector columns (FixedSizeList) incompatible with VAST Trino connector.
           const result = await trino.query(`
             SELECT
-              (SELECT COUNT(*) FROM ${table("files")}) AS total_files,
+              (SELECT COUNT(DISTINCT file_id) FROM ${table("parts")}) AS total_files,
               (SELECT COUNT(*) FROM ${table("parts")}) AS total_parts,
-              (SELECT COUNT(*) FROM ${table("channels")}) AS total_channels,
               (SELECT COUNT(*) FROM ${table("attributes")}) AS total_attributes
           `);
 
-          const row = result.data[0] ?? [0, 0, 0, 0];
+          const row = result.data[0] ?? [0, 0, 0];
           return reply.send({
             totalFiles: Number(row[0]),
             totalParts: Number(row[1]),
-            totalChannels: Number(row[2]),
-            totalAttributes: Number(row[3]),
+            totalChannels: 0,  // channels table has vector columns — count unavailable via Trino
+            totalAttributes: Number(row[2]),
             schema: getExrSchema(),
           });
         } catch (err) {
