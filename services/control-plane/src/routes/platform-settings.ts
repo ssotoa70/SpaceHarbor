@@ -406,16 +406,28 @@ export function buildTrinoFromSettings(): TrinoClient | null {
   if (!dbUrl) return null;
   try {
     const url = new URL(dbUrl);
-    const accessKey = operationalStore.vastDatabase.accessKeyId
-      || process.env.VAST_DB_ACCESS_KEY
-      || url.username
-      || process.env.VAST_ACCESS_KEY
-      || "";
-    const secretKey = operationalStore.vastDatabase.secretKey
-      || process.env.VAST_DB_SECRET_KEY
-      || url.password
-      || process.env.VAST_SECRET_KEY
-      || "";
+
+    // Only pass Basic auth credentials when connecting directly to VAST Database's
+    // built-in Trino endpoint (which uses S3 credentials). Standalone Trino
+    // (e.g. vastdataorg/trino-vast) uses X-Trino-User instead.
+    // Heuristic: if the URL contains credentials in the userinfo, use them.
+    // Otherwise, only use credentials for HTTPS endpoints (likely VAST direct).
+    const isDirectVast = url.protocol === "https:" || !!url.username;
+    const accessKey = isDirectVast
+      ? (operationalStore.vastDatabase.accessKeyId
+        || process.env.VAST_DB_ACCESS_KEY
+        || url.username
+        || process.env.VAST_ACCESS_KEY
+        || "")
+      : "";
+    const secretKey = isDirectVast
+      ? (operationalStore.vastDatabase.secretKey
+        || process.env.VAST_DB_SECRET_KEY
+        || url.password
+        || process.env.VAST_SECRET_KEY
+        || "")
+      : "";
+
     const schemaPath = getVastDatabaseSchemaPath();
     return new TrinoClient({
       endpoint: `${url.protocol}//${url.host}`,

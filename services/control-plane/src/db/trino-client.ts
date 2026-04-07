@@ -93,8 +93,15 @@ export class TrinoClient {
       }
     }
 
-    const creds = Buffer.from(`${config.accessKey}:${config.secretKey}`).toString("base64");
-    this.authHeader = `Basic ${creds}`;
+    // Only include Basic auth when credentials are provided.
+    // Standalone Trino (e.g. vastdataorg/trino-vast) uses X-Trino-User, not Basic auth.
+    // VAST Database's built-in Trino endpoint uses S3 credentials via Basic auth.
+    if (config.accessKey && config.secretKey) {
+      const creds = Buffer.from(`${config.accessKey}:${config.secretKey}`).toString("base64");
+      this.authHeader = `Basic ${creds}`;
+    } else {
+      this.authHeader = "";
+    }
     this.user = config.user ?? "spaceharbor";
     this.schema = config.schema ?? "spaceharbor/production";
     this.catalog = config.catalog ?? "vast";
@@ -114,15 +121,17 @@ export class TrinoClient {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Trino-User": this.user,
+        "X-Trino-Catalog": this.catalog,
+        "X-Trino-Schema": this.schema,
+      };
+      if (this.authHeader) headers["Authorization"] = this.authHeader;
+
       const response = await vastFetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: this.authHeader,
-          "X-Trino-User": this.user,
-          "X-Trino-Catalog": this.catalog,
-          "X-Trino-Schema": this.schema
-        },
+        headers,
         body: sql,
         signal: controller.signal
       });
