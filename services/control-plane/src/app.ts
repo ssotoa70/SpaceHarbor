@@ -411,23 +411,25 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerQueryRoutes(app, catalogTrino, prefixes);
 
     // Phase 1.2: Select IAM role binding backend
-    const roleBindingService = catalogTrino
+    // Use a getter from app so the onReady fallback can swap to in-memory.
+    const initialRoleBindingService = catalogTrino
       ? new PersistentRoleBindingService(catalogTrino)
       : new RoleBindingService();
-    (app as any).roleBindingService = roleBindingService;
+    (app as any).roleBindingService = initialRoleBindingService;
     (app as any).roleBindingType = catalogTrino ? "persistent" : "in-memory";
+    const getRoleBinding = () => (app as any).roleBindingService as RoleBindingService | PersistentRoleBindingService;
 
     // Phase 2: Local Auth & User Management
-    void registerIamRoutes(app, () => roleBindingService, prefixes);
+    void registerIamRoutes(app, getRoleBinding, prefixes);
 
     // Phase 2.2: Wire role binding service for JIT user provisioning
-    setRoleBindingService(roleBindingService);
+    setRoleBindingService(initialRoleBindingService);
 
     // Phase 2.5: SCIM inbound endpoints
-    void registerScimRoutes(app, () => roleBindingService);
+    void registerScimRoutes(app, getRoleBinding);
 
     // Phase 3.5: Device Authorization Grant (DCC plugins)
-    void registerDeviceAuthRoutes(app, () => roleBindingService, prefixes);
+    void registerDeviceAuthRoutes(app, getRoleBinding, prefixes);
 
     // Phase 3.2: CSRF protection hook (registered after routes)
     app.addHook("onRequest", csrfHook);
