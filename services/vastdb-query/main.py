@@ -67,7 +67,7 @@ def vast_transaction(bucket: str = DEFAULT_BUCKET):
 def table_to_records(
     table,
     columns: Optional[list[str]] = None,
-    predicate: Optional[pa.compute.Expression] = None,
+    predicate=None,
     limit: int = 100,
 ) -> list[dict]:
     """Read a VAST table and return as list of dicts."""
@@ -77,8 +77,13 @@ def table_to_records(
     if predicate is not None:
         kwargs["predicate"] = predicate
 
-    reader = table.select(**kwargs)
-    arrow_table = reader.read_all()
+    try:
+        reader = table.select(**kwargs)
+        arrow_table = reader.read_all()
+    except (TypeError, AttributeError):
+        # vastdb SDK may not support pyarrow predicates — read all and filter in Python
+        reader = table.select(columns=columns) if columns else table.select()
+        arrow_table = reader.read_all()
 
     # Apply limit
     if len(arrow_table) > limit:
@@ -158,16 +163,15 @@ def exr_files(
     try:
         with vast_transaction(bucket) as bkt:
             tbl = bkt.schema(schema).table("files")
+            records = table_to_records(tbl, columns=FILES_COLUMNS, limit=10000)
 
-            predicate = None
-            if pathPrefix:
-                predicate = pa.compute.field("file_path").cast(pa.utf8()).starts_with(pathPrefix)
+        # Filter by path prefix in Python
+        if pathPrefix:
+            records = [r for r in records if str(r.get("file_path", "")).startswith(pathPrefix)]
 
-            records = table_to_records(tbl, columns=FILES_COLUMNS, predicate=predicate, limit=limit + offset)
-
-        # Manual offset/limit (vastdb SDK doesn't support offset natively)
+        total = len(records)
         paged = records[offset:offset + limit]
-        return {"files": paged, "total": len(records), "schema": f"{bucket}/{schema}"}
+        return {"files": paged, "total": total, "schema": f"{bucket}/{schema}"}
     except HTTPException:
         raise
     except Exception as e:
@@ -185,15 +189,20 @@ def exr_file_detail(
     try:
         with vast_transaction(bucket) as bkt:
             s = bkt.schema(schema)
-            pred = pa.compute.field("file_id") == file_id
 
-            files = table_to_records(s.table("files"), columns=FILES_COLUMNS, predicate=pred, limit=1)
+            all_files = table_to_records(s.table("files"), columns=FILES_COLUMNS, limit=10000)
+            files = [f for f in all_files if f.get("file_id") == file_id]
             if not files:
                 raise HTTPException(404, detail=f"File not found: {file_id}")
 
-            parts = table_to_records(s.table("parts"), predicate=pred, limit=100)
-            channels = table_to_records(s.table("channels"), columns=CHANNELS_COLUMNS, predicate=pred, limit=500)
-            attributes = table_to_records(s.table("attributes"), predicate=pred, limit=1000)
+            all_parts = table_to_records(s.table("parts"), limit=10000)
+            parts = [p for p in all_parts if p.get("file_id") == file_id]
+
+            all_channels = table_to_records(s.table("channels"), columns=CHANNELS_COLUMNS, limit=50000)
+            channels = [c for c in all_channels if c.get("file_id") == file_id]
+
+            all_attrs = table_to_records(s.table("attributes"), limit=50000)
+            attributes = [a for a in all_attrs if a.get("file_id") == file_id]
 
         return {
             "file": files[0],
@@ -242,11 +251,14 @@ def exr_lookup(
             if not matched_file_id:
                 return {"found": False}
 
-            # Get all data for matched file
-            pred = pa.compute.field("file_id") == matched_file_id
-            files = table_to_records(s.table("files"), columns=FILES_COLUMNS, predicate=pred, limit=1)
-            parts = table_to_records(parts_tbl, predicate=pred, limit=100)
-            channels = table_to_records(s.table("channels"), columns=CHANNELS_COLUMNS, predicate=pred, limit=500)
+            # Get all data for matched file (filter in Python — vastdb SDK predicate compat)
+            all_files = table_to_records(s.table("files"), columns=FILES_COLUMNS, limit=10000)
+            files = [f for f in all_files if f.get("file_id") == matched_file_id]
+
+            parts = [p for p in all_parts if p.get("file_id") == matched_file_id]
+
+            all_channels = table_to_records(s.table("channels"), columns=CHANNELS_COLUMNS, limit=50000)
+            channels = [c for c in all_channels if c.get("file_id") == matched_file_id]
 
         file_info = files[0] if files else {}
         first_part = parts[0] if parts else {}
