@@ -2578,3 +2578,23 @@ export async function fetchPresignedUrl(sourceUri: string): Promise<string | nul
     return null;
   }
 }
+
+export interface MediaUrls {
+  source: string | null;
+  thumbnail: string | null;
+  proxy: string | null;
+}
+
+/** Fetch presigned URLs for source, thumbnail (.proxies/*_thumb.jpg), and proxy (.proxies/*_proxy.mp4). */
+export async function fetchMediaUrls(sourceUri: string): Promise<MediaUrls> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/storage/media-urls?sourceUri=${encodeURIComponent(sourceUri)}`,
+      { headers: withAuth() },
+    );
+    if (!response.ok) return { source: null, thumbnail: null, proxy: null };
+    return (await response.json()) as MediaUrls;
+  } catch {
+    return { source: null, thumbnail: null, proxy: null };
+  }
+}

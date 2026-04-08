@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchExrMetadataLookup, fetchPresignedUrl, type AssetRow, type AssetDependencyData, type UnregisteredFile, type ExrMetadataLookupResult } from "../api";
+import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchExrMetadataLookup, fetchMediaUrls, type AssetRow, type AssetDependencyData, type UnregisteredFile, type ExrMetadataLookupResult } from "../api";
 import { Badge, Button, Input, Skeleton } from "../design-system";
 import { AssetDetailPanel } from "../components/AssetDetailPanel";
 
@@ -385,12 +385,15 @@ function MediaPreview({ asset, onClose }: MediaPreviewProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Load presigned URL for media preview (video files can be streamed directly)
+  // Load presigned URLs for media preview (thumbnail, proxy, source)
   useEffect(() => {
-    const mt = inferMediaType(asset.title, asset.sourceUri);
-    if ((mt === "video" || mt === "image") && asset.sourceUri.startsWith("s3://")) {
-      void fetchPresignedUrl(asset.sourceUri).then(setPreviewUrl);
-    }
+    void fetchMediaUrls(asset.sourceUri).then((urls) => {
+      // Prefer thumbnail for still images, proxy for video, source as fallback
+      const mt = inferMediaType(asset.title, asset.sourceUri);
+      if (mt === "video" && urls.proxy) setPreviewUrl(urls.proxy);
+      else if (urls.thumbnail) setPreviewUrl(urls.thumbnail);
+      else if (urls.source) setPreviewUrl(urls.source);
+    });
   }, [asset.sourceUri, asset.title]);
 
   // Load EXR metadata

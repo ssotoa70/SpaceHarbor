@@ -381,5 +381,101 @@ export async function registerStorageBrowseRoutes(
         }
       },
     );
+
+    // --- GET /storage/media-urls --- Resolve presigned URLs for source, thumbnail, and proxy
+    // Uses the DataEngine `.proxies/` convention to derive paths.
+    app.get<{
+      Querystring: { sourceUri: string; endpointId?: string };
+    }>(
+      withPrefix(prefix, "/storage/media-urls"),
+      {
+        schema: {
+          tags: ["storage"],
+          operationId: prefix === "/api/v1" ? "v1StorageMediaUrls" : "legacyStorageMediaUrls",
+          summary: "Get presigned URLs for source, thumbnail, and proxy by convention",
+          querystring: {
+            type: "object",
+            required: ["sourceUri"],
+            properties: {
+              sourceUri: { type: "string" },
+              endpointId: { type: "string" },
+            },
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                source: { type: "string" },
+                thumbnail: { type: "string" },
+                proxy: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+      async (request, reply) => {
+        const { sourceUri, endpointId } = request.query;
+
+        // Resolve bucket and key from sourceUri (supports both s3://bucket/key and /key formats)
+        let bucket: string | null = null;
+        let key: string;
+
+        const s3Match = sourceUri.match(/^s3:\/\/([^/]+)\/(.+)$/);
+        if (s3Match) {
+          bucket = s3Match[1];
+          key = s3Match[2];
+        } else {
+          // Bare path like /uploads/uuid/file.exr — use first endpoint's bucket
+          key = sourceUri.startsWith("/") ? sourceUri.slice(1) : sourceUri;
+        }
+
+        const endpoints = getStorageEndpoints();
+        const ep = endpointId
+          ? endpoints.find((e) => e.id === endpointId)
+          : bucket
+            ? endpoints.find((e) => e.bucket === bucket) ?? endpoints[0]
+            : endpoints[0];
+
+        if (!ep) {
+          return reply.send({ source: null, thumbnail: null, proxy: null });
+        }
+
+        const resolvedBucket = bucket ?? ep.bucket;
+
+        // Derive proxy paths using DataEngine convention:
+        // source: bucket/path/to/file.exr
+        // thumb:  bucket/path/to/.proxies/file_thumb.jpg
+        // proxy:  bucket/path/to/.proxies/file_proxy.mp4
+        const dir = key.includes("/") ? key.substring(0, key.lastIndexOf("/")) : "";
+        const filename = key.includes("/") ? key.substring(key.lastIndexOf("/") + 1) : key;
+        const baseName = filename.replace(/\.[^.]+$/, "");
+        const thumbKey = dir ? `${dir}/.proxies/${baseName}_thumb.jpg` : `.proxies/${baseName}_thumb.jpg`;
+        const proxyKey = dir ? `${dir}/.proxies/${baseName}_proxy.mp4` : `.proxies/${baseName}_proxy.mp4`;
+
+        setVastTlsSkip();
+        try {
+          const s3 = makeS3Client(ep);
+          const expiresIn = 3600;
+
+          const [sourceUrl, thumbUrl, proxyUrl] = await Promise.allSettled([
+            getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: key }), { expiresIn }),
+            getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: thumbKey }), { expiresIn }),
+            getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: proxyKey }), { expiresIn }),
+          ]);
+
+          s3.destroy();
+
+          return reply.send({
+            source: sourceUrl.status === "fulfilled" ? sourceUrl.value : null,
+            thumbnail: thumbUrl.status === "fulfilled" ? thumbUrl.value : null,
+            proxy: proxyUrl.status === "fulfilled" ? proxyUrl.value : null,
+          });
+        } catch {
+          return reply.send({ source: null, thumbnail: null, proxy: null });
+        } finally {
+          restoreVastTls();
+        }
+      },
+    );
   }
 }

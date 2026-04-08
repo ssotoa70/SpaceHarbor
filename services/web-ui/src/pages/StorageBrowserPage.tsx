@@ -3,12 +3,13 @@ import {
   fetchStorageEndpoints,
   fetchStorageBrowse,
   fetchExrMetadataLookup,
-  fetchPresignedUrl,
+  fetchMediaUrls,
   ingestAsset,
   type StorageEndpoint,
   type StorageBrowseFile,
   type StorageBrowseFolder,
   type ExrMetadataLookupResult,
+  type MediaUrls,
 } from "../api";
 
 function formatBytes(bytes: number): string {
@@ -54,8 +55,10 @@ function FileDetailSidebar({ file, onClose }: { file: StorageBrowseFile; onClose
       setLoading(false);
     });
 
-    // Try to get a presigned preview URL
-    void fetchPresignedUrl(file.sourceUri).then(setPreviewUrl);
+    // Try to get a presigned preview URL (prefer thumbnail from .proxies/ convention)
+    void fetchMediaUrls(file.sourceUri).then((urls) => {
+      setPreviewUrl(urls.thumbnail ?? urls.source ?? null);
+    });
   }, [file.key, filename, file.sourceUri]);
 
   const summary = exrMeta?.summary;
