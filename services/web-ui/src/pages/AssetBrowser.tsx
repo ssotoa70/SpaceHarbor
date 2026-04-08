@@ -50,17 +50,30 @@ interface AssetSingle {
 
 type AssetEntry = AssetSequence | AssetSingle;
 
+/** Extract bucket or location prefix from a sourceUri for grouping. */
+function extractLocation(sourceUri: string): string {
+  // s3://bucket-name/path -> "s3://bucket-name"
+  const s3Match = sourceUri.match(/^s3:\/\/([^/]+)/);
+  if (s3Match) return `s3://${s3Match[1]}`;
+  // /uploads/uuid/file -> "/uploads"
+  const pathMatch = sourceUri.match(/^(\/[^/]+)/);
+  if (pathMatch) return pathMatch[1];
+  return "";
+}
+
 function groupIntoSequences(assets: AssetRow[]): AssetEntry[] {
-  const seqMap = new Map<string, { baseName: string; ext: string; padding: number; frames: Array<{ num: number; asset: AssetRow }> }>();
+  const seqMap = new Map<string, { baseName: string; ext: string; padding: number; location: string; frames: Array<{ num: number; asset: AssetRow }> }>();
   const singles: AssetRow[] = [];
 
   for (const asset of assets) {
     const match = FRAME_PATTERN.exec(asset.title);
     if (match) {
       const [, base, frameStr, ext] = match;
-      const key = `${base}|${ext}`;
+      // Include location in key so frames from different buckets stay separate
+      const location = extractLocation(asset.sourceUri);
+      const key = `${location}|${base}|${ext}`;
       if (!seqMap.has(key)) {
-        seqMap.set(key, { baseName: base, ext, padding: frameStr.length, frames: [] });
+        seqMap.set(key, { baseName: base, ext, padding: frameStr.length, location, frames: [] });
       }
       seqMap.get(key)!.frames.push({ num: parseInt(frameStr, 10), asset });
     } else {
@@ -277,7 +290,7 @@ function SequenceCard({ sequence, onPreview, onDetail }: SequenceCardProps) {
 
   return (
     <div
-      className="relative cursor-pointer transition-all overflow-hidden rounded-[9px] border border-[var(--color-ah-border)] hover:border-[var(--color-ah-accent)]/40 hover:shadow-[0_4px_22px_rgba(0,0,0,.45),0_0_14px_rgba(6,182,212,.09)] hover:-translate-y-0.5 bg-[var(--color-ah-bg-raised)]"
+      className="group relative cursor-pointer transition-all overflow-hidden rounded-[9px] border border-[var(--color-ah-border)] hover:border-[var(--color-ah-accent)]/40 hover:shadow-[0_4px_22px_rgba(0,0,0,.45),0_0_14px_rgba(6,182,212,.09)] hover:-translate-y-0.5 bg-[var(--color-ah-bg-raised)]"
       onClick={() => onDetail(rep)}
       onDoubleClick={() => onPreview(rep)}
     >
@@ -326,8 +339,20 @@ function SequenceCard({ sequence, onPreview, onDetail }: SequenceCardProps) {
             </span>
           )}
         </div>
-        <div className="font-[var(--font-ah-mono)] text-[9px] text-[var(--color-ah-accent)]/60 truncate">
-          {extractVastPath(rep.sourceUri).replace(/[^/]+$/, sequence.pattern)}
+        <div className="font-[var(--font-ah-mono)] text-[9px] text-[var(--color-ah-accent)]/60 truncate flex items-center gap-1">
+          <span className="truncate">{extractVastPath(rep.sourceUri).replace(/[^/]+$/, sequence.pattern)}</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const text = extractVastPath(rep.sourceUri).replace(/[^/]+$/, sequence.pattern);
+              if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text);
+              else { const ta = document.createElement("textarea"); ta.value = text; ta.style.cssText = "position:fixed;opacity:0"; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); }
+            }}
+            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-[var(--color-ah-accent)] cursor-pointer"
+            title="Copy path"
+          >
+            &#128203;
+          </button>
         </div>
       </div>
     </div>
@@ -871,6 +896,7 @@ export function AssetBrowser() {
   const [previewAsset, setPreviewAsset] = useState<AssetRow | null>(null);
   const [detailAsset, setDetailAsset] = useState<AssetRow | null>(null);
   const [ingestOpen, setIngestOpen] = useState(false);
+  const [groupSequences, setGroupSequences] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -968,8 +994,10 @@ export function AssetBrowser() {
       return a.title.localeCompare(b.title);
     });
 
-  // Group EXR sequences for gallery mode
-  const entries = groupIntoSequences(filtered);
+  // Group EXR sequences for gallery mode, or show individual frames
+  const entries: AssetEntry[] = groupSequences
+    ? groupIntoSequences(filtered)
+    : filtered.map((a) => ({ kind: "single" as const, key: a.id, asset: a }));
 
   const panelOpen = detailAsset !== null;
 
@@ -998,6 +1026,13 @@ export function AssetBrowser() {
         <div className="flex items-center gap-2">
           <Button variant="primary" onClick={() => setIngestOpen(true)}>
             + Ingest
+          </Button>
+          <Button
+            variant={groupSequences ? "primary" : "ghost"}
+            onClick={() => setGroupSequences(!groupSequences)}
+            aria-pressed={groupSequences}
+          >
+            {groupSequences ? "Sequences" : "Frames"}
           </Button>
           <div className="flex gap-1" role="toolbar" aria-label="View mode">
             {(["gallery", "list", "compact"] as const).map((mode) => (

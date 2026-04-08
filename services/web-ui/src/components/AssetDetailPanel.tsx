@@ -168,14 +168,30 @@ function StatusRow({ label, statusLabel }: { label: string; statusLabel: string 
   );
 }
 
+function copyToClipboard(text: string): boolean {
+  // Prefer modern clipboard API (requires secure context)
+  if (navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(text);
+    return true;
+  }
+  // Fallback for HTTP: use a temporary textarea
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); return true; } catch { return false; }
+  finally { document.body.removeChild(ta); }
+}
+
 function CopyBtn({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(value);
+  const handleCopy = useCallback(() => {
+    if (copyToClipboard(value)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch { /* noop */ }
+    }
   }, [value]);
   return (
     <button type="button" onClick={handleCopy}
@@ -551,7 +567,7 @@ function InfoTab({
             <span className="text-sm">&#9655;</span> Open in RV Player
           </button>
           <div className="grid grid-cols-2 gap-2">
-            <ActionBtn icon="&#128203;" label="Copy Path" onClick={() => void navigator.clipboard.writeText(asset.sourceUri)} />
+            <ActionBtn icon="&#128203;" label="Copy Path" onClick={() => copyToClipboard(asset.sourceUri)} />
             <ActionBtn icon="&#8635;" label="Re-ingest" />
           </div>
           <DevAdvanceButton asset={asset} onAdvanced={onAdvanced} />
@@ -669,7 +685,7 @@ function InfoTab({
         <div className="grid grid-cols-2 gap-2">
           <ActionBtn icon="&#128203;" label="Copy Path" onClick={() => {
             const p = v.elementPath ?? v.vastPath ?? asset.sourceUri;
-            if (p) void navigator.clipboard.writeText(p);
+            if (p) copyToClipboard(p);
           }} />
           <ActionBtn icon="&#8635;" label="Proxy" />
           <ActionBtn icon="&#9881;" label="Pipeline" />
