@@ -583,7 +583,8 @@ export const uploadUrlRequestSchema = {
   properties: {
     filename: { type: "string", minLength: 1 },
     contentType: { type: "string" },
-    prefix: { type: "string" }
+    prefix: { type: "string" },
+    endpointId: { type: "string", description: "ID of a configured storage endpoint to upload to" }
   }
 } as const;
 
