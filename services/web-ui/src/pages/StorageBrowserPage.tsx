@@ -2,10 +2,13 @@ import { useState, useEffect, useCallback } from "react";
 import {
   fetchStorageEndpoints,
   fetchStorageBrowse,
+  fetchExrMetadataLookup,
+  fetchPresignedUrl,
   ingestAsset,
   type StorageEndpoint,
   type StorageBrowseFile,
   type StorageBrowseFolder,
+  type ExrMetadataLookupResult,
 } from "../api";
 
 function formatBytes(bytes: number): string {
@@ -29,6 +32,139 @@ function mediaTypeColor(type: string): string {
   return colors[type] ?? "bg-gray-500/20 text-gray-300";
 }
 
+// ---------------------------------------------------------------------------
+// File Detail Sidebar — shows EXR metadata from the exr_metadata schema
+// ---------------------------------------------------------------------------
+
+function FileDetailSidebar({ file, onClose }: { file: StorageBrowseFile; onClose: () => void }) {
+  const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const filename = file.key.split("/").pop() ?? file.key;
+
+  useEffect(() => {
+    setLoading(true);
+    setExrMeta(null);
+    setPreviewUrl(null);
+
+    // Fetch EXR metadata by filename
+    void fetchExrMetadataLookup(filename).then((res) => {
+      setExrMeta(res);
+      setLoading(false);
+    });
+
+    // Try to get a presigned preview URL
+    void fetchPresignedUrl(file.sourceUri).then(setPreviewUrl);
+  }, [file.key, filename, file.sourceUri]);
+
+  const summary = exrMeta?.summary;
+  const parts = exrMeta?.parts ?? [];
+  const channels = exrMeta?.channels ?? [];
+  const part0 = parts[0];
+
+  return (
+    <div className="w-96 border-l border-gray-700 bg-gray-900/95 overflow-y-auto flex flex-col shrink-0">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+        <h3 className="text-sm font-semibold text-white truncate">{filename}</h3>
+        <button onClick={onClose} className="text-gray-400 hover:text-white text-lg leading-none">&times;</button>
+      </div>
+
+      {/* Preview area */}
+      <div className="h-48 bg-gray-950 flex items-center justify-center border-b border-gray-700">
+        {previewUrl ? (
+          <img src={previewUrl} alt={filename} className="max-h-full max-w-full object-contain" />
+        ) : (
+          <div className="text-gray-600 text-xs font-mono">No preview</div>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="p-4 text-gray-500 text-sm">Loading metadata...</div>
+      ) : !exrMeta?.found ? (
+        <div className="p-4 space-y-3">
+          <div className="text-xs text-gray-500">No EXR metadata available for this file.</div>
+          <div className="space-y-2">
+            <DetailRow label="File" value={filename} />
+            <DetailRow label="Size" value={formatBytes(file.sizeBytes)} />
+            <DetailRow label="Type" value={file.inferredMediaType} />
+            <DetailRow label="Modified" value={file.lastModified ? new Date(file.lastModified).toLocaleString() : "-"} />
+          </div>
+        </div>
+      ) : (
+        <div className="p-4 space-y-4">
+          {/* Summary section */}
+          {summary && (
+            <Section title="Image">
+              <DetailRow label="Resolution" value={summary.resolution} />
+              <DetailRow label="Channels" value={String(summary.channelCount)} />
+              <DetailRow label="Deep" value={summary.isDeep ? "Yes" : "No"} />
+              {summary.frameNumber != null && <DetailRow label="Frame" value={String(summary.frameNumber)} />}
+            </Section>
+          )}
+
+          {/* Technical section from part0 */}
+          {part0 && (
+            <Section title="Technical">
+              <DetailRow label="Compression" value={part0.compression} />
+              <DetailRow label="Color Space" value={part0.color_space ?? "-"} />
+              <DetailRow label="Pixel Aspect" value={String(part0.pixel_aspect_ratio)} />
+              <DetailRow label="Tiled" value={part0.is_tiled ? `${part0.tile_width}\u00d7${part0.tile_height}` : "Scanline"} />
+              {part0.render_software && <DetailRow label="Software" value={part0.render_software.split(" ")[0]} />}
+              <DetailRow label="Data Window" value={part0.data_window ?? "-"} />
+              <DetailRow label="Display Window" value={part0.display_window ?? "-"} />
+            </Section>
+          )}
+
+          {/* Channels/AOVs */}
+          {channels.length > 0 && (
+            <Section title={`Channels (${channels.length})`}>
+              <div className="flex flex-wrap gap-1">
+                {channels.map((ch) => (
+                  <span key={`${ch.part_index}-${ch.channel_name}`} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-700 text-gray-300">
+                    {ch.channel_name} <span className="text-gray-500">{ch.channel_type}</span>
+                  </span>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {/* File info */}
+          <Section title="File">
+            <DetailRow label="Size" value={formatBytes(file.sizeBytes)} />
+            <DetailRow label="Path" value={file.key} mono />
+            <DetailRow label="S3 URI" value={file.sourceUri} mono />
+            {exrMeta.file && <DetailRow label="Inspected" value={new Date(exrMeta.file.inspection_timestamp).toLocaleString()} />}
+          </Section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10px] font-mono font-medium tracking-widest text-gray-500 uppercase mb-1.5">{title}</div>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex justify-between text-xs gap-2">
+      <span className="text-gray-500 shrink-0">{label}</span>
+      <span className={`text-gray-200 text-right truncate ${mono ? "font-mono text-[10px]" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
 export function StorageBrowserPage() {
   const [endpoints, setEndpoints] = useState<StorageEndpoint[]>([]);
   const [selectedEndpoint, setSelectedEndpoint] = useState<string>("");
@@ -42,6 +178,7 @@ export function StorageBrowserPage() {
   const [ingesting, setIngesting] = useState<Set<string>>(new Set());
   const [ingested, setIngested] = useState<Set<string>>(new Set());
   const [ingestError, setIngestError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<StorageBrowseFile | null>(null);
 
   useEffect(() => {
     fetchStorageEndpoints().then((eps) => {
@@ -132,7 +269,8 @@ export function StorageBrowserPage() {
     }, []);
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="flex h-full">
+    <div className={`flex-1 p-6 space-y-4 overflow-auto ${selectedFile ? "pr-0" : ""}`}>
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">Storage Browser</h1>
         <div className="flex items-center gap-3">
@@ -254,7 +392,8 @@ export function StorageBrowserPage() {
               return (
                 <tr
                   key={file.key}
-                  className="border-b border-gray-700/50 hover:bg-gray-700/30"
+                  onClick={() => setSelectedFile(file)}
+                  className={`border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer ${selectedFile?.key === file.key ? "bg-indigo-500/10 border-l-2 border-l-indigo-400" : ""}`}
                 >
                   <td className="px-4 py-2 text-white font-mono text-xs">
                     {name}
@@ -318,6 +457,12 @@ export function StorageBrowserPage() {
           </div>
         )}
       </div>
+    </div>
+
+    {/* Detail sidebar */}
+    {selectedFile && (
+      <FileDetailSidebar file={selectedFile} onClose={() => setSelectedFile(null)} />
+    )}
     </div>
   );
 }
