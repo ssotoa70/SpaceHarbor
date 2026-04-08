@@ -796,15 +796,22 @@ def create_tables(
                     log_error(f"Failed to create {table_def.name}: {error_msg}")
                     return 0, 0, f"Failed to create table {table_def.name}: {error_msg}"
 
-            # Insert schema version if schema_version table was just created
-            if not dry_run and "schema_version" in [
-                t.name for t in tables if t not in
-                [t for t in tables if t.name in existing_table_names]
-            ]:
+            # Insert schema version record via PyArrow record batch
+            if not dry_run and tables_created > 0:
                 try:
-                    log_info("Inserting schema version record (version=1)")
-                    # Note: vastdb doesn't support direct INSERT, so we skip this for now
-                    # In production, you'd execute this via the TrinoClient
+                    sv_table = schema.table("schema_version")
+                    max_version = max(t.migration_version for t in tables)
+                    batch = pa.RecordBatch.from_pydict({
+                        "version": [max_version],
+                        "applied_at": [datetime.utcnow()],
+                        "description": [f"vastdb SDK migration: {tables_created} tables created"],
+                    }, schema=pa.schema([
+                        ("version", pa.int32()),
+                        ("applied_at", pa.timestamp("us")),
+                        ("description", pa.string()),
+                    ]))
+                    sv_table.insert(batch)
+                    log_info(f"Recorded schema version {max_version}")
                 except Exception as e:
                     log_info(f"Could not insert schema version: {e}")
 
@@ -814,6 +821,69 @@ def create_tables(
         error_msg = str(e)
         log_error(f"Migration failed: {error_msg}")
         return 0, 0, error_msg
+
+
+def get_schema_status(
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str,
+    schema_name: str,
+) -> Dict[str, Any]:
+    """
+    Query current schema version and return status info.
+    Used by the schema-status endpoint to avoid Trino dependency.
+    """
+    tables = get_table_definitions()
+    total_migrations = max(t.migration_version for t in tables)
+
+    try:
+        session = vastdb.connect(endpoint=endpoint, access=access_key, secret=secret_key)
+
+        with session.transaction() as tx:
+            bucket_obj = tx.bucket(bucket)
+            try:
+                db_schema = bucket_obj.schema(schema_name)
+            except Exception:
+                return {
+                    "currentVersion": 0,
+                    "availableMigrations": total_migrations,
+                    "upToDate": False,
+                    "tables": [],
+                }
+
+            # Read schema_version table for current version
+            current_version = 0
+            try:
+                sv_table = db_schema.table("schema_version")
+                reader = sv_table.select(columns=["version"])
+                rb = reader.read_all()
+                if len(rb) > 0:
+                    current_version = max(rb.column("version").to_pylist())
+            except Exception:
+                pass
+
+            # List existing tables
+            existing = []
+            try:
+                existing = [t.name for t in db_schema.tables()]
+            except Exception:
+                pass
+
+            return {
+                "currentVersion": current_version,
+                "availableMigrations": total_migrations,
+                "upToDate": current_version >= total_migrations,
+                "tables": existing,
+            }
+
+    except Exception as e:
+        return {
+            "currentVersion": 0,
+            "availableMigrations": total_migrations,
+            "upToDate": False,
+            "error": str(e),
+        }
 
 
 def main() -> int:
@@ -845,6 +915,11 @@ def main() -> int:
         "--dry-run",
         action="store_true",
         help="List tables without creating them",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Query current schema status (no changes)",
     )
     parser.add_argument(
         "--ssl-verify",
@@ -888,6 +963,12 @@ def main() -> int:
 
     # Configure SSL
     configure_ssl(args.ssl_verify)
+
+    # Status-only mode: query and return, no changes
+    if args.status:
+        result = get_schema_status(endpoint, access_key, secret_key, bucket, schema_name)
+        print(json.dumps(result))
+        return 0
 
     log_info(f"Starting migration: endpoint={endpoint}, bucket={bucket}, schema={schema_name}")
 

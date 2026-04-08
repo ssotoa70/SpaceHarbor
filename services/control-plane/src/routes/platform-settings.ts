@@ -1056,7 +1056,7 @@ export async function registerPlatformSettingsRoutes(
           tags: ["platform"],
           operationId: `${opPrefix}DeploySchema`,
           summary: "Run database schema migrations",
-          description: "Applies pending Trino/VAST DataBase migrations. Requires admin:system_config permission. This action cannot be undone.",
+          description: "Creates all SpaceHarbor tables in VAST Database via the vastdb Python SDK. Idempotent — skips existing tables. Requires admin:system_config permission.",
           response: {
             200: schemaDeployResponseSchema,
             503: errorEnvelopeSchema,
@@ -1166,7 +1166,7 @@ export async function registerPlatformSettingsRoutes(
           tags: ["platform"],
           operationId: `${opPrefix}GetSchemaStatus`,
           summary: "Get database schema migration status",
-          description: "Returns the current schema version, available migrations, and any pending migrations.",
+          description: "Returns the current schema version, available migrations, and any pending migrations. Uses the vastdb Python SDK.",
           response: {
             200: schemaStatusResponseSchema,
           },
@@ -1174,35 +1174,73 @@ export async function registerPlatformSettingsRoutes(
       },
       async (_request, reply) => {
         if (denyUnlessAdmin(_request, reply)) return;
-        const trino = buildTrinoFromSettings();
-        const totalMigrations = migrations.length;
 
-        let currentVersion = 0;
+        const bucket = getVastDatabaseBucket();
+        const schema = getVastDatabaseSchema();
+        const dbUrl = getVastDatabaseUrl();
+        const accessKey = operationalStore.vastDatabase.accessKeyId
+          || process.env.VAST_DB_ACCESS_KEY || process.env.VAST_ACCESS_KEY || "";
+        const secretKey = operationalStore.vastDatabase.secretKey
+          || process.env.VAST_DB_SECRET_KEY || process.env.VAST_SECRET_KEY || "";
 
-        if (trino) {
-          try {
-            const schema = getVastDatabaseSchemaPath();
-            const result = await trino.query(
-              `SELECT MAX(version) AS max_ver FROM vast."${schema}".schema_version`,
-            );
-            if (result.data.length > 0 && result.data[0][0] != null) {
-              currentVersion = result.data[0][0] as number;
-            }
-          } catch {
-            // Table doesn't exist
-          }
+        // If VAST Database is not configured, return zeroed status
+        if (!dbUrl || !bucket || !accessKey || !secretKey) {
+          return reply.send({
+            currentVersion: 0,
+            availableMigrations: migrations.length,
+            upToDate: false,
+            pending: migrations.map((m) => ({ version: m.version, description: m.description })),
+          } satisfies SchemaStatus);
         }
 
-        const pending = migrations
-          .filter((m) => m.version > currentVersion)
-          .map((m) => ({ version: m.version, description: m.description }));
+        // Query schema status via vastdb Python SDK
+        try {
+          const { execFile } = await import("node:child_process");
+          const { promisify } = await import("node:util");
+          const execFileAsync = promisify(execFile);
+          const scriptPath = new URL("../db/vast-migrate.py", import.meta.url).pathname;
 
-        return reply.send({
-          currentVersion,
-          availableMigrations: totalMigrations,
-          upToDate: pending.length === 0,
-          pending,
-        } satisfies SchemaStatus);
+          const { stdout } = await execFileAsync("python3", [
+            scriptPath,
+            "--status",
+            "--endpoint", dbUrl,
+            "--access-key", accessKey,
+            "--secret-key", secretKey,
+            "--bucket", bucket,
+            "--schema", schema,
+          ], {
+            timeout: 30_000,
+            env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+          });
+
+          const lines = stdout.trim().split("\n");
+          const lastLine = lines[lines.length - 1];
+          const sdkStatus = JSON.parse(lastLine) as {
+            currentVersion: number;
+            availableMigrations: number;
+            upToDate: boolean;
+            tables?: string[];
+          };
+
+          const pending = migrations
+            .filter((m) => m.version > sdkStatus.currentVersion)
+            .map((m) => ({ version: m.version, description: m.description }));
+
+          return reply.send({
+            currentVersion: sdkStatus.currentVersion,
+            availableMigrations: sdkStatus.availableMigrations,
+            upToDate: sdkStatus.upToDate,
+            pending,
+          } satisfies SchemaStatus);
+        } catch {
+          // Fallback: return unknown status
+          return reply.send({
+            currentVersion: 0,
+            availableMigrations: migrations.length,
+            upToDate: false,
+            pending: migrations.map((m) => ({ version: m.version, description: m.description })),
+          } satisfies SchemaStatus);
+        }
       },
     );
 

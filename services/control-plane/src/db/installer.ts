@@ -1,5 +1,17 @@
 /**
- * CLI Database Installer
+ * @deprecated Use vast-migrate.py instead. This Trino DDL installer is kept
+ * for backwards compatibility only. The canonical migration path is now:
+ *
+ *   python3 src/db/vast-migrate.py --endpoint <url> --access-key <key> --secret-key <key>
+ *
+ * Or via the Settings UI "Deploy Database" button (POST /platform/settings/deploy-schema),
+ * which calls vast-migrate.py internally using the vastdb Python SDK.
+ *
+ * This file will be removed in a future release.
+ *
+ * ---
+ *
+ * CLI Database Installer (DEPRECATED)
  *
  * Connects to a VAST cluster's Trino endpoint and runs all schema
  * migrations in order, with pre-flight checks and safety features.
@@ -227,6 +239,10 @@ export async function install(args: InstallerArgs): Promise<{ applied: number; c
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  console.warn("DEPRECATED: This Trino DDL installer is deprecated. Use vast-migrate.py instead:");
+  console.warn("  python3 src/db/vast-migrate.py --endpoint <url> --access-key <key> --secret-key <key>");
+  console.warn("Or use the Settings UI 'Deploy Database' button.\n");
+
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
