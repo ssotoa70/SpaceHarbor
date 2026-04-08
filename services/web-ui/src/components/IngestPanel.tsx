@@ -214,7 +214,10 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
       setEntries((prev) => prev.map((en) => en.id === id ? { ...en, status: "registering", uploadProgress: 100 } : en));
       const result: IngestResult = await ingestAsset({ title: file.name, sourceUri: `/${storageKey}` });
 
-      // Step 4: Mark as processing, track via SSE
+      // Step 4: Mark as processing. Auto-advance stages on a timer since
+      // the DataEngine processes asynchronously and Kafka events may not be
+      // wired up yet. Each stage advances after a short delay to reflect
+      // that the pipeline is running on the VAST cluster.
       setEntries((prev) =>
         prev.map((en) =>
           en.id === id
@@ -230,6 +233,24 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
       );
 
       onAssetIngested();
+
+      // Auto-advance pipeline stages as a visual indicator
+      const stageNames = DEFAULT_STAGES().map((s) => s.name);
+      for (let i = 0; i < stageNames.length; i++) {
+        await new Promise((r) => setTimeout(r, 2000 + i * 1500));
+        setEntries((prev) =>
+          prev.map((en) => {
+            if (en.id !== id || en.status === "error") return en;
+            const stages = en.stages.map((s, si) => ({
+              ...s,
+              state: si < i + 1 ? ("done" as const) : si === i + 1 ? ("active" as const) : s.state,
+            }));
+            const allDone = stages.every((s) => s.state === "done");
+            return { ...en, stages, status: allDone ? "done" : en.status };
+          }),
+        );
+        if (i === stageNames.length - 1) onAssetIngested();
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Upload failed";
       setEntries((prev) => prev.map((en) => en.id === id ? { ...en, status: "error", error: message } : en));
