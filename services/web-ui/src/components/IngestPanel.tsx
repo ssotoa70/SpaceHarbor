@@ -179,10 +179,20 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
       const contentType = file.type || "application/octet-stream";
       const { uploadUrl, storageKey } = await generateUploadUrl(file.name, contentType, undefined, selectedEndpointId || undefined);
 
-      // Step 2: Upload directly to VAST S3 via XHR (for progress tracking)
+      // Step 2: Upload to VAST S3 via XHR (for progress tracking).
+      // If the presigned URL is cross-origin, rewrite it to go through
+      // the nginx /s3-proxy/ reverse proxy to avoid CSP/CORS issues.
+      let targetUrl = uploadUrl;
+      try {
+        const parsed = new URL(uploadUrl);
+        if (parsed.origin !== window.location.origin) {
+          targetUrl = `/s3-proxy/${parsed.host}${parsed.pathname}${parsed.search}`;
+        }
+      } catch { /* keep original URL if parsing fails */ }
+
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open("PUT", uploadUrl);
+        xhr.open("PUT", targetUrl);
         xhr.setRequestHeader("Content-Type", contentType);
 
         xhr.upload.onprogress = (e) => {
@@ -224,7 +234,7 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
       const message = err instanceof Error ? err.message : "Upload failed";
       setEntries((prev) => prev.map((en) => en.id === id ? { ...en, status: "error", error: message } : en));
     }
-  }, [onAssetIngested]);
+  }, [onAssetIngested, selectedEndpointId]);
 
   // Handle dropped or selected files
   const handleFiles = useCallback((files: FileList | File[]) => {
