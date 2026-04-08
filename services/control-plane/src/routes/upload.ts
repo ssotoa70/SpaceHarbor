@@ -6,6 +6,7 @@ import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import { uploadUrlRequestSchema, uploadUrlResponseSchema, errorEnvelopeSchema } from "../http/schemas.js";
 import { getS3Config, createS3Client, generateUploadUrl } from "../storage/s3-client.js";
+import { getStorageEndpoints } from "./platform-settings.js";
 
 interface UploadUrlBody {
   filename: string;
@@ -80,7 +81,7 @@ export async function registerUploadRoute(
           return sendError(request, reply, 400, "VALIDATION_ERROR", `file type not allowed: ${ext || "(none)"}`);
         }
 
-        const config = getS3Config();
+        const config = getS3Config(getStorageEndpoints());
         if (!config) {
           return sendError(
             request,

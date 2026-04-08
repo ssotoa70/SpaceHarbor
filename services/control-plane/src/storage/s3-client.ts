@@ -15,7 +15,27 @@ export interface UploadUrlResult {
   expiresAt: string;
 }
 
-export function getS3Config(): S3Config | null {
+/**
+ * Resolve S3 config from the Settings store (operator-configurable) first,
+ * then fall back to environment variables. This allows operators to change
+ * the S3 endpoint and bucket from the Settings UI without restarting.
+ */
+export function getS3Config(settingsEndpoints?: ReadonlyArray<{ endpoint: string; bucket: string; accessKeyId: string; secretAccessKey: string }>): S3Config | null {
+  // Prefer the first configured endpoint from the Settings store
+  if (settingsEndpoints && settingsEndpoints.length > 0) {
+    const ep = settingsEndpoints[0];
+    if (ep.endpoint && ep.bucket && ep.accessKeyId && ep.secretAccessKey) {
+      return {
+        endpoint: ep.endpoint,
+        region: process.env.SPACEHARBOR_S3_REGION ?? "us-east-1",
+        bucket: ep.bucket,
+        accessKeyId: ep.accessKeyId,
+        secretAccessKey: ep.secretAccessKey,
+      };
+    }
+  }
+
+  // Fall back to environment variables
   const endpoint = process.env.SPACEHARBOR_S3_ENDPOINT;
   const region = process.env.SPACEHARBOR_S3_REGION;
   const bucket = process.env.SPACEHARBOR_S3_BUCKET;

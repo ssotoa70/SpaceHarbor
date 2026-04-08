@@ -6,6 +6,7 @@ import { withPrefix } from "../http/routes.js";
 import { assetSchema, errorEnvelopeSchema, workflowJobSchema } from "../http/schemas.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
 import { getS3Config, createS3Client, tagS3Object } from "../storage/s3-client.js";
+import { getStorageEndpoints } from "./platform-settings.js";
 import { CATALOG_TAGS } from "../integrations/vast-catalog.js";
 
 interface IngestPayload {
@@ -110,7 +111,7 @@ export async function registerIngestRoute(
         );
 
         // C.10: Write S3 tags for VAST Catalog integration (best-effort, non-blocking)
-        const s3Config = getS3Config();
+        const s3Config = getS3Config(getStorageEndpoints());
         if (s3Config && sourceUri) {
           try {
             const s3Client = createS3Client(s3Config);
