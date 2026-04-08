@@ -396,12 +396,20 @@ function MediaPreview({ asset, onClose }: MediaPreviewProps) {
     });
   }, [asset.sourceUri, asset.title]);
 
-  // Load EXR metadata
+  // Load EXR metadata — try full sourceUri first, then bare filename
   useEffect(() => {
-    if (asset.sourceUri) {
-      void fetchExrMetadataLookup(asset.sourceUri).then(setExrMeta);
-    }
-  }, [asset.sourceUri]);
+    if (!asset.sourceUri) return;
+    void fetchExrMetadataLookup(asset.sourceUri).then((res) => {
+      if (res.found) { setExrMeta(res); return; }
+      // Fallback: try bare filename (exr_metadata table stores filenames without path)
+      const filename = asset.title || asset.sourceUri.split("/").pop() || "";
+      if (filename && filename !== asset.sourceUri) {
+        void fetchExrMetadataLookup(filename).then(setExrMeta);
+      } else {
+        setExrMeta(res);
+      }
+    });
+  }, [asset.sourceUri, asset.title]);
 
   const exr = exrMeta?.found ? exrMeta : null;
   const summary = exr?.summary;

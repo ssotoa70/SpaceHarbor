@@ -111,6 +111,21 @@ export interface DataEnginePipeline {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const API_KEY = import.meta.env.VITE_API_KEY;
 
+/**
+ * Rewrite a presigned S3 URL through the nginx /s3-proxy/ reverse proxy
+ * when it's cross-origin. This avoids CSP/CORS issues in the browser.
+ */
+export function proxyS3Url(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== window.location.origin) {
+      return `/s3-proxy/${parsed.host}${parsed.pathname}${parsed.search}`;
+    }
+  } catch { /* keep original */ }
+  return url;
+}
+
 /* ── In-memory access token (XSS-safe — never in localStorage) ── */
 
 let _accessToken: string | null = null;
@@ -2573,7 +2588,7 @@ export async function fetchPresignedUrl(sourceUri: string): Promise<string | nul
     );
     if (!response.ok) return null;
     const data = (await response.json()) as { url: string };
-    return data.url;
+    return proxyS3Url(data.url);
   } catch {
     return null;
   }
@@ -2585,7 +2600,8 @@ export interface MediaUrls {
   proxy: string | null;
 }
 
-/** Fetch presigned URLs for source, thumbnail (.proxies/*_thumb.jpg), and proxy (.proxies/*_proxy.mp4). */
+/** Fetch presigned URLs for source, thumbnail (.proxies/*_thumb.jpg), and proxy (.proxies/*_proxy.mp4).
+ *  URLs are automatically rewritten through the nginx S3 proxy for cross-origin access. */
 export async function fetchMediaUrls(sourceUri: string): Promise<MediaUrls> {
   try {
     const response = await fetch(
@@ -2593,7 +2609,12 @@ export async function fetchMediaUrls(sourceUri: string): Promise<MediaUrls> {
       { headers: withAuth() },
     );
     if (!response.ok) return { source: null, thumbnail: null, proxy: null };
-    return (await response.json()) as MediaUrls;
+    const raw = (await response.json()) as MediaUrls;
+    return {
+      source: proxyS3Url(raw.source),
+      thumbnail: proxyS3Url(raw.thumbnail),
+      proxy: proxyS3Url(raw.proxy),
+    };
   } catch {
     return { source: null, thumbnail: null, proxy: null };
   }

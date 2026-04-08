@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { generateUploadUrl, ingestAsset, fetchStorageEndpoints, type IngestResult, type StorageEndpoint } from "../api";
+import { generateUploadUrl, ingestAsset, fetchStorageEndpoints, proxyS3Url, type IngestResult, type StorageEndpoint } from "../api";
 import { Badge, Button } from "../design-system";
 import { MediaTypeIcon } from "./MediaTypeIcon";
 import { generateId } from "../utils/id";
@@ -180,15 +180,8 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
       const { uploadUrl, storageKey } = await generateUploadUrl(file.name, contentType, undefined, selectedEndpointId || undefined);
 
       // Step 2: Upload to VAST S3 via XHR (for progress tracking).
-      // If the presigned URL is cross-origin, rewrite it to go through
-      // the nginx /s3-proxy/ reverse proxy to avoid CSP/CORS issues.
-      let targetUrl = uploadUrl;
-      try {
-        const parsed = new URL(uploadUrl);
-        if (parsed.origin !== window.location.origin) {
-          targetUrl = `/s3-proxy/${parsed.host}${parsed.pathname}${parsed.search}`;
-        }
-      } catch { /* keep original URL if parsing fails */ }
+      // Rewrite cross-origin presigned URLs through the nginx S3 proxy.
+      const targetUrl = proxyS3Url(uploadUrl) ?? uploadUrl;
 
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
