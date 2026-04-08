@@ -468,6 +468,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     inputs: ["EXR", "DPX"],
     outputs: ["metadata:JSON"],
     status: "active",
+    dbSchema: "exr_metadata",
+    queryBridge: "vastdb-query:8070",
   });
 
   functionRegistry.registerMetadata({

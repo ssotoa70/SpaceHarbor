@@ -50,6 +50,8 @@ export async function registerDataEngineRoutes(
                       outputs: { type: "array", items: { type: "string" } },
                       status: { type: "string", enum: ["active", "inactive"] },
                       config: { type: "object", additionalProperties: { type: "string" } },
+                      dbSchema: { type: "string", description: "VAST Database schema owned by this function" },
+                      queryBridge: { type: "string", description: "Query bridge endpoint for this function's data" },
                     },
                   },
                 },
@@ -90,6 +92,8 @@ export async function registerDataEngineRoutes(
                 outputs: { type: "array", items: { type: "string" } },
                 status: { type: "string", enum: ["active", "inactive"] },
                 config: { type: "object", additionalProperties: { type: "string" } },
+                dbSchema: { type: "string" },
+                queryBridge: { type: "string" },
               },
             },
             404: {

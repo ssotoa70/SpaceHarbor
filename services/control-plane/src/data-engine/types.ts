@@ -55,4 +55,8 @@ export interface FunctionMetadata {
   outputs: string[];
   status: "active" | "inactive";
   config?: Record<string, string>;
+  /** VAST Database schema owned by this function (e.g. "exr_metadata"). */
+  dbSchema?: string;
+  /** Query bridge endpoint for this function's data (e.g. "vastdb-query:8070"). */
+  queryBridge?: string;
 }

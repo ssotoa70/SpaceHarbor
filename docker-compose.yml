@@ -1,52 +1,86 @@
+## ---------------------------------------------------------------------------
+## SpaceHarbor Docker Compose
+##
+## Core services:  control-plane, web-ui, trino
+## Extensions:     vastdb-query (external function query bridge)
+##                 openassetio-manager (DCC interop)
+## Dev-only:       media-worker (profile: dev)
+## DataEngine:     exr-inspector, ffmpeg-transcoder (profile: dataengine)
+##
+## The system is modular: external functions (DataEngine containers) are
+## independently deployable and register their own database schemas in
+## VAST Database. See docs/EXTERNAL-FUNCTIONS.md for the extension model.
+## ---------------------------------------------------------------------------
+
+# Shared config for VAST credentials — reused by services that talk to VAST
+x-vast-credentials: &vast-credentials
+  VAST_ACCESS_KEY: ${VAST_ACCESS_KEY:-}
+  VAST_SECRET_KEY: ${VAST_SECRET_KEY:-}
+
+# Shared config for DataEngine function containers
+x-dataengine-function: &dataengine-function
+  restart: "no"
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp
+  networks:
+    - backend
+
 services:
+  # ---------- CORE PLATFORM ----------
+
   control-plane:
     build:
       context: ./services/control-plane
     container_name: spaceharbor-control-plane
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      # Accept self-signed VAST cluster certificates (set to '1' for production with valid certs)
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
       PORT: 8080
       SPACEHARBOR_PERSISTENCE_BACKEND: ${SPACEHARBOR_PERSISTENCE_BACKEND:-local}
       SPACEHARBOR_SETTINGS_PATH: /data/settings.json
       SPACEHARBOR_VAST_STRICT: ${SPACEHARBOR_VAST_STRICT:-false}
       SPACEHARBOR_API_KEY: ${SPACEHARBOR_API_KEY:-}
-      # Per-service credentials: control-plane accepts ALL service keys (A2 remediation)
       SPACEHARBOR_API_KEYS: ${SPACEHARBOR_API_KEY_CONTROL_PLANE:-},${SPACEHARBOR_API_KEY_MEDIA_WORKER:-},${SPACEHARBOR_API_KEY_SCANNER:-},${SPACEHARBOR_API_KEY_OPENASSETIO:-}
-      # VAST Database URL: defaults to the Trino microservice.
-      # Override with a customer Trino or VAST SQL endpoint if available.
+      # VAST Database (Trino)
       VAST_DATABASE_URL: ${VAST_DATABASE_URL:-http://trino:8080}
-      VAST_EVENT_BROKER_URL: ${VAST_EVENT_BROKER_URL:-}
-      VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL:-}
-      VAST_DATA_ENGINE_URL: ${VAST_DATA_ENGINE_URL:-${VAST_DATAENGINE_URL:-}}
+      <<: *vast-credentials
       VAST_API_TOKEN: ${VAST_API_TOKEN:-}
-      VAST_ACCESS_KEY: ${VAST_ACCESS_KEY:-}
-      VAST_SECRET_KEY: ${VAST_SECRET_KEY:-}
+      # VAST Event Broker (Kafka)
+      VAST_EVENT_BROKER_URL: ${VAST_EVENT_BROKER_URL:-}
       VAST_EVENT_BROKER_SASL_USERNAME: ${VAST_EVENT_BROKER_SASL_USERNAME:-}
       VAST_EVENT_BROKER_SASL_PASSWORD: ${VAST_EVENT_BROKER_SASL_PASSWORD:-}
       VAST_EVENT_BROKER_SASL_MECHANISM: ${VAST_EVENT_BROKER_SASL_MECHANISM:-PLAIN}
       VAST_EVENT_BROKER_SSL: ${VAST_EVENT_BROKER_SSL:-true}
+      # VAST DataEngine
+      VAST_DATAENGINE_URL: ${VAST_DATAENGINE_URL:-}
       SPACEHARBOR_VAST_FALLBACK_TO_LOCAL: ${SPACEHARBOR_VAST_FALLBACK_TO_LOCAL:-true}
+      # Webhooks
       SPACEHARBOR_WEBHOOK_SLACK_URL: ${SPACEHARBOR_WEBHOOK_SLACK_URL:-}
       SPACEHARBOR_WEBHOOK_TEAMS_URL: ${SPACEHARBOR_WEBHOOK_TEAMS_URL:-}
       SPACEHARBOR_WEBHOOK_PRODUCTION_URL: ${SPACEHARBOR_WEBHOOK_PRODUCTION_URL:-}
       SPACEHARBOR_WEBHOOK_SIGNING_SECRET: ${SPACEHARBOR_WEBHOOK_SIGNING_SECRET:-}
       SPACEHARBOR_WEBHOOK_STRICT_MODE: ${SPACEHARBOR_WEBHOOK_STRICT_MODE:-false}
+      # IAM
       SPACEHARBOR_IAM_ENABLED: ${SPACEHARBOR_IAM_ENABLED:-true}
-      SPACEHARBOR_JWT_SECRET: ${SPACEHARBOR_JWT_SECRET:?Set SPACEHARBOR_JWT_SECRET in .env — do not use defaults in production}
+      SPACEHARBOR_JWT_SECRET: ${SPACEHARBOR_JWT_SECRET:?Set SPACEHARBOR_JWT_SECRET in .env}
       SPACEHARBOR_ADMIN_EMAIL: ${SPACEHARBOR_ADMIN_EMAIL:?Set SPACEHARBOR_ADMIN_EMAIL in .env}
-      SPACEHARBOR_ADMIN_PASSWORD: ${SPACEHARBOR_ADMIN_PASSWORD:?Set SPACEHARBOR_ADMIN_PASSWORD in .env — do not use defaults in production}
+      SPACEHARBOR_ADMIN_PASSWORD: ${SPACEHARBOR_ADMIN_PASSWORD:?Set SPACEHARBOR_ADMIN_PASSWORD in .env}
+      # Job processing
       SPACEHARBOR_LEASE_REAPING_ENABLED: ${SPACEHARBOR_LEASE_REAPING_ENABLED:-true}
       SPACEHARBOR_LEASE_REAPING_INTERVAL_SECONDS: ${SPACEHARBOR_LEASE_REAPING_INTERVAL_SECONDS:-30}
       SPACEHARBOR_MAX_JOB_ATTEMPTS: ${SPACEHARBOR_MAX_JOB_ATTEMPTS:-3}
-      # S3 storage (used by ingest tagging and storage browse)
+      # S3 storage
       SPACEHARBOR_S3_ENDPOINT: ${SPACEHARBOR_S3_ENDPOINT:-}
       SPACEHARBOR_S3_BUCKET: ${SPACEHARBOR_S3_BUCKET:-}
       SPACEHARBOR_S3_REGION: ${SPACEHARBOR_S3_REGION:-us-east-1}
       SPACEHARBOR_S3_ACCESS_KEY_ID: ${SPACEHARBOR_S3_ACCESS_KEY_ID:-}
       SPACEHARBOR_S3_SECRET_ACCESS_KEY: ${SPACEHARBOR_S3_SECRET_ACCESS_KEY:-}
-      # vastdb-query service URL for EXR metadata queries
+      # External function query bridges
       VASTDB_QUERY_URL: http://vastdb-query:8070
     ports:
       - "8080:8080"
@@ -78,16 +112,83 @@ services:
           memory: 1G
           cpus: '2.0'
 
+  web-ui:
+    build:
+      context: ./services/web-ui
+    container_name: spaceharbor-web-ui
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+    ports:
+      - "4173:8080"
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  trino:
+    build:
+      context: ./services/trino
+    container_name: spaceharbor-trino
+    environment:
+      VAST_S3_ENDPOINT: ${VAST_S3_ENDPOINT:-}
+      VAST_ACCESS_KEY_ID: ${VAST_ACCESS_KEY:-}
+      VAST_SECRET_ACCESS_KEY: ${VAST_SECRET_KEY:-}
+      VAST_DATA_ENDPOINTS: ${VAST_DATA_ENDPOINTS:-}
+      VAST_REGION: ${VAST_REGION:-us-east-1}
+      TRINO_MEMORY: ${TRINO_MEMORY:-1G}
+    ports:
+      - "8090:8080"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/v1/info || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+
+  # ---------- EXTERNAL FUNCTION QUERY BRIDGES ----------
+  # Each external function that creates its own DB schema can expose a query
+  # microservice here. The control-plane routes queries to the appropriate
+  # bridge based on the function's registered dbSchema field.
+
   vastdb-query:
     build:
       context: ./services/vastdb-query
     container_name: spaceharbor-vastdb-query
     environment:
-      VASTDB_ENDPOINT: ${VASTDB_ENDPOINT:-http://172.200.201.67}
+      VASTDB_ENDPOINT: ${VASTDB_ENDPOINT:-}
       VASTDB_ACCESS_KEY: ${VAST_ACCESS_KEY:-}
       VASTDB_SECRET_KEY: ${VAST_SECRET_KEY:-}
-      VASTDB_BUCKET: ${VASTDB_BUCKET:-sergio-db}
-      VASTDB_SCHEMA: ${VASTDB_SCHEMA:-exr_metadata_2}
+      VASTDB_BUCKET: ${VASTDB_BUCKET:-}
+      VASTDB_SCHEMA: ${VASTDB_SCHEMA:-exr_metadata}
       PORT: 8070
     ports:
       - "8070:8070"
@@ -107,6 +208,48 @@ services:
         limits:
           memory: 512M
           cpus: '1.0'
+
+  # ---------- INTEGRATIONS ----------
+
+  openassetio-manager:
+    build:
+      context: services/openassetio-manager
+      dockerfile: Dockerfile
+    container_name: spaceharbor-openassetio-manager
+    ports:
+      - "8001:8001"
+    environment:
+      DEV_MODE: ${OPENASSETIO_DEV_MODE:-false}
+      VAST_DB_HOST: ${VAST_DB_HOST:-}
+      VAST_DB_PORT: ${VAST_DB_PORT:-8080}
+      SPACEHARBOR_CONTROL_PLANE_URL: http://control-plane:8080
+      SPACEHARBOR_API_KEY: ${SPACEHARBOR_API_KEY_OPENASSETIO:-}
+    networks:
+      - backend
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # ---------- DEV-ONLY ----------
 
   media-worker:
     profiles: ["dev"]
@@ -146,168 +289,6 @@ services:
         limits:
           memory: 2G
           cpus: '2.0'
-
-  openassetio-manager:
-    build:
-      context: services/openassetio-manager
-      dockerfile: Dockerfile
-    container_name: spaceharbor-openassetio-manager
-    ports:
-      - "8001:8001"
-    environment:
-      DEV_MODE: ${OPENASSETIO_DEV_MODE:-false}
-      VAST_DB_HOST: ${VAST_DB_HOST:-}
-      VAST_DB_PORT: ${VAST_DB_PORT:-8080}
-      SPACEHARBOR_CONTROL_PLANE_URL: http://control-plane:8080
-      # Per-service credential: openassetio authenticates with its own key
-      SPACEHARBOR_API_KEY: ${SPACEHARBOR_API_KEY_OPENASSETIO:-}
-    networks:
-      - backend
-    depends_on:
-      control-plane:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '1.0'
-
-  exr-inspector:
-    profiles: ["dataengine"]
-    build:
-      context: ./services/dataengine-functions
-      dockerfile: exr-inspector/Dockerfile
-    container_name: spaceharbor-exr-inspector
-    environment:
-      VAST_SOURCE_PATH: ${VAST_SOURCE_PATH:-}
-      VAST_ASSET_ID: ${VAST_ASSET_ID:-}
-      KAFKA_BROKER: ${KAFKA_BROKER:-}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-    networks:
-      - backend
-    restart: "no"
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '2.0'
-
-  ffmpeg-transcoder:
-    profiles: ["dataengine"]
-    build:
-      context: ./services/dataengine-functions
-      dockerfile: ffmpeg-transcoder/Dockerfile
-    container_name: spaceharbor-ffmpeg-transcoder
-    environment:
-      VAST_SOURCE_PATH: ${VAST_SOURCE_PATH:-}
-      VAST_ASSET_ID: ${VAST_ASSET_ID:-}
-      VAST_OUTPUT_PATH: ${VAST_OUTPUT_PATH:-}
-      TRANSCODE_PROFILE: ${TRANSCODE_PROFILE:-h264_review}
-      KAFKA_BROKER: ${KAFKA_BROKER:-}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-    networks:
-      - backend
-    restart: "no"
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-          cpus: '4.0'
-
-  trino:
-    build:
-      context: ./services/trino
-    container_name: spaceharbor-trino
-    environment:
-      # VAST S3 gateway endpoint — the only required setting.
-      # Set this in .env to enable VAST Database queries.
-      VAST_S3_ENDPOINT: ${VAST_S3_ENDPOINT:-}
-      VAST_ACCESS_KEY_ID: ${VAST_ACCESS_KEY:-}
-      VAST_SECRET_ACCESS_KEY: ${VAST_SECRET_KEY:-}
-      # Optional: CNode VIPs for faster data reads (comma-separated)
-      VAST_DATA_ENDPOINTS: ${VAST_DATA_ENDPOINTS:-}
-      VAST_REGION: ${VAST_REGION:-us-east-1}
-      TRINO_MEMORY: ${TRINO_MEMORY:-1G}
-    ports:
-      - "8090:8080"
-    networks:
-      - backend
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/v1/info || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-    tmpfs:
-      - /tmp
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '2.0'
-
-  web-ui:
-    build:
-      context: ./services/web-ui
-    container_name: spaceharbor-web-ui
-    environment:
-      VITE_API_BASE_URL: http://localhost:8080
-      # NOTE: API keys must NOT use VITE_ prefix (exposes to client).
-      # Use server-side BFF proxy or OAuth for frontend auth.
-    ports:
-      - "4173:8080"
-    networks:
-      - frontend
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    depends_on:
-      control-plane:
-        condition: service_healthy
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    tmpfs:
-      - /tmp
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: '0.5'
 
 volumes:
   settings-data:
