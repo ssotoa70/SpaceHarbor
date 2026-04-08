@@ -12,6 +12,8 @@ interface UploadUrlBody {
   filename: string;
   contentType?: string;
   prefix?: string;
+  /** Optional: ID of a configured storage endpoint to upload to. Defaults to the first endpoint. */
+  endpointId?: string;
 }
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -48,6 +50,48 @@ export async function registerUploadRoute(
   prefixes: string[]
 ): Promise<void> {
   for (const prefix of prefixes) {
+    // GET /assets/storage-endpoints — list available upload targets
+    app.get(
+      withPrefix(prefix, "/assets/storage-endpoints"),
+      {
+        schema: {
+          tags: ["assets"],
+          operationId: prefix === "/api/v1" ? "v1ListStorageEndpoints" : "legacyListStorageEndpoints",
+          summary: "List available S3 storage endpoints for uploads",
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                endpoints: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      label: { type: "string" },
+                      bucket: { type: "string" },
+                      region: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      async (_request, reply) => {
+        const endpoints = getStorageEndpoints();
+        return reply.send({
+          endpoints: endpoints.map((ep) => ({
+            id: ep.id,
+            label: ep.label,
+            bucket: ep.bucket,
+            region: (ep as Record<string, unknown>).region ?? "us-east-1",
+          })),
+        });
+      },
+    );
+
     app.post<{ Body: UploadUrlBody }>(
       withPrefix(prefix, "/assets/upload-url"),
       {
@@ -81,14 +125,29 @@ export async function registerUploadRoute(
           return sendError(request, reply, 400, "VALIDATION_ERROR", `file type not allowed: ${ext || "(none)"}`);
         }
 
-        const config = getS3Config(getStorageEndpoints());
+        // Resolve which storage endpoint to use
+        const endpoints = getStorageEndpoints();
+        const endpointId = request.body?.endpointId;
+        let targetEndpoint = endpointId
+          ? endpoints.find((ep) => ep.id === endpointId)
+          : undefined;
+
+        // If endpointId was given but not found, reject
+        if (endpointId && !targetEndpoint) {
+          return sendError(request, reply, 400, "INVALID_ENDPOINT", `Storage endpoint '${endpointId}' not found`);
+        }
+
+        const config = targetEndpoint
+          ? getS3Config([targetEndpoint])
+          : getS3Config(endpoints);
+
         if (!config) {
           return sendError(
             request,
             reply,
             503,
             "S3_NOT_CONFIGURED",
-            "S3 storage is not configured. Set SPACEHARBOR_S3_* environment variables."
+            "S3 storage is not configured. Set SPACEHARBOR_S3_* environment variables or configure endpoints in Settings."
           );
         }
 

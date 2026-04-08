@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { generateUploadUrl, ingestAsset, type IngestResult } from "../api";
+import { generateUploadUrl, ingestAsset, fetchStorageEndpoints, type IngestResult, type StorageEndpoint } from "../api";
 import { Badge, Button } from "../design-system";
 import { MediaTypeIcon } from "./MediaTypeIcon";
 import { generateId } from "../utils/id";
@@ -123,7 +123,17 @@ function IngestProgressCard({ entry }: { entry: IngestEntry }) {
 export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
   const [entries, setEntries] = useState<IngestEntry[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [storageEndpoints, setStorageEndpoints] = useState<StorageEndpoint[]>([]);
+  const [selectedEndpointId, setSelectedEndpointId] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load available storage endpoints on mount
+  useEffect(() => {
+    void fetchStorageEndpoints().then((eps) => {
+      setStorageEndpoints(eps);
+      if (eps.length > 0) setSelectedEndpointId(eps[0].id);
+    });
+  }, []);
 
   // SSE: listen for pipeline stage updates
   useEventStream({
@@ -164,10 +174,10 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
     setEntries((prev) => [entry, ...prev]);
 
     try {
-      // Step 1: Get presigned upload URL
+      // Step 1: Get presigned upload URL (targeting selected bucket)
       const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
       const contentType = file.type || "application/octet-stream";
-      const { uploadUrl, storageKey } = await generateUploadUrl(file.name, contentType);
+      const { uploadUrl, storageKey } = await generateUploadUrl(file.name, contentType, undefined, selectedEndpointId || undefined);
 
       // Step 2: Upload directly to VAST S3 via XHR (for progress tracking)
       await new Promise<void>((resolve, reject) => {
@@ -232,9 +242,6 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
     if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
   }, [handleFiles]);
 
-  // Destination path from environment (V1: single configured bucket)
-  const vastPath = "/var/204/media/uploads/";
-
   return (
     <div className="mt-4 mb-2 space-y-4" data-testid="ingest-panel">
       {/* Header */}
@@ -296,14 +303,26 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
       {/* ── Destination ── */}
       <div className="space-y-1">
         <span className="font-[var(--font-ah-mono)] text-[10px] font-medium tracking-[0.12em] text-[var(--color-ah-text-subtle)] uppercase">
-          Destination
+          Destination Bucket
         </span>
-        <div className="flex items-center justify-between bg-[var(--color-ah-bg-raised)] border border-[var(--color-ah-border-muted)] rounded-[var(--radius-ah-md)] px-4 py-2.5">
-          <div>
-            <div className="text-sm font-medium">Cluster Target</div>
-            <div className="text-xs font-[var(--font-ah-mono)] text-[var(--color-ah-accent)]/70">{`Path: ${vastPath}`}</div>
+        {storageEndpoints.length > 0 ? (
+          <select
+            value={selectedEndpointId}
+            onChange={(e) => setSelectedEndpointId(e.target.value)}
+            className="w-full bg-[var(--color-ah-bg-raised)] border border-[var(--color-ah-border-muted)] rounded-[var(--radius-ah-md)] px-4 py-2.5 text-sm font-[var(--font-ah-mono)] text-[var(--color-ah-text)] cursor-pointer focus:outline-none focus:border-[var(--color-ah-accent)]"
+          >
+            {storageEndpoints.map((ep) => (
+              <option key={ep.id} value={ep.id}>
+                {ep.label} — s3://{ep.bucket}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="bg-[var(--color-ah-bg-raised)] border border-[var(--color-ah-border-muted)] rounded-[var(--radius-ah-md)] px-4 py-2.5">
+            <div className="text-sm text-[var(--color-ah-text-muted)]">No storage endpoints configured</div>
+            <div className="text-xs text-[var(--color-ah-text-subtle)]">Configure S3 endpoints in Settings &rarr; S3 Storage</div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ── Active Ingests ── */}

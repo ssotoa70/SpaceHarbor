@@ -386,11 +386,18 @@ export interface UploadUrlResult {
   expiresAt: string;
 }
 
-export async function generateUploadUrl(filename: string, contentType?: string, prefix?: string): Promise<UploadUrlResult> {
+export async function generateUploadUrl(filename: string, contentType?: string, prefix?: string, endpointId?: string): Promise<UploadUrlResult> {
+  const body: Record<string, string> = {
+    filename,
+    contentType: contentType ?? "application/octet-stream",
+    prefix: prefix ?? "uploads",
+  };
+  if (endpointId) body.endpointId = endpointId;
+
   const response = await fetch(`${API_BASE_URL}/api/v1/assets/upload-url`, {
     method: "POST",
     headers: withAuth({ "content-type": "application/json" }),
-    body: JSON.stringify({ filename, contentType: contentType ?? "application/octet-stream", prefix: prefix ?? "uploads" }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     throw new Error(`upload URL generation failed: ${response.status}`);
