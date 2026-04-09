@@ -172,6 +172,9 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
 
 // 16px inline status indicator shown in the name cell. Non-intrusive — absent
 // (or neutral gray) for unprocessed files, colored only when there's signal.
+// The rendered icon and the tooltip copy BOTH branch on entry.file_kind so
+// video files describe the right artifacts (proxy / sprites / metadata JSON)
+// and raw camera files get a permanent camera icon for metadata-only state.
 function ProcessingStatusIcon({
   state,
   entry,
@@ -182,11 +185,20 @@ function ProcessingStatusIcon({
   const tooltip = (() => {
     if (!entry) return "Checking…";
     const parts: string[] = [];
-    parts.push(entry.thumb_ready ? "thumbnail ✓" : "thumbnail ✗");
-    parts.push(entry.preview_ready ? "preview ✓" : "preview ✗");
-    parts.push(entry.proxy_ready ? "proxy ✓" : "proxy ✗");
-    if (entry.sourceUri.toLowerCase().endsWith(".exr")) {
+    // Artifact list varies by file kind — match what the pipeline actually emits.
+    if (entry.file_kind === "image") {
+      parts.push(entry.thumb_ready ? "thumbnail ✓" : "thumbnail ✗");
+      parts.push(entry.preview_ready ? "preview ✓" : "preview ✗");
       parts.push(entry.metadata_ready ? "metadata ✓" : "metadata ✗");
+    } else if (entry.file_kind === "video") {
+      parts.push(entry.proxy_ready ? "video proxy ✓" : "video proxy ✗");
+      parts.push(entry.sprites_ready ? "sprite track ✓" : "sprite track ✗");
+      parts.push(entry.metadata_ready ? "metadata ✓" : "metadata ✗");
+    } else if (entry.file_kind === "raw_camera") {
+      parts.push(entry.metadata_ready ? "metadata ✓" : "metadata ✗");
+      parts.push("(raw camera — no proxy expected)");
+    } else {
+      parts.push("(pipeline does not process this format)");
     }
     if (entry.last_error) parts.push(`last error: ${entry.last_error}`);
     return parts.join("  ·  ");
@@ -224,6 +236,21 @@ function ProcessingStatusIcon({
     );
   }
 
+  if (state === "metadata_only") {
+    // Permanent final state for .r3d / .braw — a small camera icon in the
+    // image-only color (no red, no amber — it's NOT an error). The tooltip
+    // explains why there's no proxy so the user understands it's by design.
+    return (
+      <span title={tooltip} className="inline-flex items-center" aria-label="Metadata extracted (raw camera)">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <rect x="1.5" y="4" width="11" height="7" rx="1" stroke="#a78bfa" strokeWidth="1.2" fill="#a78bfa" fillOpacity="0.15" />
+          <rect x="5" y="2.5" width="4" height="1.5" fill="#a78bfa" />
+          <circle cx="7" cy="7.5" r="1.8" stroke="#a78bfa" strokeWidth="1.1" fill="none" />
+        </svg>
+      </span>
+    );
+  }
+
   if (state === "failed") {
     return (
       <span title={tooltip} className="inline-flex items-center" aria-label="Processing failed">
@@ -232,6 +259,14 @@ function ProcessingStatusIcon({
           <path d="M5 5 L9 9 M9 5 L5 9" stroke="#ef4444" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
       </span>
+    );
+  }
+
+  if (state === "not_applicable") {
+    // Unknown format the pipeline doesn't process — no icon, just a
+    // tooltip-carrying invisible span so the row stays clean.
+    return (
+      <span title={tooltip} className="inline-flex items-center w-[14px] h-[14px]" aria-label="Not processed by pipeline" />
     );
   }
 
@@ -597,18 +632,27 @@ export function StorageBrowserPage() {
                   </td>
                   <td className="px-4 py-2 text-right">
                     {/*
-                      Per-row action label is contextual based on processing state.
+                      Per-row action label is contextual based on processing state
+                      AND file_kind. Formats the pipeline doesn't own (txt/pdf/etc.)
+                      show no action at all. Raw camera files in metadata_only final
+                      state show a subtle Reprocess affordance in case the user wants
+                      to re-extract metadata.
+
                       Today the button still calls the legacy registration path
                       (handleIngest → ingestAsset) — Commit 3 will swap the handler
-                      body to publish a CloudEvent to the DataEngine trigger topic
-                      so "Process" / "Reprocess" actually fire the pipeline.
+                      body to publish a CloudEvent to the correct DataEngine trigger
+                      based on file_kind → image/video trigger group mapping.
                     */}
-                    {ingested.has(file.key) || displayState === "ready" ? (
+                    {displayState === "not_applicable" ? (
+                      <span className="text-xs text-gray-600">—</span>
+                    ) : ingested.has(file.key) || displayState === "ready" || displayState === "metadata_only" ? (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleIngest(file); }}
                         disabled={isIngesting}
                         className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        title="Re-run the processing pipeline for this file"
+                        title={displayState === "metadata_only"
+                          ? "Re-extract metadata (raw camera — no proxy will be generated)"
+                          : "Re-run the processing pipeline for this file"}
                       >
                         {isIngesting ? "..." : "Reprocess"}
                       </button>

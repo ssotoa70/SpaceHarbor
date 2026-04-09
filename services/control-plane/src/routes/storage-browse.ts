@@ -41,6 +41,47 @@ function inferMediaType(path: string): string {
   return EXTENSION_MEDIA_MAP[ext] ?? "other";
 }
 
+// ---------------------------------------------------------------------------
+// Processing-pipeline file kind routing
+//
+// The /storage/processing-status endpoint branches on "file kind" to decide
+// which DataEngine function is expected to produce artifacts for a given
+// source file, and therefore which .proxies/ keys to HEAD-check.
+//
+//   image      → oiio-proxy-generator      (underscore separator: _thumb.jpg, _proxy.jpg)
+//   video      → video-proxy-generator +
+//                video-metadata-extractor  (hyphen separator:     -proxy.mp4, -sprites.jpg/vtt)
+//   raw_camera → video-metadata-extractor only (no proxy will ever be produced —
+//                raw transcoding needs vendor SDKs not available in the
+//                serverless container). Metadata presence is the final state.
+//   other      → formats the pipeline doesn't process (pdf, txt, etc.)
+//
+// The authoritative contract is documented in the project memory at
+// project_dataengine_function_coverage.md — keep that file and this block in sync.
+// ---------------------------------------------------------------------------
+
+type FileKind = "image" | "video" | "raw_camera" | "other";
+
+const IMAGE_PIPELINE_EXTS = new Set([
+  ".exr", ".dpx", ".tif", ".tiff", ".png", ".jpg", ".jpeg",
+]);
+const VIDEO_PIPELINE_EXTS = new Set([
+  ".mp4", ".mov", ".mxf", ".avi", ".mkv", ".m4v", ".webm", ".m2ts",
+]);
+const RAW_CAMERA_EXTS = new Set([
+  ".r3d", ".braw",
+]);
+
+function inferFileKind(filename: string): FileKind {
+  const lastDot = filename.lastIndexOf(".");
+  if (lastDot === -1) return "other";
+  const ext = filename.substring(lastDot).toLowerCase();
+  if (IMAGE_PIPELINE_EXTS.has(ext)) return "image";
+  if (VIDEO_PIPELINE_EXTS.has(ext)) return "video";
+  if (RAW_CAMERA_EXTS.has(ext)) return "raw_camera";
+  return "other";
+}
+
 function makeS3Client(ep: { endpoint: string; accessKeyId: string; secretAccessKey: string; region: string; pathStyle: boolean; useSsl: boolean }): S3Client {
   return new S3Client({
     endpoint: ep.endpoint,
@@ -559,10 +600,12 @@ export async function registerStorageBrowseRoutes(
                     type: "object",
                     properties: {
                       sourceUri: { type: "string" },
-                      thumb_ready: { type: "boolean" },
-                      preview_ready: { type: "boolean" },
-                      proxy_ready: { type: "boolean" },
-                      metadata_ready: { type: "boolean" },
+                      file_kind: { type: "string" }, // "image" | "video" | "raw_camera" | "other"
+                      thumb_ready: { type: "boolean" },     // image only
+                      preview_ready: { type: "boolean" },   // image only
+                      proxy_ready: { type: "boolean" },     // image jpg (oiio) OR video mp4
+                      sprites_ready: { type: "boolean" },   // video only: sprite.jpg + .vtt
+                      metadata_ready: { type: "boolean" },  // all kinds
                       in_flight_job_id: { type: ["string", "null"] },
                       last_status: { type: ["string", "null"] },
                       last_error: { type: ["string", "null"] },
@@ -632,59 +675,86 @@ export async function registerStorageBrowseRoutes(
               : endpoints[0];
             const resolvedBucket = bucket ?? ep.bucket;
 
-            // Derive sibling proxy paths via the DataEngine convention.
-            // See media-urls handler above for the convention reference.
+            // Branch on file kind — different functions own different formats
+            // and emit artifacts with different naming conventions. See the
+            // module-level comment on inferFileKind for the routing rules.
             const dir = key.includes("/") ? key.substring(0, key.lastIndexOf("/")) : "";
             const filename = key.includes("/") ? key.substring(key.lastIndexOf("/") + 1) : key;
             const baseName = filename.replace(/\.[^.]+$/, "");
-            const thumbKey = dir ? `${dir}/.proxies/${baseName}_thumb.jpg` : `.proxies/${baseName}_thumb.jpg`;
-            const previewKey = dir ? `${dir}/.proxies/${baseName}_preview.jpg` : `.proxies/${baseName}_preview.jpg`;
-            const proxyJpgKey = dir ? `${dir}/.proxies/${baseName}_proxy.jpg` : `.proxies/${baseName}_proxy.jpg`;
-            const proxyMp4Key = dir ? `${dir}/.proxies/${baseName}_proxy.mp4` : `.proxies/${baseName}_proxy.mp4`;
-
+            const fileKind = inferFileKind(filename);
+            const proxiesDir = dir ? `${dir}/.proxies` : ".proxies";
             const client = getClient(ep);
-            const [thumbReady, previewFileReady, proxyJpgReady, proxyMp4Ready] = await Promise.all([
-              headExists(client, resolvedBucket, thumbKey),
-              headExists(client, resolvedBucket, previewKey),
-              headExists(client, resolvedBucket, proxyJpgKey),
-              headExists(client, resolvedBucket, proxyMp4Key),
-            ]);
-            // preview_ready = dedicated _preview.jpg OR _proxy.jpg (the DataEngine
-            //   function currently emits _proxy.jpg as the higher-res still).
-            // proxy_ready   = only the video .mp4 proxy. Still-image EXRs won't
-            //   have one; the UI falls back to the preview JPG instead.
-            const previewReady = previewFileReady || proxyJpgReady;
-            const proxyReady = proxyMp4Ready;
 
-            // Metadata readiness — currently only EXR files have a metadata
-            // sidecar table. Other file types report metadata_ready=false and
-            // the UI won't surface a "missing metadata" indicator for them.
-            // TODO(commit 3): query processing_requests for in_flight_job_id
-            // once the insert path exists. For now always return null.
-            const isExr = filename.toLowerCase().endsWith(".exr");
+            // Defaults — every field present so the response shape is stable
+            // regardless of file_kind.
+            let thumbReady = false;
+            let previewReady = false;
+            let proxyReady = false;
+            let spritesReady = false;
             let metadataReady = false;
-            if (isExr) {
-              // Best-effort EXR metadata lookup via the existing route helper.
-              // If the vastdb-query service is unreachable we return false and
-              // the UI shows a "no metadata" state — a safe default.
-              try {
-                const { proxyToVastdbQuery } = await import("./exr-metadata.js");
-                const lookup = await proxyToVastdbQuery(
-                  `/api/v1/exr-metadata/lookup?path=${encodeURIComponent(filename)}`,
-                );
-                if (lookup.ok && lookup.data && typeof lookup.data === "object" && "found" in lookup.data) {
-                  metadataReady = Boolean((lookup.data as { found: boolean }).found);
-                }
-              } catch {
-                metadataReady = false;
-              }
+
+            if (fileKind === "image") {
+              // oiio-proxy-generator convention: UNDERSCORE separator.
+              // Presence of _thumb.jpg implies the exr_metadata DB row exists
+              // (the function writes them in the same transaction), so we can
+              // avoid an extra vastdb-query round-trip — file presence IS the
+              // metadata signal here.
+              const thumbKey = `${proxiesDir}/${baseName}_thumb.jpg`;
+              const previewKey = `${proxiesDir}/${baseName}_preview.jpg`;
+              const proxyJpgKey = `${proxiesDir}/${baseName}_proxy.jpg`;
+
+              const [thumb, previewFile, proxyJpg] = await Promise.all([
+                headExists(client, resolvedBucket, thumbKey),
+                headExists(client, resolvedBucket, previewKey),
+                headExists(client, resolvedBucket, proxyJpgKey),
+              ]);
+              thumbReady = thumb;
+              // preview_ready cascade: dedicated _preview.jpg > _proxy.jpg
+              previewReady = previewFile || proxyJpg;
+              // image "proxy_ready" reuses the field for the jpg still proxy —
+              // the UI distinguishes by file_kind when deciding playback.
+              proxyReady = proxyJpg;
+              // Metadata is inferred from thumbnail presence (atomic write
+              // invariant with the oiio function).
+              metadataReady = thumb;
+            } else if (fileKind === "video") {
+              // video-proxy-generator + video-metadata-extractor convention:
+              // HYPHEN separator for the media artifacts, but the metadata
+              // sidecar uses an UNDERSCORE. Don't refactor — it's authoritative.
+              const proxyMp4Key = `${proxiesDir}/${baseName}-proxy.mp4`;
+              const spritesJpgKey = `${proxiesDir}/${baseName}-sprites.jpg`;
+              const spritesVttKey = `${proxiesDir}/${baseName}-sprites.vtt`;
+              const metadataJsonKey = `${proxiesDir}/${baseName}_metadata.json`;
+
+              const [proxyMp4, spritesJpg, spritesVtt, metadataJson] = await Promise.all([
+                headExists(client, resolvedBucket, proxyMp4Key),
+                headExists(client, resolvedBucket, spritesJpgKey),
+                headExists(client, resolvedBucket, spritesVttKey),
+                headExists(client, resolvedBucket, metadataJsonKey),
+              ]);
+              proxyReady = proxyMp4;
+              spritesReady = spritesJpg && spritesVtt;
+              metadataReady = metadataJson;
+              // Video has no "thumb" / "preview" in the oiio sense — those
+              // fields stay false and the UI ignores them for file_kind=video.
+            } else if (fileKind === "raw_camera") {
+              // R3D / BRAW: only the metadata sidecar will ever be produced.
+              // Presence of the sidecar is the final ready state — the UI
+              // renders this as "metadata_only", NOT "partial".
+              const metadataJsonKey = `${proxiesDir}/${baseName}_metadata.json`;
+              metadataReady = await headExists(client, resolvedBucket, metadataJsonKey);
             }
+            // else file_kind === "other": all defaults stay false; the UI
+            // shows a neutral "not processed" state and the Process button
+            // is hidden (no function owns this extension).
 
             return {
               sourceUri,
+              file_kind: fileKind,
               thumb_ready: thumbReady,
               preview_ready: previewReady,
               proxy_ready: proxyReady,
+              sprites_ready: spritesReady,
               metadata_ready: metadataReady,
               in_flight_job_id: null as string | null,
               last_status: null as string | null,

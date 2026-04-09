@@ -2633,37 +2633,87 @@ export async function fetchMediaUrls(sourceUri: string): Promise<MediaUrls> {
 // ---------------------------------------------------------------------------
 // Storage processing status — per-object "is it processed?" state for the
 // Storage Browser row-level status icon. Batched to avoid N HTTP calls.
+//
+// The backend endpoint (/storage/processing-status) branches on file kind
+// so it HEAD-checks the right artifact naming convention per format family:
+//   - image      → oiio: _thumb.jpg, _proxy.jpg, _preview.jpg  (underscore)
+//   - video      → video-*: -proxy.mp4, -sprites.{jpg,vtt}     (hyphen)
+//                  + _metadata.json sidecar                      (underscore)
+//   - raw_camera → _metadata.json sidecar only (no proxy by design)
+//   - other      → no processing expected
+// See project_dataengine_function_coverage.md for the authoritative contract.
 // ---------------------------------------------------------------------------
+
+export type FileKind = "image" | "video" | "raw_camera" | "other";
 
 export interface ProcessingStatusEntry {
   sourceUri: string;
+  file_kind: FileKind;
+  /** image only — oiio _thumb.jpg presence */
   thumb_ready: boolean;
+  /** image only — _preview.jpg ?? _proxy.jpg presence */
   preview_ready: boolean;
+  /** image: _proxy.jpg present / video: -proxy.mp4 present */
   proxy_ready: boolean;
+  /** video only — both -sprites.jpg AND -sprites.vtt present */
+  sprites_ready: boolean;
+  /** image: atomic with thumb / video: _metadata.json / raw: _metadata.json */
   metadata_ready: boolean;
   in_flight_job_id: string | null;
   last_status: string | null;
   last_error: string | null;
 }
 
-/** Derive a coarse display state from the raw flags. */
+/** Derive a coarse display state from the raw per-file-kind flags. */
 export type ProcessingDisplayState =
-  | "not_processed"    // no artifacts, no metadata
-  | "partial"          // some but not all artifacts
-  | "ready"            // thumb + (preview or proxy) + (metadata if EXR)
-  | "processing"       // in-flight job exists
-  | "failed";          // last attempt failed
+  | "not_processed"     // no artifacts, no metadata, no in-flight job
+  | "partial"           // some but not all expected artifacts present (transient error state)
+  | "ready"             // all expected artifacts for this file kind are present
+  | "processing"        // in-flight job (transient)
+  | "metadata_only"     // raw camera (.r3d/.braw) with metadata — PERMANENT final state
+  | "failed"            // last attempt failed
+  | "not_applicable";   // file_kind === "other" (pipeline doesn't process this format)
 
+/**
+ * Collapse the raw backend flags into the display state machine.
+ * CRITICAL: the semantics differ by file_kind. Don't treat a mid-flight MP4
+ * as "metadata_only" — that state is reserved for formats that will never
+ * have a proxy (raw camera), not for files currently being processed.
+ */
 export function deriveDisplayState(entry: ProcessingStatusEntry): ProcessingDisplayState {
+  // Transient states apply regardless of file_kind
   if (entry.in_flight_job_id) return "processing";
   if (entry.last_status === "failed") return "failed";
-  const isExr = entry.sourceUri.toLowerCase().endsWith(".exr");
-  const hasThumbOrPreview = entry.thumb_ready || entry.preview_ready;
-  const hasAllArtifacts = entry.thumb_ready && (entry.preview_ready || entry.proxy_ready);
-  const metadataOk = !isExr || entry.metadata_ready;
-  if (hasAllArtifacts && metadataOk) return "ready";
-  if (hasThumbOrPreview || entry.metadata_ready) return "partial";
-  return "not_processed";
+
+  switch (entry.file_kind) {
+    case "image": {
+      // oiio writes _thumb.jpg + metadata atomically; presence of thumb is
+      // the whole signal. _preview / _proxy are nice-to-haves that cascade
+      // for the Frame.io viewer but don't change readiness.
+      if (entry.thumb_ready) return "ready";
+      return "not_processed";
+    }
+
+    case "video": {
+      // Need all three artifacts: playable proxy, sprite track, metadata.
+      const allReady = entry.proxy_ready && entry.sprites_ready && entry.metadata_ready;
+      if (allReady) return "ready";
+      const anyReady = entry.proxy_ready || entry.sprites_ready || entry.metadata_ready;
+      if (anyReady) return "partial";
+      return "not_processed";
+    }
+
+    case "raw_camera": {
+      // R3D/BRAW: metadata IS the final state — no proxy will ever be
+      // produced. Don't render this as "partial" (that implies retry).
+      if (entry.metadata_ready) return "metadata_only";
+      return "not_processed";
+    }
+
+    case "other":
+    default:
+      return "not_applicable";
+  }
 }
 
 /** Batch-fetch processing status for up to 200 sourceUris at once. */
