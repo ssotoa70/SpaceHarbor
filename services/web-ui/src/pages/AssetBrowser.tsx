@@ -161,12 +161,31 @@ interface ThumbnailCardProps {
 
 function ThumbnailCard({ asset, selected, onSelect, onPreview, onDetail }: ThumbnailCardProps) {
   const [hovered, setHovered] = useState(false);
+  const [resolvedThumb, setResolvedThumb] = useState<string | null>(null);
   const mediaType = inferMediaType(asset.title, asset.sourceUri);
   const badge = getTypeBadge(mediaType);
   const gradient = getThumbGradient(mediaType);
   const vastPath = extractVastPath(asset.sourceUri);
   const duration = asset.proxy?.durationSeconds;
   const isProcessing = asset.status === "processing";
+
+  // Lazy-resolve thumbnail from S3 when asset record has none.
+  // Retries every 15s while proxies are being generated.
+  useEffect(() => {
+    if (asset.thumbnail?.uri || !asset.sourceUri) return;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout>;
+    const attempt = () => {
+      void fetchMediaUrls(asset.sourceUri).then((urls) => {
+        if (cancelled) return;
+        if (urls.thumbnail) { setResolvedThumb(urls.thumbnail); return; }
+        // Retry — proxies may still be generating
+        retryTimer = setTimeout(attempt, 15_000);
+      });
+    };
+    attempt();
+    return () => { cancelled = true; clearTimeout(retryTimer); };
+  }, [asset.sourceUri, asset.thumbnail?.uri]);
 
   return (
     <div
@@ -185,11 +204,11 @@ function ThumbnailCard({ asset, selected, onSelect, onPreview, onDetail }: Thumb
         className="relative aspect-video flex items-center justify-center overflow-hidden"
         style={{ background: gradient }}
       >
-        {asset.thumbnail?.uri ? (
+        {(asset.thumbnail?.uri || resolvedThumb) ? (
           hovered && asset.proxy?.uri ? (
             <video src={asset.proxy.uri} autoPlay muted loop className="w-full h-full object-cover" />
           ) : (
-            <LazyThumbnail src={asset.thumbnail.uri} alt={asset.title} className="w-full h-full object-cover" />
+            <LazyThumbnail src={(asset.thumbnail?.uri ?? resolvedThumb)!} alt={asset.title} className="w-full h-full object-cover" />
           )
         ) : (
           <MediaTypeIcon type={mediaType} size={52} className="text-[var(--color-ah-text-muted)]" />
@@ -287,6 +306,22 @@ function SequenceCard({ sequence, onPreview, onDetail }: SequenceCardProps) {
   const gradient = getThumbGradient("image");
   const rep = sequence.representative;
   const totalSize = sequence.assets.reduce((sum, a) => sum + (a.metadata?.file_size_bytes ?? 0), 0);
+  const [resolvedThumb, setResolvedThumb] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (rep.thumbnail?.uri || !rep.sourceUri) return;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout>;
+    const attempt = () => {
+      void fetchMediaUrls(rep.sourceUri).then((urls) => {
+        if (cancelled) return;
+        if (urls.thumbnail) { setResolvedThumb(urls.thumbnail); return; }
+        retryTimer = setTimeout(attempt, 15_000);
+      });
+    };
+    attempt();
+    return () => { cancelled = true; clearTimeout(retryTimer); };
+  }, [rep.sourceUri, rep.thumbnail?.uri]);
 
   return (
     <div
@@ -299,8 +334,8 @@ function SequenceCard({ sequence, onPreview, onDetail }: SequenceCardProps) {
         className="relative aspect-video flex items-center justify-center overflow-hidden"
         style={{ background: gradient }}
       >
-        {rep.thumbnail?.uri ? (
-          <LazyThumbnail src={rep.thumbnail.uri} alt={sequence.pattern} className="w-full h-full object-cover" />
+        {(rep.thumbnail?.uri || resolvedThumb) ? (
+          <LazyThumbnail src={(rep.thumbnail?.uri ?? resolvedThumb)!} alt={sequence.pattern} className="w-full h-full object-cover" />
         ) : (
           <div className="flex flex-col items-center gap-1">
             <MediaTypeIcon type="image" size={36} className="text-[var(--color-ah-text-muted)]" />
@@ -361,7 +396,9 @@ function SequenceCard({ sequence, onPreview, onDetail }: SequenceCardProps) {
 
 interface MediaPreviewProps {
   asset: AssetRow;
+  assets: AssetRow[];
   onClose: () => void;
+  onNavigate: (asset: AssetRow) => void;
 }
 
 function attrDisplayValue(attr: { value_text?: string | null; value_float?: number | null; value_int?: number | null }): string {
@@ -371,37 +408,63 @@ function attrDisplayValue(attr: { value_text?: string | null; value_float?: numb
   return "(empty)";
 }
 
-function MediaPreview({ asset, onClose }: MediaPreviewProps) {
+function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoaded, setPreviewLoaded] = useState(false);
+
+  const currentIndex = assets.findIndex((a) => a.id === asset.id);
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex < assets.length - 1;
+  const goPrev = () => { if (hasPrev) onNavigate(assets[currentIndex - 1]); };
+  const goNext = () => { if (hasNext) onNavigate(assets[currentIndex + 1]); };
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
       if (e.key === "i" || e.key === "I") setSidebarOpen((p) => !p);
+      if (e.key === "ArrowLeft") goPrev();
+      if (e.key === "ArrowRight") goNext();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  });
 
-  // Load presigned URLs for media preview (thumbnail, proxy, source)
+  // Load presigned URLs — progressive: show thumb fast, swap in full-res preview
   useEffect(() => {
+    setThumbUrl(null);
+    setPreviewUrl(null);
+    setPreviewLoaded(false);
     void fetchMediaUrls(asset.sourceUri).then((urls) => {
-      // Prefer thumbnail for still images, proxy for video, source as fallback
       const mt = inferMediaType(asset.title, asset.sourceUri);
-      if (mt === "video" && urls.proxy) setPreviewUrl(urls.proxy);
-      else if (urls.thumbnail) setPreviewUrl(urls.thumbnail);
-      else if (urls.source) setPreviewUrl(urls.source);
+      if (mt === "video" && urls.proxy) {
+        setPreviewUrl(urls.proxy);
+        setPreviewLoaded(true);
+      } else {
+        // Show thumbnail immediately as placeholder
+        if (urls.thumbnail) setThumbUrl(urls.thumbnail);
+        // Full-res: preview > source (for browser-native images)
+        const fullRes = urls.preview ?? urls.source;
+        if (fullRes && fullRes !== urls.thumbnail) {
+          setPreviewUrl(fullRes);
+          // previewLoaded stays false until <img onLoad> fires
+        } else if (urls.thumbnail) {
+          // No higher-res available — thumb is the best we have
+          setPreviewUrl(urls.thumbnail);
+          setPreviewLoaded(true);
+        }
+      }
     });
   }, [asset.sourceUri, asset.title]);
 
-  // Load EXR metadata — try full sourceUri first, then bare filename
+  // Load EXR metadata
   useEffect(() => {
+    setExrMeta(null);
     if (!asset.sourceUri) return;
     void fetchExrMetadataLookup(asset.sourceUri).then((res) => {
       if (res.found) { setExrMeta(res); return; }
-      // Fallback: try bare filename (exr_metadata table stores filenames without path)
       const filename = asset.title || asset.sourceUri.split("/").pop() || "";
       if (filename && filename !== asset.sourceUri) {
         void fetchExrMetadataLookup(filename).then(setExrMeta);
@@ -416,7 +479,7 @@ function MediaPreview({ asset, onClose }: MediaPreviewProps) {
   const firstPart = exr?.parts?.[0];
   const mediaType = inferMediaType(asset.title, asset.sourceUri);
 
-  // Build dynamic fields for sidebar
+  // Build dynamic fields
   const fields: Array<{ group: string; label: string; value: string }> = [];
   const addField = (group: string, label: string, value: string | number | null | undefined) => {
     if (value == null || value === "" || value === "unknown") return;
@@ -427,6 +490,7 @@ function MediaPreview({ asset, onClose }: MediaPreviewProps) {
   addField("File", "Source", asset.sourceUri);
   if (asset.metadata?.file_size_bytes) addField("File", "Size", formatFileSize(asset.metadata.file_size_bytes));
   else if (exr?.file?.size_bytes) addField("File", "Size", formatFileSize(exr.file.size_bytes));
+  if (asset.createdAt) addField("File", "Created", new Date(asset.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }));
 
   if (summary) {
     addField("Image", "Resolution", summary.resolution);
@@ -454,120 +518,171 @@ function MediaPreview({ asset, onClose }: MediaPreviewProps) {
     }
   }
 
-  // Group fields
   const grouped = new Map<string, typeof fields>();
   for (const f of fields) {
     if (!grouped.has(f.group)) grouped.set(f.group, []);
     grouped.get(f.group)!.push(f);
   }
 
+  const effectiveProxy = asset.proxy?.uri ?? (mediaType === "video" ? previewUrl : null);
+  // Progressive: show thumb while full-res loads
+  const displayUrl = previewLoaded ? previewUrl : (thumbUrl ?? previewUrl);
+  const isLoading = !thumbUrl && !previewUrl && asset.sourceUri.startsWith("s3://");
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex bg-black/90"
-      role="dialog"
-      aria-label={`Preview: ${asset.title}`}
-    >
-      {/* Center stage — media viewer */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar */}
-        <div className="flex items-center justify-between px-4 py-3 bg-black/40">
-          <div className="flex items-center gap-3 min-w-0">
-            <h2 className="text-sm font-semibold text-white truncate">{asset.title}</h2>
+    <div className="fixed inset-0 z-50 flex bg-[#0d0d0f]" role="dialog" aria-label={`Preview: ${asset.title}`}>
+
+      {/* ── Left: full-bleed media viewer ── */}
+      <div className="flex-1 flex flex-col min-w-0 relative">
+
+        {/* Top bar — breadcrumb style like Frame.io */}
+        <div className="flex items-center justify-between px-5 py-3 bg-[#0d0d0f]/80 backdrop-blur-sm z-10">
+          <div className="flex items-center gap-2 min-w-0">
+            <button type="button" onClick={onClose} className="text-gray-400 hover:text-white transition-colors cursor-pointer mr-1" title="Back to library">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 15L7 10L12 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            <span className="text-[13px] text-gray-500">Library</span>
+            <span className="text-gray-600 text-xs">/</span>
+            <h2 className="text-[13px] font-medium text-white truncate">{asset.title}</h2>
             {summary && (
-              <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-400 shrink-0">
+              <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-500 shrink-0 ml-2">
                 {summary.resolution} &middot; {summary.compression}
                 {summary.colorSpace !== "unknown" ? ` \u00b7 ${summary.colorSpace}` : ""}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setSidebarOpen((p) => !p)}
-              className={`px-2 py-1 rounded text-[10px] font-medium cursor-pointer transition-colors ${
-                sidebarOpen
-                  ? "bg-[var(--color-ah-accent)]/20 text-[var(--color-ah-accent)]"
-                  : "text-gray-400 hover:text-white"
-              }`}
-              title="Toggle info sidebar (I)"
-            >
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Prev/Next navigation */}
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={goPrev} disabled={!hasPrev}
+                className={`w-7 h-7 flex items-center justify-center rounded cursor-pointer transition-colors ${hasPrev ? "text-gray-300 hover:text-white hover:bg-white/10" : "text-gray-700 cursor-default"}`}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              <span className="text-[11px] text-gray-500 font-[var(--font-ah-mono)] min-w-[60px] text-center">
+                {currentIndex >= 0 ? `${currentIndex + 1} of ${assets.length}` : ""}
+              </span>
+              <button type="button" onClick={goNext} disabled={!hasNext}
+                className={`w-7 h-7 flex items-center justify-center rounded cursor-pointer transition-colors ${hasNext ? "text-gray-300 hover:text-white hover:bg-white/10" : "text-gray-700 cursor-default"}`}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </div>
+            <button type="button" onClick={() => setSidebarOpen((p) => !p)}
+              className={`px-2.5 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors ${
+                sidebarOpen ? "bg-white/10 text-white" : "text-gray-400 hover:text-white hover:bg-white/5"
+              }`} title="Toggle info sidebar (I)">
               {sidebarOpen ? "Hide Info" : "Show Info"}
             </button>
-            <Button variant="ghost" onClick={onClose} aria-label="Close preview"><CloseIcon /></Button>
           </div>
         </div>
 
-        {/* Media area */}
-        <div className="flex-1 flex items-center justify-center p-4">
-          {asset.proxy?.uri ? (
-            <video src={asset.proxy.uri} controls className="max-w-full max-h-full rounded" />
-          ) : asset.thumbnail?.uri ? (
-            <img src={asset.thumbnail.uri} alt={asset.title} className="max-w-full max-h-full rounded" />
-          ) : previewUrl && mediaType === "video" ? (
-            <video src={previewUrl} controls className="max-w-full max-h-full rounded" />
-          ) : previewUrl && mediaType === "image" && !asset.title.toLowerCase().endsWith(".exr") ? (
-            <img src={previewUrl} alt={asset.title} className="max-w-full max-h-full rounded" />
-          ) : (
-            <div className="flex flex-col items-center gap-3 text-gray-500">
-              <span className="text-6xl">{mediaType === "image" ? "\uD83C\uDFA8" : mediaType === "video" ? "\uD83C\uDFA6" : "\uD83D\uDCC4"}</span>
-              <span className="text-sm">{previewUrl === null && asset.sourceUri.startsWith("s3://") ? "Loading preview..." : "No preview available"}</span>
-              <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-600">{asset.sourceUri}</span>
+        {/* Media viewport — image fills the space */}
+        <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+          {/* Hidden preload: load full-res in background, swap on ready */}
+          {previewUrl && !previewLoaded && (
+            <img src={previewUrl} alt="" className="hidden" onLoad={() => setPreviewLoaded(true)} />
+          )}
+          {effectiveProxy ? (
+            <video src={effectiveProxy} controls autoPlay className="w-full h-full object-contain" />
+          ) : displayUrl ? (
+            <img src={displayUrl} alt={asset.title} className="w-full h-full object-contain select-none" draggable={false} />
+          ) : isLoading ? (
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-gray-700 border-t-[var(--color-ah-accent)] rounded-full animate-spin" />
+              <span className="text-sm text-gray-500">Loading preview...</span>
             </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3 text-gray-600">
+              <MediaTypeIcon type={mediaType} size={72} className="text-gray-700" />
+              <span className="text-sm">No preview available</span>
+              <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-700">{asset.sourceUri}</span>
+            </div>
+          )}
+
+          {/* Hover nav arrows — large click targets on edges */}
+          {hasPrev && (
+            <button type="button" onClick={goPrev}
+              className="absolute left-0 top-0 bottom-0 w-16 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer group">
+              <div className="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center group-hover:bg-black/70 transition-colors">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 15L7 10L12 5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </div>
+            </button>
+          )}
+          {hasNext && (
+            <button type="button" onClick={goNext}
+              className="absolute right-0 top-0 bottom-0 w-16 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer group">
+              <div className="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center group-hover:bg-black/70 transition-colors">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 5L13 10L8 15" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </div>
+            </button>
           )}
         </div>
 
         {/* Bottom bar — actions */}
-        <div className="flex items-center justify-center gap-3 px-4 py-2 bg-black/40">
-          <button
-            type="button"
+        <div className="flex items-center justify-center gap-3 px-5 py-2.5 bg-[#0d0d0f]/80 backdrop-blur-sm">
+          <button type="button"
             onClick={() => window.open(`rvlink://${asset.sourceUri}`, "_blank")}
-            className="px-3 py-1.5 rounded bg-[var(--color-ah-accent)] text-[var(--color-ah-bg)] text-[11px] font-semibold cursor-pointer hover:brightness-110 transition-all flex items-center gap-1.5"
-          >
+            className="px-3 py-1.5 rounded bg-[var(--color-ah-accent)] text-[var(--color-ah-bg)] text-[11px] font-semibold cursor-pointer hover:brightness-110 transition-all flex items-center gap-1.5">
             <span>&#9655;</span> Open in RV
           </button>
-          <button
-            type="button"
+          <button type="button"
             onClick={() => void navigator.clipboard.writeText(asset.sourceUri)}
-            className="px-3 py-1.5 rounded border border-gray-600 text-gray-300 text-[11px] font-medium cursor-pointer hover:bg-gray-800 transition-colors"
-          >
+            className="px-3 py-1.5 rounded border border-gray-700 text-gray-300 text-[11px] font-medium cursor-pointer hover:bg-white/5 transition-colors">
             Copy Path
           </button>
         </div>
       </div>
 
-      {/* Right sidebar — dynamic fields */}
+      {/* ── Right sidebar — metadata fields ── */}
       {sidebarOpen && (
-        <div className="w-80 shrink-0 bg-[var(--color-ah-bg-raised)] border-l border-[var(--color-ah-border)] overflow-auto">
-          <div className="px-4 py-3 border-b border-[var(--color-ah-border)]">
-            <h3 className="text-[13px] font-semibold text-[var(--color-ah-text)]">All Fields</h3>
-            <span className="font-[var(--font-ah-mono)] text-[10px] text-[var(--color-ah-text-subtle)]">
-              {fields.length} fields
-            </span>
+        <div className="w-[340px] shrink-0 bg-[#141418] border-l border-[#1e1e24] flex flex-col overflow-hidden">
+          {/* Header with filename + format/resolution badges */}
+          <div className="px-5 pt-5 pb-4 border-b border-[#1e1e24]">
+            <h3 className="text-[14px] font-semibold text-white mb-1 truncate">{asset.title}</h3>
+            {asset.createdAt && (
+              <p className="text-[11px] text-gray-500 mb-3">
+                Created {new Date(asset.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+              </p>
+            )}
+            {summary && (
+              <div className="flex gap-4">
+                <div className="text-center">
+                  <div className="text-[9px] font-[var(--font-ah-mono)] tracking-[0.12em] text-gray-500 uppercase mb-0.5">Format</div>
+                  <div className="text-[13px] font-semibold text-white">{summary.compression?.toUpperCase() || "EXR"}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[9px] font-[var(--font-ah-mono)] tracking-[0.12em] text-gray-500 uppercase mb-0.5">Resolution</div>
+                  <div className="text-[13px] font-semibold text-white">{summary.resolution}</div>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="px-4 py-2">
+
+          {/* Scrollable fields */}
+          <div className="flex-1 overflow-auto px-5 py-3">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[12px] font-medium text-gray-300">All Fields ({fields.length})</span>
+            </div>
             {[...grouped.entries()].map(([group, gFields]) => (
-              <div key={group} className="mb-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="font-[var(--font-ah-mono)] text-[10px] font-medium tracking-[0.14em] text-[var(--color-ah-text-subtle)] uppercase">
+              <div key={group} className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="font-[var(--font-ah-mono)] text-[10px] font-medium tracking-[0.14em] text-gray-500 uppercase">
                     {group}
                   </span>
-                  <span className="font-[var(--font-ah-mono)] text-[9px] text-[var(--color-ah-text-subtle)]">
-                    ({gFields.length})
-                  </span>
-                  <div className="flex-1 h-px bg-[var(--color-ah-border-muted)]" />
+                  <span className="font-[var(--font-ah-mono)] text-[9px] text-gray-600">({gFields.length})</span>
+                  <div className="flex-1 h-px bg-[#1e1e24]" />
                 </div>
                 <dl>
                   {gFields.map((f) => (
-                    <div key={f.label} className="flex items-baseline justify-between gap-2 py-[3px]">
-                      <dt className="font-[var(--font-ah-mono)] text-[11px] text-[var(--color-ah-text-subtle)] shrink-0">{f.label}</dt>
-                      <dd className="text-[11px] font-[var(--font-ah-mono)] text-[var(--color-ah-text)] text-right truncate">{f.value}</dd>
+                    <div key={f.label} className="flex items-baseline justify-between gap-3 py-[4px]">
+                      <dt className="font-[var(--font-ah-mono)] text-[11px] text-gray-500 shrink-0">{f.label}</dt>
+                      <dd className="text-[11px] font-[var(--font-ah-mono)] text-gray-200 text-right truncate max-w-[180px]" title={f.value}>{f.value}</dd>
                     </div>
                   ))}
                 </dl>
               </div>
             ))}
             {fields.length === 0 && (
-              <p className="text-[11px] text-[var(--color-ah-text-subtle)] py-4">
+              <p className="text-[11px] text-gray-600 py-4 text-center">
                 {exrMeta === null ? "Loading metadata..." : "No metadata available."}
               </p>
             )}
@@ -1254,7 +1369,7 @@ export function AssetBrowser() {
         </>
       )}
 
-      {previewAsset && <MediaPreview asset={previewAsset} onClose={() => setPreviewAsset(null)} />}
+      {previewAsset && <MediaPreview asset={previewAsset} assets={assets} onClose={() => setPreviewAsset(null)} onNavigate={setPreviewAsset} />}
       </div>{/* end main content */}
 
       {/* ── Detail panel — slides in as fixed-width column; grid reflows naturally ── */}

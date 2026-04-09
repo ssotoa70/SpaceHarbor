@@ -126,9 +126,13 @@ export function proxyS3Url(url: string | null): string | null {
   return url;
 }
 
-/* ── In-memory access token (XSS-safe — never in localStorage) ── */
+/* ── Access token — sessionStorage so it survives page refresh ── */
 
-let _accessToken: string | null = null;
+const TOKEN_KEY = "ah_access_token";
+
+let _accessToken: string | null = (() => {
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+})();
 
 export function getAccessToken(): string | null {
   return _accessToken;
@@ -136,6 +140,10 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string | null): void {
   _accessToken = token;
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch { /* private browsing */ }
 }
 
 export class ApiRequestError extends Error {
@@ -2597,10 +2605,11 @@ export async function fetchPresignedUrl(sourceUri: string): Promise<string | nul
 export interface MediaUrls {
   source: string | null;
   thumbnail: string | null;
+  preview: string | null;
   proxy: string | null;
 }
 
-/** Fetch presigned URLs for source, thumbnail (.proxies/*_thumb.jpg), and proxy (.proxies/*_proxy.mp4).
+/** Fetch presigned URLs for source, thumbnail, full-res preview, and proxy.
  *  URLs are automatically rewritten through the nginx S3 proxy for cross-origin access. */
 export async function fetchMediaUrls(sourceUri: string): Promise<MediaUrls> {
   try {
@@ -2608,14 +2617,15 @@ export async function fetchMediaUrls(sourceUri: string): Promise<MediaUrls> {
       `${API_BASE_URL}/api/v1/storage/media-urls?sourceUri=${encodeURIComponent(sourceUri)}`,
       { headers: withAuth() },
     );
-    if (!response.ok) return { source: null, thumbnail: null, proxy: null };
+    if (!response.ok) return { source: null, thumbnail: null, preview: null, proxy: null };
     const raw = (await response.json()) as MediaUrls;
     return {
       source: proxyS3Url(raw.source),
       thumbnail: proxyS3Url(raw.thumbnail),
+      preview: proxyS3Url(raw.preview),
       proxy: proxyS3Url(raw.proxy),
     };
   } catch {
-    return { source: null, thumbnail: null, proxy: null };
+    return { source: null, thumbnail: null, preview: null, proxy: null };
   }
 }

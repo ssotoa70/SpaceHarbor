@@ -407,6 +407,7 @@ export async function registerStorageBrowseRoutes(
               properties: {
                 source: { type: "string" },
                 thumbnail: { type: "string" },
+                preview: { type: "string" },
                 proxy: { type: "string" },
               },
             },
@@ -450,25 +451,53 @@ export async function registerStorageBrowseRoutes(
         const filename = key.includes("/") ? key.substring(key.lastIndexOf("/") + 1) : key;
         const baseName = filename.replace(/\.[^.]+$/, "");
         const thumbKey = dir ? `${dir}/.proxies/${baseName}_thumb.jpg` : `.proxies/${baseName}_thumb.jpg`;
+        const previewKey = dir ? `${dir}/.proxies/${baseName}_preview.jpg` : `.proxies/${baseName}_preview.jpg`;
         const proxyKey = dir ? `${dir}/.proxies/${baseName}_proxy.mp4` : `.proxies/${baseName}_proxy.mp4`;
+
+        // Browser-native image extensions — can use source as thumbnail fallback
+        const BROWSER_IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg"]);
+        const ext = filename.substring(filename.lastIndexOf(".")).toLowerCase();
+        const isBrowserImage = BROWSER_IMAGE_EXTS.has(ext);
 
         setVastTlsSkip();
         try {
           const s3 = makeS3Client(ep);
           const expiresIn = 3600;
 
-          const [sourceUrl, thumbUrl, proxyUrl] = await Promise.allSettled([
+          // Check if .proxies/ files exist (using authenticated HEAD, not presigned)
+          const exists = async (k: string): Promise<boolean> => {
+            try {
+              await s3.send(new HeadObjectCommand({ Bucket: resolvedBucket, Key: k }));
+              return true;
+            } catch {
+              return false;
+            }
+          };
+
+          // Run existence checks in parallel with source presigning
+          const [sourceUrl, thumbExists, previewExists, proxyExists] = await Promise.all([
             getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: key }), { expiresIn }),
-            getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: thumbKey }), { expiresIn }),
-            getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: proxyKey }), { expiresIn }),
+            exists(thumbKey),
+            exists(previewKey),
+            exists(proxyKey),
+          ]);
+
+          // Only presign .proxies/ URLs if the objects actually exist
+          const [thumbUrl, previewUrl, proxyUrl] = await Promise.all([
+            thumbExists ? getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: thumbKey }), { expiresIn }) : null,
+            previewExists ? getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: previewKey }), { expiresIn }) : null,
+            proxyExists ? getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: proxyKey }), { expiresIn }) : null,
           ]);
 
           s3.destroy();
 
           return reply.send({
-            source: sourceUrl.status === "fulfilled" ? sourceUrl.value : null,
-            thumbnail: thumbUrl.status === "fulfilled" ? thumbUrl.value : null,
-            proxy: proxyUrl.status === "fulfilled" ? proxyUrl.value : null,
+            source: sourceUrl,
+            // For browser-native images, fall back to source as thumbnail
+            thumbnail: thumbUrl ?? (isBrowserImage ? sourceUrl : null),
+            // Full-res preview: _preview.jpg > source (if browser-native)
+            preview: previewUrl ?? (isBrowserImage ? sourceUrl : null),
+            proxy: proxyUrl,
           });
         } catch {
           return reply.send({ source: null, thumbnail: null, proxy: null });
