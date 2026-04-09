@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchExrMetadataLookup, fetchMediaUrls, type AssetRow, type AssetDependencyData, type UnregisteredFile, type ExrMetadataLookupResult } from "../api";
@@ -8,7 +8,6 @@ import { AssetDetailPanel } from "../components/AssetDetailPanel";
 
 import { AssetSelectionToolbar } from "../components/AssetSelectionToolbar";
 import { CloseIcon } from "../components/CloseIcon";
-import { IngestPanel } from "../components/IngestPanel";
 import { MediaTypeIcon } from "../components/MediaTypeIcon";
 import type { PipelineStage } from "../types";
 import {
@@ -1021,11 +1020,11 @@ export function AssetBrowser() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [previewAsset, setPreviewAsset] = useState<AssetRow | null>(null);
   const [detailAsset, setDetailAsset] = useState<AssetRow | null>(null);
-  const [ingestOpen, setIngestOpen] = useState(false);
   const [groupSequences, setGroupSequences] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchText, setSearchText] = useState(searchParams.get("q") ?? "");
   const statusFilter = searchParams.get("status") ?? "";
@@ -1150,8 +1149,8 @@ export function AssetBrowser() {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold">Assets</h1>
         <div className="flex items-center gap-2">
-          <Button variant="primary" onClick={() => setIngestOpen(true)}>
-            + Ingest
+          <Button variant="ghost" onClick={() => navigate("/library/storage")}>
+            Add files
           </Button>
           <Button
             variant={groupSequences ? "primary" : "ghost"}
@@ -1193,14 +1192,6 @@ export function AssetBrowser() {
         onClear={() => setSelected(new Set())}
       />
 
-      {/* Inline ingest panel — slides in above the gallery */}
-      {ingestOpen && (
-        <IngestPanel
-          onClose={() => setIngestOpen(false)}
-          onAssetIngested={() => void fetchAssets().then(setAssets)}
-        />
-      )}
-
       {!loading && !apiError && !isEmpty && <PropagationAlertBanner assets={filtered} />}
       {!loading && !apiError && !isEmpty && <UnregisteredFilesPanel />}
 
@@ -1228,10 +1219,10 @@ export function AssetBrowser() {
           </div>
           <h2 className="text-lg font-semibold mb-1">No assets yet</h2>
           <p className="text-sm text-[var(--color-ah-text-muted)] mb-4 max-w-sm">
-            Ingest your first asset to get started. Assets from connected VAST storage will appear here automatically.
+            Upload files from the Storage Browser to get them processed and registered as assets. Files added to connected VAST storage will appear here automatically.
           </p>
-          <Button variant="primary" onClick={() => setIngestOpen(true)}>
-            + Ingest Asset
+          <Button variant="primary" onClick={() => navigate("/library/storage")}>
+            Go to Storage Browser
           </Button>
         </div>
       )}
