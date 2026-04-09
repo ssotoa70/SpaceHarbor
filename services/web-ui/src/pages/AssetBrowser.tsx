@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchExrMetadataLookup, fetchMediaUrls, type AssetRow, type AssetDependencyData, type UnregisteredFile, type ExrMetadataLookupResult } from "../api";
+import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchExrMetadataLookup, fetchVideoMetadataLookup, fetchMediaUrls, type AssetRow, type AssetDependencyData, type UnregisteredFile, type ExrMetadataLookupResult, type VideoMetadataLookupResult } from "../api";
 import { Badge, Button, Input, Skeleton } from "../design-system";
 import { AssetDetailPanel } from "../components/AssetDetailPanel";
+import { metadataKindForFilename } from "../utils/metadata-routing";
 
 import { AssetSelectionToolbar } from "../components/AssetSelectionToolbar";
 import { CloseIcon } from "../components/CloseIcon";
@@ -407,9 +408,36 @@ function attrDisplayValue(attr: { value_text?: string | null; value_float?: numb
   return "(empty)";
 }
 
+// Dynamic-field helpers used by the video metadata rendering path. Both are
+// schema-agnostic: humanizeMetaLabel turns snake_case / camelCase column
+// names into "Title Case" display labels, and formatMetaFieldValue coerces
+// any JSON value (string / number / bool / array / nested object) to a safe
+// display string. Keeps the sidebar robust to whatever shape the
+// video-metadata-extractor function decides to emit.
+function humanizeMetaLabel(key: string): string {
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatMetaFieldValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map((v) => formatMetaFieldValue(v)).join(", ");
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
+  const [videoMeta, setVideoMeta] = useState<VideoMetadataLookupResult | null>(null);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoaded, setPreviewLoaded] = useState(false);
@@ -458,19 +486,41 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
     });
   }, [asset.sourceUri, asset.title]);
 
-  // Load EXR metadata
+  // Load metadata — routed by file extension to the right DataEngine lookup.
+  // EXR files go through fetchExrMetadataLookup (oiio-inspector schema),
+  // video + raw camera files go through fetchVideoMetadataLookup
+  // (video-metadata-extractor schema). The extension→kind mapping lives in
+  // utils/metadata-routing so the Storage Browser and this view stay in sync.
   useEffect(() => {
     setExrMeta(null);
+    setVideoMeta(null);
     if (!asset.sourceUri) return;
-    void fetchExrMetadataLookup(asset.sourceUri).then((res) => {
-      if (res.found) { setExrMeta(res); return; }
-      const filename = asset.title || asset.sourceUri.split("/").pop() || "";
-      if (filename && filename !== asset.sourceUri) {
-        void fetchExrMetadataLookup(filename).then(setExrMeta);
-      } else {
-        setExrMeta(res);
-      }
-    });
+
+    const filename = asset.title || asset.sourceUri.split("/").pop() || "";
+    const kind = metadataKindForFilename(filename);
+
+    if (kind === "image") {
+      void fetchExrMetadataLookup(asset.sourceUri).then((res) => {
+        if (res.found) { setExrMeta(res); return; }
+        // Fallback: try the bare filename (the exr_metadata table may store
+        // filenames without the full s3:// prefix).
+        if (filename && filename !== asset.sourceUri) {
+          void fetchExrMetadataLookup(filename).then(setExrMeta);
+        } else {
+          setExrMeta(res);
+        }
+      });
+    } else if (kind === "video") {
+      void fetchVideoMetadataLookup(asset.sourceUri).then((res) => {
+        if (res.found) { setVideoMeta(res); return; }
+        if (filename && filename !== asset.sourceUri) {
+          void fetchVideoMetadataLookup(filename).then(setVideoMeta);
+        } else {
+          setVideoMeta(res);
+        }
+      });
+    }
+    // kind === "none" — no metadata expected, leave both null.
   }, [asset.sourceUri, asset.title]);
 
   const exr = exrMeta?.found ? exrMeta : null;
@@ -514,6 +564,24 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
   if (exr?.attributes) {
     for (const attr of exr.attributes) {
       addField("Attributes", attr.attr_name, attrDisplayValue(attr));
+    }
+  }
+
+  // Video metadata — dynamic rendering since the video_metadata schema is
+  // owned by the functions team and we don't want to hardcode field names.
+  // summary goes into a "Media" group for prominence; every other column
+  // from the raw row falls through to a generic "Attributes" group via the
+  // attributes array.
+  const video = videoMeta?.found ? videoMeta : null;
+  if (video?.summary) {
+    for (const [key, value] of Object.entries(video.summary)) {
+      if (value === undefined || value === null || value === "") continue;
+      addField("Media", humanizeMetaLabel(key), formatMetaFieldValue(value));
+    }
+  }
+  if (video?.attributes) {
+    for (const attr of video.attributes) {
+      addField("Attributes", humanizeMetaLabel(attr.name), formatMetaFieldValue(attr.value));
     }
   }
 

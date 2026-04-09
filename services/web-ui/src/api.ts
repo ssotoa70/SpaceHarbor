@@ -2571,6 +2571,64 @@ export async function fetchExrMetadataLookup(path: string): Promise<ExrMetadataL
   }
 }
 
+// ---------------------------------------------------------------------------
+// Video metadata lookup — parallel surface for video-metadata-extractor output.
+//
+// The schema is owned by the functions team and is INTENTIONALLY loose here:
+// the UI consumes `summary` (a best-effort dict of well-known fields if
+// present) and `attributes` (a flat list of every other column) so the
+// sidebar can render any shape the function chooses to emit without code
+// changes on this side.
+// ---------------------------------------------------------------------------
+
+export interface VideoMetadataSummary {
+  resolution?: string;
+  codec?: string;
+  duration?: string | number;
+  fps?: string | number;
+  bitrate?: string | number;
+  colorSpace?: string;
+  hdr?: string;
+  audioChannels?: string | number;
+  cameraMake?: string;
+  cameraModel?: string;
+  timecodeStart?: string;
+  rawMetadataOnly?: boolean;
+  // Intentionally open — the Python service populates whatever well-known
+  // fields it can find. Unknown keys fall through to `attributes`.
+  [key: string]: unknown;
+}
+
+export interface VideoMetadataAttribute {
+  name: string;
+  value: unknown;
+}
+
+export interface VideoMetadataLookupResult {
+  found: boolean;
+  /** Raw row from the video_metadata table, passed through unchanged. */
+  file?: Record<string, unknown>;
+  /** Best-effort computed highlights from well-known column names. */
+  summary?: VideoMetadataSummary;
+  /** All other row columns as generic name/value pairs for dynamic rendering. */
+  attributes?: VideoMetadataAttribute[];
+  /** Optional diagnostic surfaced from the sidecar on query failure. */
+  error?: string;
+}
+
+export async function fetchVideoMetadataLookup(path: string): Promise<VideoMetadataLookupResult> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/video-metadata/lookup?path=${encodeURIComponent(path)}`,
+      { headers: withAuth() },
+    );
+    if (!response.ok) return { found: false };
+    return (await response.json()) as VideoMetadataLookupResult;
+  } catch {
+    return { found: false };
+  }
+}
+
 export async function fetchExrMetadataStats(): Promise<ExrMetadataStats | null> {
   try {
     const response = await fetch(

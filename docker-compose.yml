@@ -189,6 +189,10 @@ services:
       VASTDB_SECRET_KEY: ${VAST_SECRET_KEY:-}
       VASTDB_BUCKET: ${VASTDB_BUCKET:-}
       VASTDB_SCHEMA: ${VASTDB_SCHEMA:-exr_metadata}
+      # video-metadata-extractor writes into a separate schema — name is
+      # env-configurable so the functions team can rename without touching code.
+      VASTDB_VIDEO_SCHEMA: ${VASTDB_VIDEO_SCHEMA:-video_metadata}
+      VASTDB_VIDEO_TABLE: ${VASTDB_VIDEO_TABLE:-files}
       PORT: 8070
     ports:
       - "8070:8070"

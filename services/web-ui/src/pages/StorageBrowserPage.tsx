@@ -3,6 +3,7 @@ import {
   fetchStorageEndpoints,
   fetchStorageBrowse,
   fetchExrMetadataLookup,
+  fetchVideoMetadataLookup,
   fetchMediaUrls,
   fetchProcessingStatus,
   deriveDisplayState,
@@ -11,12 +12,14 @@ import {
   type StorageBrowseFile,
   type StorageBrowseFolder,
   type ExrMetadataLookupResult,
+  type VideoMetadataLookupResult,
   type MediaUrls,
   type ProcessingStatusEntry,
   type ProcessingDisplayState,
 } from "../api";
 import { IngestPanel } from "../components/IngestPanel";
 import { Button } from "../design-system";
+import { metadataKindForFilename } from "../utils/metadata-routing";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -45,27 +48,42 @@ function mediaTypeColor(type: string): string {
 
 function FileDetailSidebar({ file, onClose }: { file: StorageBrowseFile; onClose: () => void }) {
   const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
+  const [videoMeta, setVideoMeta] = useState<VideoMetadataLookupResult | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const filename = file.key.split("/").pop() ?? file.key;
+  const metadataKind = metadataKindForFilename(filename);
 
   useEffect(() => {
     setLoading(true);
     setExrMeta(null);
+    setVideoMeta(null);
     setPreviewUrl(null);
 
-    // Fetch EXR metadata by filename
-    void fetchExrMetadataLookup(filename).then((res) => {
-      setExrMeta(res);
-      setLoading(false);
-    });
+    // Fetch metadata from the right service based on file kind. The EXR
+    // sidecar and the video sidecar have different schemas — don't hit
+    // both for every file, it just wastes calls.
+    if (metadataKind === "image") {
+      void fetchExrMetadataLookup(filename).then((res) => {
+        setExrMeta(res);
+        setLoading(false);
+      });
+    } else if (metadataKind === "video") {
+      void fetchVideoMetadataLookup(filename).then((res) => {
+        setVideoMeta(res);
+        setLoading(false);
+      });
+    } else {
+      setLoading(false); // no metadata expected for this extension
+    }
 
-    // Try to get a presigned preview URL (prefer thumbnail from .proxies/ convention)
+    // Preview URL lookup is the same for all file kinds — the media-urls
+    // endpoint already handles the .proxies/ convention per file type.
     void fetchMediaUrls(file.sourceUri).then((urls) => {
       setPreviewUrl(urls.thumbnail ?? urls.source ?? null);
     });
-  }, [file.key, filename, file.sourceUri]);
+  }, [file.key, filename, file.sourceUri, metadataKind]);
 
   const summary = exrMeta?.summary;
   const parts = exrMeta?.parts ?? [];
@@ -91,17 +109,7 @@ function FileDetailSidebar({ file, onClose }: { file: StorageBrowseFile; onClose
 
       {loading ? (
         <div className="p-4 text-gray-500 text-sm">Loading metadata...</div>
-      ) : !exrMeta?.found ? (
-        <div className="p-4 space-y-3">
-          <div className="text-xs text-gray-500">No EXR metadata available for this file.</div>
-          <div className="space-y-2">
-            <DetailRow label="File" value={filename} />
-            <DetailRow label="Size" value={formatBytes(file.sizeBytes)} />
-            <DetailRow label="Type" value={file.inferredMediaType} />
-            <DetailRow label="Modified" value={file.lastModified ? new Date(file.lastModified).toLocaleString() : "-"} />
-          </div>
-        </div>
-      ) : (
+      ) : metadataKind === "image" && exrMeta?.found ? (
         <div className="p-4 space-y-4">
           {/* Summary section */}
           {summary && (
@@ -147,9 +155,92 @@ function FileDetailSidebar({ file, onClose }: { file: StorageBrowseFile; onClose
             {exrMeta.file && <DetailRow label="Inspected" value={new Date(exrMeta.file.inspection_timestamp).toLocaleString()} />}
           </Section>
         </div>
+      ) : metadataKind === "video" && videoMeta?.found ? (
+        <div className="p-4 space-y-4">
+          {/*
+            Video detail view is fully dynamic — we don't hardcode the field
+            list because the video_metadata schema is owned by the functions
+            team and may evolve. summary holds the well-known highlights;
+            attributes is a flat kv list of every other column in the row.
+          */}
+          {videoMeta.summary && Object.keys(videoMeta.summary).length > 0 && (
+            <Section title="Media">
+              {Object.entries(videoMeta.summary)
+                .filter(([, v]) => v !== undefined && v !== null && v !== "")
+                .map(([key, value]) => (
+                  <DetailRow
+                    key={key}
+                    label={humanizeLabel(key)}
+                    value={formatMetaValue(value)}
+                  />
+                ))}
+            </Section>
+          )}
+
+          {videoMeta.attributes && videoMeta.attributes.length > 0 && (
+            <Section title={`Attributes (${videoMeta.attributes.length})`}>
+              {videoMeta.attributes.map((attr) => (
+                <DetailRow
+                  key={attr.name}
+                  label={humanizeLabel(attr.name)}
+                  value={formatMetaValue(attr.value)}
+                  mono
+                />
+              ))}
+            </Section>
+          )}
+
+          <Section title="File">
+            <DetailRow label="Size" value={formatBytes(file.sizeBytes)} />
+            <DetailRow label="Path" value={file.key} mono />
+            <DetailRow label="S3 URI" value={file.sourceUri} mono />
+            <DetailRow label="Modified" value={file.lastModified ? new Date(file.lastModified).toLocaleString() : "-"} />
+          </Section>
+        </div>
+      ) : (
+        <div className="p-4 space-y-3">
+          <div className="text-xs text-gray-500">
+            {metadataKind === "none"
+              ? "No metadata expected — this file type is not processed by the pipeline."
+              : metadataKind === "video"
+                ? "No video metadata available yet. The file may not have been processed."
+                : "No EXR metadata available for this file."}
+          </div>
+          <div className="space-y-2">
+            <DetailRow label="File" value={filename} />
+            <DetailRow label="Size" value={formatBytes(file.sizeBytes)} />
+            <DetailRow label="Type" value={file.inferredMediaType} />
+            <DetailRow label="Modified" value={file.lastModified ? new Date(file.lastModified).toLocaleString() : "-"} />
+          </div>
+        </div>
       )}
     </div>
   );
+}
+
+// Turn a snake_case or camelCase column name into a human-friendly label.
+// Used by the dynamic video metadata sidebar to render any field the
+// functions team adds without code changes.
+function humanizeLabel(key: string): string {
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")      // camelCase → camel Case
+    .replace(/_/g, " ")                        // snake_case → snake case
+    .replace(/\b\w/g, (c) => c.toUpperCase()); // Title Case
+}
+
+// Format an arbitrary metadata value for display. Booleans, numbers, arrays,
+// and objects all have to render somehow — never throw on unexpected shapes.
+function formatMetaValue(value: unknown): string {
+  if (value === null || value === undefined) return "-";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map((v) => formatMetaValue(v)).join(", ");
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

@@ -49,6 +49,7 @@ import { registerDeliveryRoutes } from "./routes/delivery.js";
 import { registerNavBadgeRoutes } from "./routes/nav-badges.js";
 import { registerStorageBrowseRoutes } from "./routes/storage-browse.js";
 import { registerExrMetadataRoutes } from "./routes/exr-metadata.js";
+import { registerVideoMetadataRoutes } from "./routes/video-metadata.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 import { TrinoClient } from "./db/trino-client.js";
@@ -401,6 +402,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // EXR metadata routes — query exr-inspector tables via Trino
     void registerExrMetadataRoutes(app, catalogTrino, prefixes);
+    void registerVideoMetadataRoutes(app, prefixes);
 
     // Phase: Analytics dashboard endpoints (cached, fallback to in-memory)
     void registerAnalyticsRoutes(app, persistence, catalogTrino, prefixes);
