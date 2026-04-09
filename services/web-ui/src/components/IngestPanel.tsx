@@ -205,7 +205,10 @@ export function IngestPanel({ onClose, onAssetIngested }: IngestPanelProps) {
 
       // Step 3: Register the asset
       setEntries((prev) => prev.map((en) => en.id === id ? { ...en, status: "registering", uploadProgress: 100 } : en));
-      const result: IngestResult = await ingestAsset({ title: file.name, sourceUri: `/${storageKey}` });
+      // Build a proper s3:// URI so all downstream code (presign, media-urls, metadata) works consistently
+      const ep = storageEndpoints.find((e) => e.id === selectedEndpointId) ?? storageEndpoints[0];
+      const sourceUri = ep ? `s3://${ep.bucket}/${storageKey}` : `/${storageKey}`;
+      const result: IngestResult = await ingestAsset({ title: file.name, sourceUri });
 
       // Step 4: Mark as processing. Auto-advance stages on a timer since
       // the DataEngine processes asynchronously and Kafka events may not be

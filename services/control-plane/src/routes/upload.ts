@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
 
@@ -165,8 +164,7 @@ export async function registerUploadRoute(
           );
         }
 
-        const uuid = crypto.randomUUID();
-        const storageKey = `${prefixParam}/${uuid}/${filename}`;
+        const storageKey = `${prefixParam}/${filename}`;
 
         const client = createS3Client(config);
         const result = await generateUploadUrl(client, config.bucket, storageKey, contentType);
