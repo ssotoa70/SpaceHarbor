@@ -725,6 +725,29 @@ def get_table_definitions() -> List[TableDefinition]:
         ]), 14)
     )
 
+    # Migration 015: Processing Requests — tracks on-demand DataEngine function
+    # invocations for files that missed the automatic element trigger (e.g. files
+    # put into the bucket via s3cmd, NFS copy, or catalog rehydration). Populated
+    # by POST /storage/process; read by GET /storage/processing-status. Lets the
+    # Storage Browser show "processing" / "failed" states and enforces per-object
+    # request dedup via the job_id primary key and an (s3_bucket, s3_key) lookup.
+    #
+    # In Commit 1 the table is created but unused — the status endpoint reads it
+    # optionally and returns null in_flight state. Commit 3 wires the insert path.
+    tables.append(
+        TableDefinition("processing_requests", pa.schema([
+            ("job_id", pa.string()),        # uuid primary key
+            ("s3_bucket", pa.string()),
+            ("s3_key", pa.string()),
+            ("status", pa.string()),        # in_progress | completed | failed | timed_out
+            ("requested_at", pa.timestamp("us")),
+            ("requested_by", pa.string()),  # user email from JWT
+            ("completed_at", pa.timestamp("us")),
+            ("error_message", pa.string()),
+            ("deadline_at", pa.timestamp("us")),
+        ]), 15)
+    )
+
     return tables
 
 

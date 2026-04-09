@@ -1,16 +1,22 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, type DragEvent } from "react";
 import {
   fetchStorageEndpoints,
   fetchStorageBrowse,
   fetchExrMetadataLookup,
   fetchMediaUrls,
+  fetchProcessingStatus,
+  deriveDisplayState,
   ingestAsset,
   type StorageEndpoint,
   type StorageBrowseFile,
   type StorageBrowseFolder,
   type ExrMetadataLookupResult,
   type MediaUrls,
+  type ProcessingStatusEntry,
+  type ProcessingDisplayState,
 } from "../api";
+import { IngestPanel } from "../components/IngestPanel";
+import { Button } from "../design-system";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -164,6 +170,81 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
   );
 }
 
+// 16px inline status indicator shown in the name cell. Non-intrusive — absent
+// (or neutral gray) for unprocessed files, colored only when there's signal.
+function ProcessingStatusIcon({
+  state,
+  entry,
+}: {
+  state: ProcessingDisplayState;
+  entry?: ProcessingStatusEntry;
+}) {
+  const tooltip = (() => {
+    if (!entry) return "Checking…";
+    const parts: string[] = [];
+    parts.push(entry.thumb_ready ? "thumbnail ✓" : "thumbnail ✗");
+    parts.push(entry.preview_ready ? "preview ✓" : "preview ✗");
+    parts.push(entry.proxy_ready ? "proxy ✓" : "proxy ✗");
+    if (entry.sourceUri.toLowerCase().endsWith(".exr")) {
+      parts.push(entry.metadata_ready ? "metadata ✓" : "metadata ✗");
+    }
+    if (entry.last_error) parts.push(`last error: ${entry.last_error}`);
+    return parts.join("  ·  ");
+  })();
+
+  if (state === "ready") {
+    return (
+      <span title={tooltip} className="inline-flex items-center" aria-label="Processed">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="7" r="6" fill="#10b981" fillOpacity="0.18" stroke="#10b981" strokeWidth="1.2" />
+          <path d="M4.5 7.2 L6.2 8.8 L9.5 5.4" stroke="#10b981" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (state === "partial") {
+    return (
+      <span title={tooltip} className="inline-flex items-center" aria-label="Partially processed">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="7" r="6" fill="none" stroke="#f59e0b" strokeWidth="1.2" />
+          <path d="M7 1 A6 6 0 0 1 7 13 Z" fill="#f59e0b" fillOpacity="0.4" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (state === "processing") {
+    return (
+      <span title={tooltip} className="inline-flex items-center" aria-label="Processing">
+        <svg width="14" height="14" viewBox="0 0 14 14" className="animate-spin">
+          <circle cx="7" cy="7" r="5" stroke="#06b6d4" strokeWidth="1.4" strokeLinecap="round" strokeDasharray="20 12" fill="none" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (state === "failed") {
+    return (
+      <span title={tooltip} className="inline-flex items-center" aria-label="Processing failed">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="7" r="6" fill="#ef4444" fillOpacity="0.18" stroke="#ef4444" strokeWidth="1.2" />
+          <path d="M5 5 L9 9 M9 5 L5 9" stroke="#ef4444" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </span>
+    );
+  }
+
+  // not_processed — empty circle, muted
+  return (
+    <span title={tooltip} className="inline-flex items-center" aria-label="Not processed">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <circle cx="7" cy="7" r="6" fill="none" stroke="#4b5563" strokeWidth="1.2" strokeDasharray="1.5 1.5" />
+      </svg>
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
@@ -182,6 +263,15 @@ export function StorageBrowserPage() {
   const [ingested, setIngested] = useState<Set<string>>(new Set());
   const [ingestError, setIngestError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<StorageBrowseFile | null>(null);
+  // Processing status keyed by sourceUri — populated after each browse via
+  // the batch /storage/processing-status endpoint. Empty map means "unknown"
+  // and the row renders a neutral dashed circle until data arrives.
+  const [statusByUri, setStatusByUri] = useState<Map<string, ProcessingStatusEntry>>(new Map());
+  // Upload drawer — the primary affordance for putting new bytes into the
+  // bucket, moved here from the Assets page as of the IA refactor.
+  const [uploadOpen, setUploadOpen] = useState(false);
+  // Drag-over overlay state — shown while the user drags files over the page
+  const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
     fetchStorageEndpoints().then((eps) => {
@@ -228,6 +318,37 @@ export function StorageBrowserPage() {
     if (selectedEndpoint) browse("");
   }, [selectedEndpoint, browse]);
 
+  // After each browse, fetch processing status for all visible files in a
+  // single batched POST. The endpoint caps at 200 sourceUris per request so
+  // we chunk if the listing exceeds that (rare — page size is 200).
+  useEffect(() => {
+    if (files.length === 0) {
+      setStatusByUri(new Map());
+      return;
+    }
+    let cancelled = false;
+    const fetchStatuses = async () => {
+      const uris = files.map((f) => f.sourceUri).filter(Boolean);
+      // Chunk at 200 — matches the backend's maxItems guard
+      const chunks: string[][] = [];
+      for (let i = 0; i < uris.length; i += 200) chunks.push(uris.slice(i, i + 200));
+      const all: ProcessingStatusEntry[] = [];
+      for (const chunk of chunks) {
+        const batch = await fetchProcessingStatus(chunk);
+        all.push(...batch);
+        if (cancelled) return;
+      }
+      if (cancelled) return;
+      const next = new Map<string, ProcessingStatusEntry>();
+      for (const entry of all) next.set(entry.sourceUri, entry);
+      setStatusByUri(next);
+    };
+    void fetchStatuses();
+    return () => {
+      cancelled = true;
+    };
+  }, [files]);
+
   const navigateToFolder = (prefix: string) => {
     browse(prefix);
   };
@@ -271,8 +392,52 @@ export function StorageBrowserPage() {
       return acc;
     }, []);
 
+  // Drag-and-drop handlers — counter-based so nested enter/leave don't flicker.
+  const dragCounterRef = useRef(0);
+  const handleDragEnter = (e: DragEvent) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    setDragOver(true);
+  };
+  const handleDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setDragOver(false);
+  };
+  const handleDragOver = (e: DragEvent) => {
+    if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
+  };
+  const handleDrop = (e: DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setDragOver(false);
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      // Opening the upload drawer is enough — IngestPanel's own drop zone
+      // will receive the next drag-drop session. For now, nudge the user.
+      setUploadOpen(true);
+    }
+  };
+
   return (
-    <div className="flex h-full">
+    <div
+      className="flex h-full relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+    {/* Drag-over overlay — shown while files are being dragged over the page */}
+    {dragOver && (
+      <div className="fixed inset-0 z-40 flex items-center justify-center bg-[var(--color-ah-accent)]/10 backdrop-blur-sm pointer-events-none">
+        <div className="px-8 py-6 rounded-2xl border-2 border-dashed border-[var(--color-ah-accent)] bg-[var(--color-ah-bg-raised)]/90">
+          <p className="text-lg font-semibold text-white text-center">Drop files to upload</p>
+          <p className="text-xs text-gray-400 text-center mt-1">
+            Files will be placed in <span className="font-mono">{currentPrefix || "/"}</span>
+          </p>
+        </div>
+      </div>
+    )}
     <div className={`flex-1 p-6 space-y-4 overflow-auto ${selectedFile ? "pr-0" : ""}`}>
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">Storage Browser</h1>
@@ -295,6 +460,13 @@ export function StorageBrowserPage() {
               s3://{currentEp.bucket}
             </span>
           )}
+          <Button
+            variant="primary"
+            onClick={() => setUploadOpen(true)}
+            disabled={endpoints.length === 0}
+          >
+            + Upload
+          </Button>
         </div>
       </div>
 
@@ -336,7 +508,7 @@ export function StorageBrowserPage() {
 
       {ingested.size > 0 && (
         <div className="bg-green-500/10 border border-green-500/30 rounded p-3 text-green-300 text-sm flex justify-between items-center">
-          <span>Ingested {ingested.size} file{ingested.size > 1 ? "s" : ""} successfully</span>
+          <span>Registered {ingested.size} file{ingested.size > 1 ? "s" : ""} as assets</span>
           <button onClick={() => setIngested(new Set())} className="text-green-400 hover:text-green-200 ml-2">x</button>
         </div>
       )}
@@ -392,6 +564,10 @@ export function StorageBrowserPage() {
             {files.map((file) => {
               const name = file.key.replace(currentPrefix, "");
               const isIngesting = ingesting.has(file.key);
+              const statusEntry = statusByUri.get(file.sourceUri);
+              const displayState: ProcessingDisplayState = statusEntry
+                ? deriveDisplayState(statusEntry)
+                : "not_processed";
               return (
                 <tr
                   key={file.key}
@@ -399,7 +575,10 @@ export function StorageBrowserPage() {
                   className={`border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer ${selectedFile?.key === file.key ? "bg-indigo-500/10 border-l-2 border-l-indigo-400" : ""}`}
                 >
                   <td className="px-4 py-2 text-white font-mono text-xs">
-                    {name}
+                    <span className="inline-flex items-center gap-2">
+                      <ProcessingStatusIcon state={displayState} entry={statusEntry} />
+                      <span>{name}</span>
+                    </span>
                   </td>
                   <td className="px-4 py-2">
                     <span
@@ -417,17 +596,34 @@ export function StorageBrowserPage() {
                       : "-"}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    {ingested.has(file.key) ? (
-                      <span className="text-xs px-2 py-1 rounded bg-green-600/20 text-green-300">
-                        Ingested
+                    {/*
+                      Per-row action label is contextual based on processing state.
+                      Today the button still calls the legacy registration path
+                      (handleIngest → ingestAsset) — Commit 3 will swap the handler
+                      body to publish a CloudEvent to the DataEngine trigger topic
+                      so "Process" / "Reprocess" actually fire the pipeline.
+                    */}
+                    {ingested.has(file.key) || displayState === "ready" ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleIngest(file); }}
+                        disabled={isIngesting}
+                        className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title="Re-run the processing pipeline for this file"
+                      >
+                        {isIngesting ? "..." : "Reprocess"}
+                      </button>
+                    ) : displayState === "processing" ? (
+                      <span className="text-xs px-2 py-1 rounded bg-cyan-600/20 text-cyan-300">
+                        Processing…
                       </span>
                     ) : (
                       <button
-                        onClick={() => handleIngest(file)}
+                        onClick={(e) => { e.stopPropagation(); handleIngest(file); }}
                         disabled={isIngesting}
                         className="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title="Run the processing pipeline for this file"
                       >
-                        {isIngesting ? "..." : "Ingest"}
+                        {isIngesting ? "..." : "Process"}
                       </button>
                     )}
                   </td>
@@ -465,6 +661,17 @@ export function StorageBrowserPage() {
     {/* Detail sidebar */}
     {selectedFile && (
       <FileDetailSidebar file={selectedFile} onClose={() => setSelectedFile(null)} />
+    )}
+
+    {/* Upload drawer — IA refactor: upload lives in the Storage section now */}
+    {uploadOpen && (
+      <IngestPanel
+        onClose={() => setUploadOpen(false)}
+        onAssetIngested={() => {
+          // Re-browse so the new file shows up in the listing, plus a status refresh
+          void browse(currentPrefix);
+        }}
+      />
     )}
     </div>
   );

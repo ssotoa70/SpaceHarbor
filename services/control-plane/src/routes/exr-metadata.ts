@@ -23,7 +23,7 @@ function getVastdbQueryUrl(): string {
 }
 
 /** Proxy a request to the vastdb-query service. */
-async function proxyToVastdbQuery(path: string): Promise<{ ok: boolean; status: number; data: unknown }> {
+export async function proxyToVastdbQuery(path: string): Promise<{ ok: boolean; status: number; data: unknown }> {
   const url = `${getVastdbQueryUrl()}${path}`;
   try {
     const response = await vastFetch(url, {

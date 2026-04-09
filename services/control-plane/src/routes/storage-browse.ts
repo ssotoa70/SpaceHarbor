@@ -450,9 +450,17 @@ export async function registerStorageBrowseRoutes(
         const dir = key.includes("/") ? key.substring(0, key.lastIndexOf("/")) : "";
         const filename = key.includes("/") ? key.substring(key.lastIndexOf("/") + 1) : key;
         const baseName = filename.replace(/\.[^.]+$/, "");
+        // Artifact naming conventions (tracked with the DataEngine function):
+        //   - _thumb.jpg  : 256×256 thumbnail for grid cards
+        //   - _preview.jpg: full-res still (not yet produced — future function rev)
+        //   - _proxy.jpg  : higher-res still image proxy (current output for EXR)
+        //   - _proxy.mp4  : H.264 video proxy (for video sources; not used for still EXRs)
+        // Both _proxy.jpg and _proxy.mp4 are checked — _proxy.mp4 is the legacy
+        // name from earlier function revisions and may still exist for video inputs.
         const thumbKey = dir ? `${dir}/.proxies/${baseName}_thumb.jpg` : `.proxies/${baseName}_thumb.jpg`;
         const previewKey = dir ? `${dir}/.proxies/${baseName}_preview.jpg` : `.proxies/${baseName}_preview.jpg`;
-        const proxyKey = dir ? `${dir}/.proxies/${baseName}_proxy.mp4` : `.proxies/${baseName}_proxy.mp4`;
+        const proxyJpgKey = dir ? `${dir}/.proxies/${baseName}_proxy.jpg` : `.proxies/${baseName}_proxy.jpg`;
+        const proxyMp4Key = dir ? `${dir}/.proxies/${baseName}_proxy.mp4` : `.proxies/${baseName}_proxy.mp4`;
 
         // Browser-native image extensions — can use source as thumbnail fallback
         const BROWSER_IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg"]);
@@ -475,18 +483,22 @@ export async function registerStorageBrowseRoutes(
           };
 
           // Run existence checks in parallel with source presigning
-          const [sourceUrl, thumbExists, previewExists, proxyExists] = await Promise.all([
+          const [sourceUrl, thumbExists, previewExists, proxyJpgExists, proxyMp4Exists] = await Promise.all([
             getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: key }), { expiresIn }),
             exists(thumbKey),
             exists(previewKey),
-            exists(proxyKey),
+            exists(proxyJpgKey),
+            exists(proxyMp4Key),
           ]);
 
-          // Only presign .proxies/ URLs if the objects actually exist
-          const [thumbUrl, previewUrl, proxyUrl] = await Promise.all([
+          // Only presign .proxies/ URLs if the objects actually exist.
+          // Preview preference: _preview.jpg > _proxy.jpg > source (browser-native)
+          // Video proxy is strictly _proxy.mp4 — the UI uses it to render <video>.
+          const [thumbUrl, previewJpgUrl, proxyJpgUrl, proxyMp4Url] = await Promise.all([
             thumbExists ? getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: thumbKey }), { expiresIn }) : null,
             previewExists ? getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: previewKey }), { expiresIn }) : null,
-            proxyExists ? getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: proxyKey }), { expiresIn }) : null,
+            proxyJpgExists ? getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: proxyJpgKey }), { expiresIn }) : null,
+            proxyMp4Exists ? getSignedUrl(s3, new GetObjectCommand({ Bucket: resolvedBucket, Key: proxyMp4Key }), { expiresIn }) : null,
           ]);
 
           s3.destroy();
@@ -495,12 +507,200 @@ export async function registerStorageBrowseRoutes(
             source: sourceUrl,
             // For browser-native images, fall back to source as thumbnail
             thumbnail: thumbUrl ?? (isBrowserImage ? sourceUrl : null),
-            // Full-res preview: _preview.jpg > source (if browser-native)
-            preview: previewUrl ?? (isBrowserImage ? sourceUrl : null),
-            proxy: proxyUrl,
+            // Full-res preview cascade: _preview.jpg > _proxy.jpg > source (browser-native)
+            preview: previewJpgUrl ?? proxyJpgUrl ?? (isBrowserImage ? sourceUrl : null),
+            // Video proxy: .mp4 only
+            proxy: proxyMp4Url,
           });
         } catch {
           return reply.send({ source: null, thumbnail: null, proxy: null });
+        } finally {
+          restoreVastTls();
+        }
+      },
+    );
+
+    // --- POST /storage/processing-status ---
+    // Batch-query the processing state of a list of S3 objects. Returns, for
+    // each sourceUri, which derived artifacts exist on disk (.proxies/_thumb,
+    // _preview, _proxy) plus any in-flight / failed processing_requests row.
+    //
+    // The UI calls this after a browse to decorate each row with a status icon.
+    // We intentionally use POST (not GET) so the request body can carry up to
+    // 200 sourceUris at once without hitting URL length limits.
+    app.post<{
+      Body: { sourceUris: string[] };
+    }>(
+      withPrefix(prefix, "/storage/processing-status"),
+      {
+        schema: {
+          tags: ["storage"],
+          operationId: prefix === "/api/v1" ? "v1StorageProcessingStatus" : "legacyStorageProcessingStatus",
+          summary: "Batch-query processing state (artifacts + in-flight jobs) for S3 objects",
+          body: {
+            type: "object",
+            required: ["sourceUris"],
+            properties: {
+              sourceUris: {
+                type: "array",
+                items: { type: "string" },
+                maxItems: 200,
+              },
+            },
+          },
+          response: {
+            200: {
+              type: "object",
+              required: ["results"],
+              properties: {
+                results: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      sourceUri: { type: "string" },
+                      thumb_ready: { type: "boolean" },
+                      preview_ready: { type: "boolean" },
+                      proxy_ready: { type: "boolean" },
+                      metadata_ready: { type: "boolean" },
+                      in_flight_job_id: { type: ["string", "null"] },
+                      last_status: { type: ["string", "null"] },
+                      last_error: { type: ["string", "null"] },
+                    },
+                  },
+                },
+              },
+            },
+            400: errorEnvelopeSchema,
+            503: errorEnvelopeSchema,
+          },
+        },
+      },
+      async (request, reply) => {
+        const { sourceUris } = request.body ?? { sourceUris: [] };
+        if (!Array.isArray(sourceUris) || sourceUris.length === 0) {
+          return reply.send({ results: [] });
+        }
+
+        const endpoints = getStorageEndpoints();
+        if (endpoints.length === 0) {
+          return sendError(request, reply, 503, "STORAGE_NOT_CONFIGURED",
+            "No S3 storage endpoints configured.");
+        }
+
+        // Lazy-build S3 clients keyed by endpoint id — many sourceUris will
+        // share the same bucket so we avoid reconstructing the client per key.
+        const clientCache = new Map<string, S3Client>();
+        const getClient = (ep: typeof endpoints[number]): S3Client => {
+          const cached = clientCache.get(ep.id);
+          if (cached) return cached;
+          const fresh = makeS3Client(ep);
+          clientCache.set(ep.id, fresh);
+          return fresh;
+        };
+
+        // NB: this helper is deliberately copy-pasted from the /storage/media-urls
+        // handler above rather than extracted to a shared function. The two
+        // routes serve different response shapes and we want to keep them
+        // loosely coupled until both have proven behavior in production. A
+        // follow-up cleanup commit will consolidate.
+        const headExists = async (client: S3Client, bucket: string, key: string): Promise<boolean> => {
+          try {
+            await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+            return true;
+          } catch {
+            return false;
+          }
+        };
+
+        setVastTlsSkip();
+        try {
+          const results = await Promise.all(sourceUris.map(async (sourceUri) => {
+            // Parse bucket + key. Accept both s3://bucket/key and bare /key.
+            let bucket: string | null = null;
+            let key: string;
+            const match = sourceUri.match(/^s3:\/\/([^/]+)\/(.+)$/);
+            if (match) {
+              bucket = match[1];
+              key = match[2];
+            } else {
+              key = sourceUri.startsWith("/") ? sourceUri.slice(1) : sourceUri;
+            }
+
+            const ep = bucket
+              ? endpoints.find((e) => e.bucket === bucket) ?? endpoints[0]
+              : endpoints[0];
+            const resolvedBucket = bucket ?? ep.bucket;
+
+            // Derive sibling proxy paths via the DataEngine convention.
+            // See media-urls handler above for the convention reference.
+            const dir = key.includes("/") ? key.substring(0, key.lastIndexOf("/")) : "";
+            const filename = key.includes("/") ? key.substring(key.lastIndexOf("/") + 1) : key;
+            const baseName = filename.replace(/\.[^.]+$/, "");
+            const thumbKey = dir ? `${dir}/.proxies/${baseName}_thumb.jpg` : `.proxies/${baseName}_thumb.jpg`;
+            const previewKey = dir ? `${dir}/.proxies/${baseName}_preview.jpg` : `.proxies/${baseName}_preview.jpg`;
+            const proxyJpgKey = dir ? `${dir}/.proxies/${baseName}_proxy.jpg` : `.proxies/${baseName}_proxy.jpg`;
+            const proxyMp4Key = dir ? `${dir}/.proxies/${baseName}_proxy.mp4` : `.proxies/${baseName}_proxy.mp4`;
+
+            const client = getClient(ep);
+            const [thumbReady, previewFileReady, proxyJpgReady, proxyMp4Ready] = await Promise.all([
+              headExists(client, resolvedBucket, thumbKey),
+              headExists(client, resolvedBucket, previewKey),
+              headExists(client, resolvedBucket, proxyJpgKey),
+              headExists(client, resolvedBucket, proxyMp4Key),
+            ]);
+            // preview_ready = dedicated _preview.jpg OR _proxy.jpg (the DataEngine
+            //   function currently emits _proxy.jpg as the higher-res still).
+            // proxy_ready   = only the video .mp4 proxy. Still-image EXRs won't
+            //   have one; the UI falls back to the preview JPG instead.
+            const previewReady = previewFileReady || proxyJpgReady;
+            const proxyReady = proxyMp4Ready;
+
+            // Metadata readiness — currently only EXR files have a metadata
+            // sidecar table. Other file types report metadata_ready=false and
+            // the UI won't surface a "missing metadata" indicator for them.
+            // TODO(commit 3): query processing_requests for in_flight_job_id
+            // once the insert path exists. For now always return null.
+            const isExr = filename.toLowerCase().endsWith(".exr");
+            let metadataReady = false;
+            if (isExr) {
+              // Best-effort EXR metadata lookup via the existing route helper.
+              // If the vastdb-query service is unreachable we return false and
+              // the UI shows a "no metadata" state — a safe default.
+              try {
+                const { proxyToVastdbQuery } = await import("./exr-metadata.js");
+                const lookup = await proxyToVastdbQuery(
+                  `/api/v1/exr-metadata/lookup?path=${encodeURIComponent(filename)}`,
+                );
+                if (lookup.ok && lookup.data && typeof lookup.data === "object" && "found" in lookup.data) {
+                  metadataReady = Boolean((lookup.data as { found: boolean }).found);
+                }
+              } catch {
+                metadataReady = false;
+              }
+            }
+
+            return {
+              sourceUri,
+              thumb_ready: thumbReady,
+              preview_ready: previewReady,
+              proxy_ready: proxyReady,
+              metadata_ready: metadataReady,
+              in_flight_job_id: null as string | null,
+              last_status: null as string | null,
+              last_error: null as string | null,
+            };
+          }));
+
+          // Clean up cached clients
+          for (const client of clientCache.values()) {
+            client.destroy();
+          }
+
+          return reply.send({ results });
+        } catch (err) {
+          return sendError(request, reply, 503, "STATUS_CHECK_FAILED",
+            err instanceof Error ? err.message : "Failed to query processing status");
         } finally {
           restoreVastTls();
         }

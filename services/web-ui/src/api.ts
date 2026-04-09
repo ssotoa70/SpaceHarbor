@@ -2629,3 +2629,56 @@ export async function fetchMediaUrls(sourceUri: string): Promise<MediaUrls> {
     return { source: null, thumbnail: null, preview: null, proxy: null };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Storage processing status — per-object "is it processed?" state for the
+// Storage Browser row-level status icon. Batched to avoid N HTTP calls.
+// ---------------------------------------------------------------------------
+
+export interface ProcessingStatusEntry {
+  sourceUri: string;
+  thumb_ready: boolean;
+  preview_ready: boolean;
+  proxy_ready: boolean;
+  metadata_ready: boolean;
+  in_flight_job_id: string | null;
+  last_status: string | null;
+  last_error: string | null;
+}
+
+/** Derive a coarse display state from the raw flags. */
+export type ProcessingDisplayState =
+  | "not_processed"    // no artifacts, no metadata
+  | "partial"          // some but not all artifacts
+  | "ready"            // thumb + (preview or proxy) + (metadata if EXR)
+  | "processing"       // in-flight job exists
+  | "failed";          // last attempt failed
+
+export function deriveDisplayState(entry: ProcessingStatusEntry): ProcessingDisplayState {
+  if (entry.in_flight_job_id) return "processing";
+  if (entry.last_status === "failed") return "failed";
+  const isExr = entry.sourceUri.toLowerCase().endsWith(".exr");
+  const hasThumbOrPreview = entry.thumb_ready || entry.preview_ready;
+  const hasAllArtifacts = entry.thumb_ready && (entry.preview_ready || entry.proxy_ready);
+  const metadataOk = !isExr || entry.metadata_ready;
+  if (hasAllArtifacts && metadataOk) return "ready";
+  if (hasThumbOrPreview || entry.metadata_ready) return "partial";
+  return "not_processed";
+}
+
+/** Batch-fetch processing status for up to 200 sourceUris at once. */
+export async function fetchProcessingStatus(sourceUris: string[]): Promise<ProcessingStatusEntry[]> {
+  if (sourceUris.length === 0) return [];
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/v1/storage/processing-status`, {
+      method: "POST",
+      headers: withAuth({ "content-type": "application/json" }),
+      body: JSON.stringify({ sourceUris }),
+    });
+    if (!response.ok) return [];
+    const data = (await response.json()) as { results: ProcessingStatusEntry[] };
+    return data.results ?? [];
+  } catch {
+    return [];
+  }
+}
