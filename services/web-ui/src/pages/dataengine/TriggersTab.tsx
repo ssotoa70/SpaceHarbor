@@ -3,6 +3,7 @@ import { Badge, Button, Skeleton } from "../../design-system";
 import { fetchVastTriggers, deleteVastTrigger } from "../../api/dataengine-proxy";
 import type { VastTrigger } from "../../types/dataengine";
 import { TriggerCreateModal } from "./TriggerCreateModal";
+import { TriggerEditModal } from "./TriggerEditModal";
 
 /* ── Helpers ── */
 
@@ -52,6 +53,7 @@ export function TriggersTab() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<VastTrigger | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -255,13 +257,23 @@ export function TriggersTab() {
                         </Button>
                       </span>
                     ) : (
-                      <Button
-                        variant="ghost"
-                        onClick={() => setDeleteTarget(trigger.guid)}
-                        data-testid={`trigger-delete-${trigger.guid}`}
-                      >
-                        Delete
-                      </Button>
+                      <div className="inline-flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          onClick={() => setEditTarget(trigger)}
+                          data-testid={`trigger-edit-${trigger.guid}`}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => setDeleteTarget(trigger.guid)}
+                          data-testid={`trigger-delete-${trigger.guid}`}
+                          className="text-[var(--color-ah-danger)] hover:text-[var(--color-ah-danger)]"
+                        >
+                          Delete
+                        </Button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -279,6 +291,14 @@ export function TriggersTab() {
           setCreateOpen(false);
           void loadTriggers();
         }}
+      />
+
+      {/* Edit modal (name + description only; full editing lives in the Visual Builder) */}
+      <TriggerEditModal
+        open={editTarget !== null}
+        trigger={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSaved={loadTriggers}
       />
     </div>
   );

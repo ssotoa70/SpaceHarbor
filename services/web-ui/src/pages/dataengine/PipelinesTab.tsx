@@ -11,6 +11,7 @@ import {
 import type { VastPipeline, PipelineStatus } from "../../types/dataengine";
 import { PipelineCreateModal } from "./PipelineCreateModal";
 import { PipelineManifestEditor } from "./PipelineManifestEditor";
+import { PipelineEditModal } from "./PipelineEditModal";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 
 const STATUS_BADGE_VARIANT: Record<string, BadgeVariant> = {
@@ -34,6 +35,7 @@ export function PipelinesTab() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<VastPipeline | null>(null);
+  const [editTarget, setEditTarget] = useState<VastPipeline | null>(null);
   const [manifestTarget, setManifestTarget] = useState<VastPipeline | null>(null);
   const [deployingIds, setDeployingIds] = useState<Set<string>>(new Set());
 
@@ -246,6 +248,13 @@ export function PipelinesTab() {
                       )}
                       <Button
                         variant="ghost"
+                        onClick={() => setEditTarget(pipeline)}
+                        data-testid={`pipeline-edit-${pipeline.id}`}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
                         onClick={() => setManifestTarget(pipeline)}
                         data-testid={`pipeline-manifest-${pipeline.id}`}
                       >
@@ -272,6 +281,13 @@ export function PipelinesTab() {
         open={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         onCreated={loadPipelines}
+      />
+
+      <PipelineEditModal
+        open={editTarget !== null}
+        pipeline={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSaved={loadPipelines}
       />
 
       <PipelineManifestEditor

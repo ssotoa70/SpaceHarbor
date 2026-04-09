@@ -1,26 +1,28 @@
 import { useState, useEffect, useCallback, type FormEvent } from "react";
 import { Button } from "../../design-system/Button";
 import { Input } from "../../design-system/Input";
-import { createVastFunction, updateVastFunction } from "../../api/dataengine-proxy";
+import { updateVastTrigger } from "../../api/dataengine-proxy";
+import type { VastTrigger } from "../../types/dataengine";
 
 /**
- * FunctionCreateModal supports both create and edit modes.
+ * Lightweight edit modal for renaming / re-describing an existing trigger.
  *
- * - Pass `initial` with { guid, name, description } to edit an existing function.
- * - Omit `initial` to create a new function.
+ * Editing the trigger type, source bucket, filters, topic, or schedule is
+ * intentionally out of scope here — those are structural changes that the
+ * Visual Builder (Option B) will handle. This modal covers the common case
+ * of fixing a typo or updating a description.
  */
-export function FunctionCreateModal({
+export function TriggerEditModal({
   open,
+  trigger,
   onClose,
-  onCreated,
-  initial,
+  onSaved,
 }: {
   open: boolean;
+  trigger: VastTrigger | null;
   onClose: () => void;
-  onCreated: () => void;
-  initial?: { guid: string; name: string; description: string };
+  onSaved: () => void;
 }) {
-  const isEdit = !!initial;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -39,90 +41,101 @@ export function FunctionCreateModal({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, handleKeyDown]);
 
-  // Reset form state when modal opens — populate from `initial` in edit mode
   useEffect(() => {
-    if (open) {
-      setName(initial?.name ?? "");
-      setDescription(initial?.description ?? "");
+    if (open && trigger) {
+      setName(trigger.name);
+      setDescription(trigger.description ?? "");
       setError(null);
       setSubmitting(false);
     }
-  }, [open, initial]);
+  }, [open, trigger]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!trigger || !name.trim()) return;
 
     setSubmitting(true);
     setError(null);
     try {
-      if (isEdit && initial) {
-        await updateVastFunction(initial.guid, {
-          name: name.trim(),
-          description: description.trim(),
-        });
-      } else {
-        await createVastFunction({
-          name: name.trim(),
-          description: description.trim() || undefined,
-        });
-      }
-      onCreated();
+      await updateVastTrigger(trigger.guid, {
+        name: name.trim(),
+        description: description.trim(),
+      });
+      onSaved();
       onClose();
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : isEdit
-            ? "Failed to update function"
-            : "Failed to create function",
-      );
+      setError(err instanceof Error ? err.message : "Failed to update trigger");
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (!open) return null;
+  if (!open || !trigger) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
-      data-testid={isEdit ? "function-edit-modal" : "function-create-modal"}
+      data-testid="trigger-edit-modal"
     >
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
 
-      {/* Dialog */}
       <div className="relative z-10 w-full max-w-lg rounded-[var(--radius-ah-lg)] border border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg-raised)] p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-[var(--color-ah-text)] mb-4">
-          {isEdit ? "Edit Function" : "Create Function"}
+        <h2 className="text-lg font-semibold text-[var(--color-ah-text)] mb-1">
+          Edit Trigger
         </h2>
+        <p className="text-[11px] text-[var(--color-ah-text-subtle)] mb-4">
+          Structural changes (type, source, filters, topic, schedule) are managed in the Visual Builder.
+        </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input
             label="Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. thumbnail-generator"
             required
             autoFocus
           />
 
           <div className="grid gap-1.5">
             <label
-              htmlFor="fn-description"
+              htmlFor="trigger-description"
               className="text-sm font-medium text-[var(--color-ah-text-muted)]"
             >
               Description
             </label>
             <textarea
-              id="fn-description"
+              id="trigger-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional description of the function"
+              placeholder="Optional description"
               rows={3}
               className="rounded-[var(--radius-ah-md)] border border-[var(--color-ah-border)] bg-[var(--color-ah-bg)] px-3 py-2 text-sm text-[var(--color-ah-text)] placeholder:text-[var(--color-ah-text-subtle)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-ah-accent)] resize-none"
             />
+          </div>
+
+          <div className="rounded-[var(--radius-ah-sm)] border border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg)] px-3 py-2 space-y-1">
+            <div className="flex justify-between text-[11px]">
+              <span className="text-[var(--color-ah-text-subtle)]">Type</span>
+              <span className="text-[var(--color-ah-text-muted)] font-[var(--font-ah-mono)]">{trigger.type}</span>
+            </div>
+            {trigger.source_view && (
+              <div className="flex justify-between text-[11px]">
+                <span className="text-[var(--color-ah-text-subtle)]">Source</span>
+                <span className="text-[var(--color-ah-text-muted)] font-[var(--font-ah-mono)]">{trigger.source_view}</span>
+              </div>
+            )}
+            {trigger.event_type && (
+              <div className="flex justify-between text-[11px]">
+                <span className="text-[var(--color-ah-text-subtle)]">Event</span>
+                <span className="text-[var(--color-ah-text-muted)] font-[var(--font-ah-mono)]">{trigger.event_type}</span>
+              </div>
+            )}
+            {trigger.schedule_expression && (
+              <div className="flex justify-between text-[11px]">
+                <span className="text-[var(--color-ah-text-subtle)]">Schedule</span>
+                <span className="text-[var(--color-ah-text-muted)] font-[var(--font-ah-mono)]">{trigger.schedule_expression}</span>
+              </div>
+            )}
           </div>
 
           {error && (
@@ -139,9 +152,7 @@ export function FunctionCreateModal({
               Cancel
             </Button>
             <Button variant="primary" type="submit" disabled={submitting || !name.trim()}>
-              {submitting
-                ? isEdit ? "Saving..." : "Creating..."
-                : isEdit ? "Save" : "Create"}
+              {submitting ? "Saving..." : "Save"}
             </Button>
           </div>
         </form>

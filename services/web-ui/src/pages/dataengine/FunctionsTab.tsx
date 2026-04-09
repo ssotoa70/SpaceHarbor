@@ -15,6 +15,7 @@ export function FunctionsTab() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [expandedGuid, setExpandedGuid] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<VastFunction | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<VastFunction | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -192,16 +193,28 @@ export function FunctionsTab() {
                       {formatDate(fn.created_at)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Button
-                        variant="ghost"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteTarget(fn);
-                        }}
-                        className="text-[var(--color-ah-danger)] hover:text-[var(--color-ah-danger)]"
-                      >
-                        Delete
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditTarget(fn);
+                          }}
+                          data-testid={`function-edit-${fn.guid}`}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteTarget(fn);
+                          }}
+                          className="text-[var(--color-ah-danger)] hover:text-[var(--color-ah-danger)]"
+                        >
+                          Delete
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                   {expandedGuid === fn.guid && (
@@ -223,6 +236,17 @@ export function FunctionsTab() {
         open={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         onCreated={loadFunctions}
+      />
+
+      <FunctionCreateModal
+        open={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        onCreated={loadFunctions}
+        initial={
+          editTarget
+            ? { guid: editTarget.guid, name: editTarget.name, description: editTarget.description }
+            : undefined
+        }
       />
 
       <DeleteConfirmModal
