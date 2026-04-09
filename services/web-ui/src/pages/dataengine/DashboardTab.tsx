@@ -190,7 +190,7 @@ export function DashboardTab() {
       {/* ── Charts row ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <DashboardCard title="Events & Failures">
-          {eventsStats && eventsStats.events.length > 0 ? (
+          {eventsStats?.events?.length ? (
             <LineChart
               series={[
                 {
@@ -200,7 +200,7 @@ export function DashboardTab() {
                 },
                 {
                   label: "Failures",
-                  data: eventsStats.failures,
+                  data: eventsStats.failures ?? [],
                   color: "var(--color-ah-danger)",
                 },
               ]}
@@ -213,12 +213,12 @@ export function DashboardTab() {
           )}
         </DashboardCard>
 
-        <DashboardCard title="Avg Function Duration">
-          {executionTime && executionTime.labels.length > 0 ? (
+        <DashboardCard title="Avg Function Duration (ms)">
+          {executionTime?.labels?.length ? (
             <VerticalBarChart
               data={executionTime.labels.map((label, i) => ({
                 label,
-                value: executionTime.avg_duration_ms[i],
+                value: executionTime.avg_duration_ms?.[i] ?? 0,
                 color: "var(--color-ah-accent)",
               }))}
             />

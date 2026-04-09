@@ -65,7 +65,10 @@ export interface VastTrigger {
 
 // ── Pipelines ──
 
-export type PipelineStatus = "Draft" | "In progress" | "Running" | "Failure";
+// VMS returns a richer set of statuses (Ready, Deploying, Failed, etc.) than the
+// original four. Keep this as a string so the UI doesn't crash on unknown values;
+// the badge map uses a `?? "default"` fallback for anything unrecognized.
+export type PipelineStatus = string;
 
 export interface PipelineManifestFunction {
   function_guid: string;
@@ -82,7 +85,9 @@ export interface PipelineManifest {
 }
 
 export interface VastPipeline {
-  id: number;
+  /** Stable identifier used in URLs for delete/deploy/update. Populated from
+   *  the VMS `guid` (not the numeric `id` which overflows JS Number precision). */
+  id: string;
   name: string;
   description: string;
   status: PipelineStatus;

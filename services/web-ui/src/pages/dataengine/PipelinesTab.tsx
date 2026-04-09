@@ -13,11 +13,17 @@ import { PipelineCreateModal } from "./PipelineCreateModal";
 import { PipelineManifestEditor } from "./PipelineManifestEditor";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 
-const STATUS_BADGE_VARIANT: Record<PipelineStatus, BadgeVariant> = {
+const STATUS_BADGE_VARIANT: Record<string, BadgeVariant> = {
   Draft: "default",
   "In progress": "warning",
   Running: "success",
+  Ready: "success",
+  Deployed: "success",
   Failure: "danger",
+  Failed: "danger",
+  Error: "danger",
+  Deploying: "warning",
+  Pending: "warning",
 };
 
 export function PipelinesTab() {
@@ -29,7 +35,7 @@ export function PipelinesTab() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<VastPipeline | null>(null);
   const [manifestTarget, setManifestTarget] = useState<VastPipeline | null>(null);
-  const [deployingIds, setDeployingIds] = useState<Set<number>>(new Set());
+  const [deployingIds, setDeployingIds] = useState<Set<string>>(new Set());
 
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -213,7 +219,7 @@ export function PipelinesTab() {
                   </td>
                   <td className="px-4 py-3">
                     <Badge
-                      variant={STATUS_BADGE_VARIANT[pipeline.status]}
+                      variant={STATUS_BADGE_VARIANT[pipeline.status] ?? "default"}
                       data-testid={`pipeline-status-${pipeline.id}`}
                     >
                       {pipeline.status}
