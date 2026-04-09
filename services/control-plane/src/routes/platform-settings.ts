@@ -355,6 +355,11 @@ export function getVastDataEngineCredentials(): { username: string; password: st
   return { username, password };
 }
 
+/** Tenant name for VAST DataEngine API calls (query param). */
+export function getVastDataEngineTenant(): string | null {
+  return operationalStore.vastDataEngine.tenant || process.env.VAST_DATA_ENGINE_TENANT || null;
+}
+
 export interface ConnectionTestResult {
   service: string;
   status: "ok" | "error";
@@ -476,31 +481,66 @@ export async function registerPlatformSettingsRoutes(
         if (denyUnlessAdmin(_request, reply)) return;
         const iamFlags = resolveIamFlags();
 
-        // VAST Database
+        // VAST Database — use S3 HeadBucket (same proven path as Test Connection)
+        // rather than Trino (deprecated in favor of vastdb SDK).
         const dbUrl = getVastDatabaseUrl();
+        const dbBucket = getVastDatabaseBucket();
         const dbConfigured = !!dbUrl;
         let dbStatus: PlatformSettings["vastDatabase"]["status"] = "disconnected";
         let tablesDeployed = false;
 
-        if (dbConfigured) {
-          const trino = buildTrinoFromSettings();
-          if (trino) {
-            try {
-              const health = await trino.healthCheck();
-              dbStatus = health.reachable ? "connected" : "disconnected";
+        if (dbConfigured && dbBucket) {
+          try {
+            const { setVastTlsSkip, restoreVastTls } = await import("../vast/vast-fetch.js");
+            setVastTlsSkip();
+            const { S3Client, HeadBucketCommand } = await import("@aws-sdk/client-s3");
+            const accessKey = operationalStore.vastDatabase.accessKeyId
+              || process.env.VAST_DB_ACCESS_KEY || process.env.VAST_ACCESS_KEY || "";
+            const secretKey = operationalStore.vastDatabase.secretKey
+              || process.env.VAST_DB_SECRET_KEY || process.env.VAST_SECRET_KEY || "";
 
-              if (health.reachable) {
-                try {
-                  const schema = getVastDatabaseSchemaPath();
-                  await trino.query(`SELECT MAX(version) AS v FROM vast."${schema}".schema_version`);
-                  tablesDeployed = true;
-                } catch {
-                  // schema_version table doesn't exist
-                }
+            const s3 = new S3Client({
+              endpoint: dbUrl,
+              region: "us-east-1",
+              credentials: accessKey && secretKey
+                ? { accessKeyId: accessKey, secretAccessKey: secretKey }
+                : undefined,
+              forcePathStyle: true,
+              requestHandler: { requestTimeout: 5000 } as never,
+            });
+            await s3.send(new HeadBucketCommand({ Bucket: dbBucket }));
+            s3.destroy();
+            restoreVastTls();
+            dbStatus = "connected";
+
+            // Tables deployed check — use the vastdb SDK via vast-migrate.py
+            // (same path that powers /schema-status, which reports accurate state).
+            if (accessKey && secretKey) {
+              try {
+                const { execFile } = await import("node:child_process");
+                const { promisify } = await import("node:util");
+                const execFileAsync = promisify(execFile);
+                const scriptPath = new URL("../db/vast-migrate.py", import.meta.url).pathname;
+                const schema = getVastDatabaseSchema();
+                const { stdout } = await execFileAsync("python3", [
+                  scriptPath, "--status",
+                  "--endpoint", dbUrl,
+                  "--access-key", accessKey,
+                  "--secret-key", secretKey,
+                  "--bucket", dbBucket,
+                  "--schema", schema,
+                ], { timeout: 10_000, env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
+                const lastLine = stdout.trim().split("\n").pop() ?? "{}";
+                const sdkStatus = JSON.parse(lastLine) as { currentVersion: number };
+                tablesDeployed = sdkStatus.currentVersion > 0;
+              } catch {
+                // schema check failed — leave tablesDeployed false but keep status=connected
               }
-            } catch {
-              dbStatus = "error";
             }
+          } catch {
+            const { restoreVastTls: restore } = await import("../vast/vast-fetch.js");
+            restore();
+            dbStatus = "error";
           }
         }
 
@@ -963,15 +1003,67 @@ export async function registerPlatformSettingsRoutes(
           // is just the origin (https://vast.example.com).
           const cleanUrl = deUrl.includes("#") ? deUrl.split("#")[0] : deUrl;
 
-          // Actually test VMS authentication
+          // Step 1: Test VMS authentication (login)
           const { VmsTokenManager } = await import("../vast/vms-token-manager.js");
           const tokenManager = new VmsTokenManager(cleanUrl, creds);
-          const result = await tokenManager.testConnection();
-          return reply.send({
-            service,
-            status: result.ok ? "ok" : "error",
-            message: result.message,
-          } satisfies ConnectionTestResult);
+          const authResult = await tokenManager.testConnection();
+          if (!authResult.ok) {
+            return reply.send({
+              service,
+              status: "error",
+              message: authResult.message,
+            } satisfies ConnectionTestResult);
+          }
+
+          // Step 2: Verify tenant access by calling an actual DataEngine endpoint
+          // with X-Tenant-Name. If the tenant is missing/wrong the dashboard will
+          // keep failing even though auth succeeded — surface that now.
+          const tenant = getVastDataEngineTenant();
+          if (!tenant) {
+            return reply.send({
+              service,
+              status: "error",
+              message: "VMS login succeeded but Tenant Name is not set. The DataEngine API requires a tenant to scope requests.",
+            } satisfies ConnectionTestResult);
+          }
+
+          try {
+            const { vastFetch } = await import("../vast/vast-fetch.js");
+            const token = await tokenManager.getToken();
+            const probeUrl = new URL("/api/latest/dataengine/dashboard/stats", cleanUrl).toString();
+            const probeResp = await vastFetch(probeUrl, {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/json",
+                "X-Tenant-Name": tenant,
+              },
+            });
+            if (probeResp.ok) {
+              return reply.send({
+                service,
+                status: "ok",
+                message: `Connected to VAST DataEngine — tenant "${tenant}" accessible`,
+              } satisfies ConnectionTestResult);
+            }
+            const body = await probeResp.text().catch(() => "");
+            let detail = `HTTP ${probeResp.status}`;
+            try {
+              const parsed = JSON.parse(body) as { detail?: string; message?: string };
+              detail = parsed.detail ?? parsed.message ?? detail;
+            } catch { /* body wasn't JSON */ }
+            return reply.send({
+              service,
+              status: "error",
+              message: `VMS login succeeded but tenant "${tenant}" probe failed: ${detail}`,
+            } satisfies ConnectionTestResult);
+          } catch (err) {
+            return reply.send({
+              service,
+              status: "error",
+              message: `VMS login succeeded but tenant probe failed: ${err instanceof Error ? err.message : String(err)}`,
+            } satisfies ConnectionTestResult);
+          }
         }
 
         if (service === "s3" || service.startsWith("s3:")) {

@@ -16,6 +16,8 @@ import { vastFetch } from "./vast-fetch.js";
 export interface ProxyContext {
   tokenManager: VmsTokenManager;
   vastBaseUrl: string;
+  /** VAST tenant name — VMS DataEngine API requires this as a query param. */
+  tenant?: string | null;
   fetchFn?: typeof fetch;
 }
 
@@ -50,12 +52,16 @@ export async function proxyToVast(
     }
   }
 
-  // Build headers
+  // Build headers — VMS DataEngine API scopes tenant context via X-Tenant-Name
+  // header (not query param/path). Returns 400 "No tenant was provided" otherwise.
   const buildHeaders = (token: string): Record<string, string> => {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
     };
+    if (ctx.tenant) {
+      headers["X-Tenant-Name"] = ctx.tenant;
+    }
     if (method !== "GET" && method !== "DELETE") {
       headers["Content-Type"] = "application/json";
     }

@@ -21,16 +21,20 @@ import type {
   TraceSpan,
   TelemetryLog,
 } from "../types/dataengine";
+import { getAccessToken } from "../api";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const PROXY_PREFIX = `${API_BASE_URL}/api/v1/dataengine-proxy`;
 
-// Re-use the auth helper from the main api module
-// Import dynamically to avoid circular deps
-let _getAuth: () => Record<string, string> = () => ({});
+/** Build auth headers from the current in-memory access token. */
+function _getAuth(): Record<string, string> {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
-export function setAuthProvider(fn: () => Record<string, string>): void {
-  _getAuth = fn;
+/** @deprecated kept for backwards compat; tokens are now read directly via getAccessToken() */
+export function setAuthProvider(_fn: () => Record<string, string>): void {
+  /* no-op */
 }
 
 async function proxyGet<T>(path: string, query?: Record<string, string>): Promise<T> {

@@ -16,6 +16,7 @@ import { VmsTokenManager } from "../vast/vms-token-manager.js";
 interface DataEngineProxyConfig {
   getVastUrl: () => string | null;
   getCredentials: () => { username: string; password: string } | null;
+  getTenant?: () => string | null;
 }
 
 /**
@@ -45,6 +46,7 @@ function getProxyContext(
   return {
     tokenManager: tokenManagerRef.current,
     vastBaseUrl: vastUrl,
+    tenant: config.getTenant?.() ?? null,
   };
 }
 
