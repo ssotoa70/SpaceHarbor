@@ -900,15 +900,29 @@ export async function registerPlatformSettingsRoutes(
         // authoritative — the admin replaces the entire list at once rather
         // than patching individual entries, so downstream routes never see
         // a transient partial state.
+        let pipelinesChanged = false;
         if (body["dataEnginePipelines"] !== undefined) {
           try {
             operationalStore.dataEnginePipelines = validatePipelineConfigList(body["dataEnginePipelines"]);
+            // Mark sentinel so future boot-time seeds don't run again
+            operationalStore.dataEnginePipelinesSeeded = true;
+            pipelinesChanged = true;
           } catch (err) {
             const msg = err instanceof InvalidPipelineConfigError
               ? err.message
               : "dataEnginePipelines validation failed";
             return sendError(request, reply, 400, "INVALID_DATAENGINE_PIPELINES", msg);
           }
+        }
+        // VAST DataEngine connection fields also invalidate discovery cache
+        const deFieldsChanged = !!deBody && (
+          "url" in deBody || "tenant" in deBody || "username" in deBody || "password" in deBody
+        );
+        if (pipelinesChanged || deFieldsChanged) {
+          // Lazy import to avoid circular dependency between platform-settings
+          // and the dataengine-pipelines route module.
+          const mod = await import("./dataengine-pipelines.js");
+          mod.invalidateDataEnginePipelineCache();
         }
 
         // Write all changes to persistent store

@@ -51,6 +51,7 @@ import { registerStorageBrowseRoutes } from "./routes/storage-browse.js";
 import { registerStorageMetadataRoutes } from "./routes/storage-metadata.js";
 import { registerExrMetadataRoutes } from "./routes/exr-metadata.js";
 import { registerVideoMetadataRoutes } from "./routes/video-metadata.js";
+import { registerDataEnginePipelineRoutes } from "./routes/dataengine-pipelines.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 import { TrinoClient } from "./db/trino-client.js";
@@ -378,6 +379,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // S3 single-file sidecar reader — powers dynamic metadata panel in web-ui
     void registerStorageMetadataRoutes(app, prefixes);
+
+    // DataEngine pipelines — live merge of Settings + VAST function records
+    void registerDataEnginePipelineRoutes(app, prefixes);
 
     // DataEngine function catalogue + pipeline listing
     void registerDataEngineRoutes(app, functionRegistry, prefixes);
