@@ -766,11 +766,79 @@ interface FilterBarProps {
   sortBy: string;
   pipelineStage: string;
   mediaTypeFilter: string;
+  statusOptions: StatusOption[];
   onSearchChange: (v: string) => void;
   onStatusChange: (v: string) => void;
   onSortChange: (v: string) => void;
   onPipelineStageChange: (v: string) => void;
   onMediaTypeChange: (v: string) => void;
+}
+
+export interface StatusOption {
+  /** Raw status value, e.g. "pending", "qc_approved". Matches AssetRow.status. */
+  value: string;
+  /** Humanized label, e.g. "Pending", "QC Approved". */
+  label: string;
+  /** Number of assets in the loaded list with this status. */
+  count: number;
+}
+
+/** Canonical ordering for known workflow statuses — unknown/new statuses
+ *  sort alphabetically after these in the dropdown. Keep this in sync
+ *  with VALID_STATUSES in services/control-plane/src/routes/assets.ts. */
+const STATUS_SORT_ORDER: readonly string[] = [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "needs_replay",
+  "qc_pending",
+  "qc_in_review",
+  "qc_approved",
+  "qc_rejected",
+  "revision_required",
+  "retake",
+  "client_submitted",
+  "client_approved",
+  "client_rejected",
+];
+
+/** Convert a snake_case workflow status into a human-friendly label. */
+export function humanizeStatus(status: string): string {
+  return status
+    .split("_")
+    .map((part) => (part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)))
+    .join(" ")
+    .replace(/^Qc\b/, "QC");
+}
+
+/**
+ * Build the status dropdown options from the currently-loaded asset list.
+ * Data-driven so the dropdown never drifts from the backend's status set —
+ * a new status appears automatically the first time an asset carries it,
+ * and disappears when no assets have it anymore.
+ */
+export function buildStatusOptions(assets: { status: string }[]): StatusOption[] {
+  const counts = new Map<string, number>();
+  for (const asset of assets) {
+    const s = asset.status;
+    if (!s) continue;
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  const entries = Array.from(counts.entries()).map(([value, count]) => ({
+    value,
+    count,
+    label: humanizeStatus(value),
+  }));
+  entries.sort((a, b) => {
+    const aIdx = STATUS_SORT_ORDER.indexOf(a.value);
+    const bIdx = STATUS_SORT_ORDER.indexOf(b.value);
+    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+    if (aIdx !== -1) return -1;
+    if (bIdx !== -1) return 1;
+    return a.value.localeCompare(b.value);
+  });
+  return entries;
 }
 
 const PIPELINE_STAGES: PipelineStage[] = ["animation", "lighting", "comp", "fx", "lookdev", "roto", "paint", "editorial"];
@@ -787,7 +855,7 @@ const MEDIA_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "ai", label: "AI" },
 ];
 
-function FilterBar({ search, statusFilter, sortBy, pipelineStage, mediaTypeFilter, onSearchChange, onStatusChange, onSortChange, onPipelineStageChange, onMediaTypeChange }: FilterBarProps) {
+function FilterBar({ search, statusFilter, sortBy, pipelineStage, mediaTypeFilter, statusOptions, onSearchChange, onStatusChange, onSortChange, onPipelineStageChange, onMediaTypeChange }: FilterBarProps) {
   const [localSearch, setLocalSearch] = useState(search);
 
   return (
@@ -812,11 +880,12 @@ function FilterBar({ search, statusFilter, sortBy, pipelineStage, mediaTypeFilte
           onChange={(e) => onStatusChange(e.target.value)}
           className="rounded-[var(--radius-ah-md)] border border-[var(--color-ah-border)] bg-[var(--color-ah-bg)] px-3 py-2 text-sm text-[var(--color-ah-text)]"
         >
-          <option value="">All</option>
-          <option value="pending">Pending</option>
-          <option value="processing">Processing</option>
-          <option value="completed">Completed</option>
-          <option value="failed">Failed</option>
+          <option value="">All ({statusOptions.reduce((sum, o) => sum + o.count, 0)})</option>
+          {statusOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label} ({o.count})
+            </option>
+          ))}
         </select>
       </div>
       <div className="grid gap-1.5">
@@ -1177,6 +1246,7 @@ export function AssetBrowser() {
     });
   }, []);
 
+  const statusOptions = buildStatusOptions(assets);
   const filtered = assets
     .filter((a) => !searchText || a.title.toLowerCase().includes(searchText.toLowerCase()))
     .filter((a) => !statusFilter || a.status === statusFilter)
@@ -1248,6 +1318,7 @@ export function AssetBrowser() {
         sortBy={sortBy}
         pipelineStage={pipelineStage}
         mediaTypeFilter={mediaTypeFilter}
+        statusOptions={statusOptions}
         onSearchChange={setSearch}
         onStatusChange={setStatusFilter}
         onSortChange={setSortBy}
@@ -1295,6 +1366,41 @@ export function AssetBrowser() {
         </div>
       )}
 
+      {/* No-results state — data exists but all filters combined narrow to zero */}
+      {!loading && !apiError && !isEmpty && filtered.length === 0 && (
+        <div
+          className="flex flex-col items-center justify-center py-16 text-center"
+          data-testid="asset-browser-no-results"
+        >
+          <div className="w-14 h-14 rounded-full bg-[var(--color-ah-bg-raised)] flex items-center justify-center mb-3">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--color-ah-text-subtle)]">
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.35-4.35" />
+            </svg>
+          </div>
+          <h3 className="text-sm font-semibold text-[var(--color-ah-text)] mb-1">No results match the current filters</h3>
+          <p className="text-xs text-[var(--color-ah-text-muted)] max-w-md mb-4">
+            {assets.length} total asset{assets.length === 1 ? "" : "s"} loaded. Adjust or clear filters to see them.
+          </p>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setSearchText("");
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete("q");
+                next.delete("status");
+                next.delete("stage");
+                next.delete("type");
+                return next;
+              }, { replace: true });
+            }}
+          >
+            Clear filters
+          </Button>
+        </div>
+      )}
+
       {loading ? (
         <div
           className="grid gap-3 mt-4"
@@ -1304,7 +1410,7 @@ export function AssetBrowser() {
         </div>
       ) : (
         <>
-          {isGallery && (
+          {isGallery && filtered.length > 0 && (
             <SectionHeader
               label="ALL ASSETS"
               count={filtered.length}

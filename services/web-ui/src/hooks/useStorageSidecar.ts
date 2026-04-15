@@ -66,10 +66,12 @@ const lastSegment = (sourceUri: string): string => {
 function isEligible(sourceUri: string): boolean {
   if (!sourceUri) return false;
   const kind = metadataKindForFilename(lastSegment(sourceUri));
-  // `image` extractors also write sidecars; include them once the image
-  // renderer is wired. For now we only issue a fetch for video/raw, since
-  // that is what the current dynamic renderer consumes.
-  return kind === "video";
+  // Both image and video pipelines write `_metadata.json` sidecars now —
+  // image via frame-metadata-extractor, video via video-metadata-extractor.
+  // `metadataKindForFilename` returns "video" for raw camera formats too
+  // (R3D/BRAW) since they share the video-metadata-extractor, and "none"
+  // for formats the pipeline does not process.
+  return kind === "image" || kind === "video";
 }
 
 async function runFetch(sourceUri: string): Promise<StorageMetadataResponse | null> {

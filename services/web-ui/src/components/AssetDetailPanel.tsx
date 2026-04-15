@@ -14,6 +14,7 @@ import type { AssetRow } from "../types";
 import { formatTC } from "../utils/timecode";
 import { formatFileSize, formatDuration, inferMediaType } from "../utils/media-types";
 import { dataEngineFunctionsForFilename } from "../utils/metadata-routing";
+import { useStorageSidecar } from "../hooks/useStorageSidecar";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -903,10 +904,17 @@ function attrDisplayValue(attr: ExrAttributeMetadata): string {
 
 function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLookupResult | null }) {
   const functions = dataEngineFunctionsForFilename(asset.title);
-  // `exrMeta?.found` is the readiness signal for the image pipeline today.
-  // When the video-metadata-extractor readiness wiring lands (via the new
-  // useStorageSidecar hook), swap this for a file-kind-aware check.
-  const metadataReady = exrMeta?.found === true;
+  // File-kind-agnostic readiness signal. The hook reads the `_metadata.json`
+  // sidecar via the control-plane `/storage/metadata` route. Any pipeline
+  // (frame-metadata-extractor for images, video-metadata-extractor for video
+  // and raw camera) becomes "ready" when its sidecar exists. `exrMeta?.found`
+  // is kept as a fallback for legacy EXR pages where the VastDB lookup ran
+  // without the sidecar hook — the hook short-circuits on cache hit so this
+  // is free when both are present.
+  const { sidecar, loading: sidecarLoading } = useStorageSidecar(asset.sourceUri);
+  const sidecarReady = sidecar !== null;
+  const legacyExrReady = exrMeta?.found === true;
+  const metadataReady = sidecarReady || legacyExrReady;
   const metadataFunctionName = functions.find((f) => f.tableSchema !== null)?.name ?? null;
 
   return (
@@ -961,7 +969,9 @@ function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLook
           })}
           {!metadataReady && metadataFunctionName && (
             <p className="text-[11px] text-[var(--color-ah-text-subtle)] pt-1">
-              Metadata will appear here once {metadataFunctionName} has processed this file.
+              {sidecarLoading
+                ? `Checking ${metadataFunctionName} output...`
+                : `Metadata will appear here once ${metadataFunctionName} has processed this file.`}
             </p>
           )}
         </div>
@@ -973,6 +983,9 @@ function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLook
         {asset.jobId && <MetaRow label="Job ID" value={asset.jobId} copyable />}
         {exrMeta?.found && exrMeta.file?.file_id && (
           <MetaRow label="Metadata File ID" value={String(exrMeta.file.file_id)} copyable />
+        )}
+        {sidecar && (
+          <MetaRow label="Sidecar Key" value={sidecar.sidecar_key} copyable />
         )}
       </dl>
     </div>

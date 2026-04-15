@@ -71,6 +71,16 @@ describe("useStorageSidecar", () => {
     expect(last.loading).toBe(false);
   });
 
+  it("fetches for image file kinds (EXR via frame-metadata-extractor)", async () => {
+    const spy = vi.spyOn(api, "fetchStorageMetadata").mockResolvedValue(
+      makeResponse("s3://bucket/shot.0042.exr"),
+    );
+    let last: HookResult = { sidecar: null, loading: false, error: null };
+    render(<HookHarness sourceUri="s3://bucket/shot.0042.exr" onUpdate={(r) => { last = r; }} />);
+    await waitFor(() => expect(last.sidecar).not.toBeNull());
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("caches and returns the same sidecar across rerenders without re-fetching", async () => {
     const spy = vi.spyOn(api, "fetchStorageMetadata").mockResolvedValue(
       makeResponse("s3://bucket/a.mov"),
