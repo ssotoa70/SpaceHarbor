@@ -31,7 +31,7 @@ export function AssetDetail() {
       setAsset(a);
       setAudit(auditRows);
       setLoading(false);
-      // If asset has an EXR source, look up rich metadata from exr-inspector tables
+      // If asset has an EXR source, look up rich metadata from the frame-metadata-extractor table
       if (a?.sourceUri?.toLowerCase().endsWith(".exr")) {
         fetchExrMetadataLookup(a.sourceUri).then(setExrMeta);
       }
@@ -126,7 +126,7 @@ export function AssetDetail() {
             </dl>
           </Card>
 
-          {/* EXR Metadata from exr-inspector */}
+          {/* Rich per-frame metadata from frame-metadata-extractor */}
           {exrMeta?.found && exrMeta.summary && (
             <Card>
               <h2 className="text-sm font-semibold mb-3">EXR Metadata</h2>

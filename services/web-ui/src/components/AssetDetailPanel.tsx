@@ -13,6 +13,7 @@ import {
 import type { AssetRow } from "../types";
 import { formatTC } from "../utils/timecode";
 import { formatFileSize, formatDuration, inferMediaType } from "../utils/media-types";
+import { dataEngineFunctionsForFilename } from "../utils/metadata-routing";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -348,7 +349,7 @@ function InfoTab({
   onAdvanced?: (updatedAsset: AssetRow) => void;
 }) {
   // When no version detail is available (asset ingested without VFX hierarchy),
-  // show data from the asset record + EXR metadata from exr-inspector.
+  // show data from the asset record + rich metadata from the frame-metadata-extractor pipeline.
   if (!info && !asset.currentVersionId) {
     const mt = inferMediaType(asset.title, asset.sourceUri);
     const statusLabel = STATUS_LABELS[asset.status] ?? asset.status;
@@ -901,6 +902,13 @@ function attrDisplayValue(attr: ExrAttributeMetadata): string {
 // ---------------------------------------------------------------------------
 
 function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLookupResult | null }) {
+  const functions = dataEngineFunctionsForFilename(asset.title);
+  // `exrMeta?.found` is the readiness signal for the image pipeline today.
+  // When the video-metadata-extractor readiness wiring lands (via the new
+  // useStorageSidecar hook), swap this for a file-kind-aware check.
+  const metadataReady = exrMeta?.found === true;
+  const metadataFunctionName = functions.find((f) => f.tableSchema !== null)?.name ?? null;
+
   return (
     <div className="overflow-auto px-4 py-3" style={{ maxHeight: "calc(100vh - 200px)" }}>
       <SectionHeader title="VAST Storage" />
@@ -914,17 +922,49 @@ function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLook
       </dl>
 
       <SectionHeader title="DataEngine Jobs" />
-      {exrMeta?.found ? (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between px-3 py-2 rounded bg-[var(--color-ah-bg)] border border-green-500/30">
-            <span className="text-[11px] font-[var(--font-ah-mono)] text-[var(--color-ah-text)]">exr-metadata</span>
-            <span className="text-[10px] font-[var(--font-ah-mono)] text-green-400">done</span>
-          </div>
-        </div>
-      ) : (
+      {functions.length === 0 ? (
         <p className="text-[11px] text-[var(--color-ah-text-subtle)]">
-          No DataEngine results yet. EXR metadata will appear here once the exr-inspector function has processed this file.
+          This file kind is not processed by any DataEngine function.
         </p>
+      ) : (
+        <div className="space-y-2">
+          {functions.map((func) => {
+            // Proxy-only functions (oiio/video proxy generators) are green
+            // once the asset record carries a thumbnail — we don't yet have
+            // a readiness signal distinct from metadata so we mark those
+            // "ready" if the asset has a thumbnail, "pending" otherwise.
+            const hasThumb = Boolean(asset.thumbnail?.uri);
+            const ready = func.tableSchema === null ? hasThumb : metadataReady;
+            return (
+              <div
+                key={func.name}
+                className={`flex items-center justify-between px-3 py-2 rounded bg-[var(--color-ah-bg)] border ${ready ? "border-green-500/30" : "border-[var(--color-ah-border-muted)]"}`}
+              >
+                <div className="flex flex-col min-w-0">
+                  <span className="text-[11px] font-[var(--font-ah-mono)] text-[var(--color-ah-text)] truncate">
+                    {func.name}
+                  </span>
+                  <span className="text-[10px] text-[var(--color-ah-text-subtle)] truncate">
+                    {func.description}
+                  </span>
+                  {func.tableSchema && (
+                    <span className="text-[10px] font-[var(--font-ah-mono)] text-[var(--color-ah-text-subtle)] truncate">
+                      → {func.tableSchema}
+                    </span>
+                  )}
+                </div>
+                <span className={`text-[10px] font-[var(--font-ah-mono)] ml-2 shrink-0 ${ready ? "text-green-400" : "text-[var(--color-ah-text-subtle)]"}`}>
+                  {ready ? "done" : "pending"}
+                </span>
+              </div>
+            );
+          })}
+          {!metadataReady && metadataFunctionName && (
+            <p className="text-[11px] text-[var(--color-ah-text-subtle)] pt-1">
+              Metadata will appear here once {metadataFunctionName} has processed this file.
+            </p>
+          )}
+        </div>
       )}
 
       <SectionHeader title="Asset IDs" />
@@ -932,7 +972,7 @@ function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLook
         <MetaRow label="Asset ID" value={asset.id} copyable />
         {asset.jobId && <MetaRow label="Job ID" value={asset.jobId} copyable />}
         {exrMeta?.found && exrMeta.file?.file_id && (
-          <MetaRow label="EXR File ID" value={String(exrMeta.file.file_id)} copyable />
+          <MetaRow label="Metadata File ID" value={String(exrMeta.file.file_id)} copyable />
         )}
       </dl>
     </div>
@@ -1043,7 +1083,7 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
     });
   }, [asset.currentVersionId]);
 
-  // Fetch EXR metadata from exr-inspector tables (non-blocking background)
+  // Fetch rich per-frame metadata written by frame-metadata-extractor (non-blocking background)
   useEffect(() => {
     if (!asset.sourceUri) return;
     void fetchExrMetadataLookup(asset.sourceUri).then(setExrMeta);
