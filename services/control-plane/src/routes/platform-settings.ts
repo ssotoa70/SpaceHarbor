@@ -16,6 +16,12 @@ import { isValidApiKey, resolveValidApiKeys } from "../iam/auth-plugin.js";
 import { PERMISSIONS } from "../iam/types.js";
 import { getEffectivePermissions } from "../iam/permissions.js";
 import type { SettingsStore } from "../persistence/settings-store.js";
+import { sendError } from "../http/errors.js";
+import {
+  validatePipelineConfigList,
+  InvalidPipelineConfigError,
+  type DataEnginePipelineConfig,
+} from "../data-engine/pipeline-config.js";
 
 /**
  * Enforce admin:system_config permission when IAM is enabled, or require an API
@@ -146,6 +152,14 @@ export interface PlatformSettings {
     groupSearchFilter?: string;
     syncIntervalMinutes?: number;
   };
+  /**
+   * DataEngine pipeline routing table — one entry per file kind
+   * SpaceHarbor knows how to process. Admin-controlled. Empty array
+   * means no metadata extraction functions are configured and the
+   * Metadata tab falls back to "not processed by any function" for
+   * every asset. See `src/data-engine/pipeline-config.ts`.
+   */
+  dataEnginePipelines: DataEnginePipelineConfig[];
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +248,7 @@ interface OperationalSettings {
   };
   ldap: LdapConfigStored | null;
   scim: ScimConfigStored | null;
+  dataEnginePipelines: DataEnginePipelineConfig[];
 }
 
 const defaultOperationalSettings: OperationalSettings = {
@@ -243,6 +258,7 @@ const defaultOperationalSettings: OperationalSettings = {
   storage: { endpoints: [], nfsConnectors: [], smbConnectors: [] },
   ldap: null,
   scim: null,
+  dataEnginePipelines: [],
 };
 
 /** Module-level store. Loaded from SettingsStore on startup; persisted on write. */
@@ -260,6 +276,16 @@ function persistOperationalStore(): void {
 function loadOperationalStore(store: SettingsStore): void {
   const saved = store.get("platform.operational") as unknown as OperationalSettings | null;
   if (saved) {
+    // Re-validate persisted pipelines on load — if a previous version wrote
+    // malformed entries, we drop them rather than surfacing garbage to the
+    // rest of the system. The validator returns a normalized copy.
+    let loadedPipelines: DataEnginePipelineConfig[] = [];
+    try {
+      loadedPipelines = validatePipelineConfigList(saved.dataEnginePipelines ?? []);
+    } catch {
+      loadedPipelines = [];
+    }
+
     operationalStore = {
       // Clear deprecated fields (vmsVip, cnodeVips removed from UI)
       vastDatabase: { ...defaultOperationalSettings.vastDatabase, ...saved.vastDatabase, vmsVip: null, cnodeVips: null },
@@ -272,8 +298,19 @@ function loadOperationalStore(store: SettingsStore): void {
       },
       ldap: saved.ldap ?? null,
       scim: saved.scim ?? null,
+      dataEnginePipelines: loadedPipelines,
     };
   }
+}
+
+/**
+ * Get the configured DataEngine pipelines (discovery input).
+ * Returns an empty array when the admin has not configured any.
+ * Downstream discovery modules read this to decide which functions
+ * to look up by name in VAST.
+ */
+export function getDataEnginePipelines(): readonly DataEnginePipelineConfig[] {
+  return operationalStore.dataEnginePipelines;
 }
 
 /**
@@ -639,6 +676,7 @@ export async function registerPlatformSettingsRoutes(
                 syncIntervalMinutes: operationalStore.ldap.syncIntervalMinutes,
               }
             : { configured: false, enabled: false },
+          dataEnginePipelines: operationalStore.dataEnginePipelines,
         };
 
         return reply.send(settings);
@@ -778,6 +816,21 @@ export async function registerPlatformSettingsRoutes(
           });
         }
 
+        // Persist DataEngine pipeline routing table. The body field is
+        // authoritative — the admin replaces the entire list at once rather
+        // than patching individual entries, so downstream routes never see
+        // a transient partial state.
+        if (body["dataEnginePipelines"] !== undefined) {
+          try {
+            operationalStore.dataEnginePipelines = validatePipelineConfigList(body["dataEnginePipelines"]);
+          } catch (err) {
+            const msg = err instanceof InvalidPipelineConfigError
+              ? err.message
+              : "dataEnginePipelines validation failed";
+            return sendError(request, reply, 400, "INVALID_DATAENGINE_PIPELINES", msg);
+          }
+        }
+
         // Write all changes to persistent store
         persistOperationalStore();
 
@@ -861,6 +914,7 @@ export async function registerPlatformSettingsRoutes(
                 syncIntervalMinutes: operationalStore.ldap.syncIntervalMinutes,
               }
             : { configured: false, enabled: false },
+          dataEnginePipelines: operationalStore.dataEnginePipelines,
         };
 
         return reply.send(settings);

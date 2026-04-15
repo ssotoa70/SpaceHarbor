@@ -158,6 +158,39 @@ export const platformSettingsResponseSchema = {
         // bindPassword intentionally ABSENT (write-only)
       },
     },
+    dataEnginePipelines: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          fileKind: { type: "string", enum: ["image", "video", "raw_camera"] },
+          functionName: { type: "string" },
+          extensions: { type: "array", items: { type: "string" } },
+          targetSchema: { type: "string" },
+          targetTable: { type: "string" },
+          sidecarSchemaId: { type: "string" },
+          displayLabel: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
+const dataEnginePipelineConfigSchema = {
+  type: "object",
+  required: ["fileKind", "functionName", "extensions", "targetSchema", "targetTable", "sidecarSchemaId"],
+  properties: {
+    fileKind: { type: "string", enum: ["image", "video", "raw_camera"] },
+    functionName: { type: "string", minLength: 1, maxLength: 128 },
+    extensions: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string", pattern: "^\\.[a-zA-Z0-9]{1,16}$" },
+    },
+    targetSchema: { type: "string", minLength: 1 },
+    targetTable: { type: "string", minLength: 1 },
+    sidecarSchemaId: { type: "string", minLength: 1 },
+    displayLabel: { type: "string" },
   },
 } as const;
 
@@ -165,6 +198,7 @@ export const savePlatformSettingsBodySchema = {
   type: "object",
   additionalProperties: true,
   properties: {
+    dataEnginePipelines: { type: "array", items: dataEnginePipelineConfigSchema },
     vastDatabase: {
       type: "object",
       properties: {
