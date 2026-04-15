@@ -15,12 +15,13 @@ import { formatTC } from "../utils/timecode";
 import { formatFileSize, formatDuration, inferMediaType } from "../utils/media-types";
 import { dataEngineFunctionsForFilename } from "../utils/metadata-routing";
 import { useStorageSidecar } from "../hooks/useStorageSidecar";
+import { VideoMetadataRenderer, detectSchema } from "./metadata";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type TabId = "info" | "aovs" | "streams" | "vast" | "history";
+type TabId = "metadata" | "info" | "aovs" | "streams" | "vast" | "history";
 
 interface AssetDetailPanelProps {
   asset: AssetRow;
@@ -292,9 +293,15 @@ function FrameBar({ info }: { info: VersionDetailInfo | null }) {
 type TabDef = { id: TabId; label: string };
 
 function getTabsForMediaType(mediaType: string): TabDef[] {
-  const base: TabDef[] = [
-    { id: "info", label: "INFO" },
-  ];
+  const base: TabDef[] = [];
+  // "Metadata" is the primary view — rich sidecar payload from
+  // frame-metadata-extractor (images) or video-metadata-extractor (video/raw).
+  // Rendered only for media types whose extractor writes a sidecar; other
+  // kinds (audio, documents, 3D, etc.) skip this tab and start on INFO.
+  if (mediaType === "image" || mediaType === "video" || mediaType === "raw") {
+    base.push({ id: "metadata", label: "METADATA" });
+  }
+  base.push({ id: "info", label: "INFO" });
   if (mediaType === "image") {
     base.push({ id: "aovs", label: "AOVS" });
   } else if (mediaType === "video" || mediaType === "audio") {
@@ -330,6 +337,86 @@ function TabBar({ activeTab, onTabChange, tabs }: { activeTab: TabId; onTabChang
           >{tab.label}</button>
         );
       })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MetadataTab — primary rich view powered by the new /storage/metadata route.
+//
+// Reads the `_metadata.json` sidecar via the `useStorageSidecar` hook and
+// renders it with the schema-dispatched dynamic renderer. Falls back to a
+// clear empty state when the sidecar hasn't been written yet (e.g. images
+// where frame-metadata-extractor has not yet run on legacy uploads, or
+// freshly-ingested video before the pipeline finishes). Never touches the
+// asset record's metadata bag — that lives in InfoTab for back-compat.
+// ---------------------------------------------------------------------------
+
+export function MetadataTab({ asset }: { asset: AssetRow }) {
+  const { sidecar, loading, error } = useStorageSidecar(asset.sourceUri);
+  const functions = dataEngineFunctionsForFilename(asset.title);
+  const metadataFunction = functions.find((f) => f.tableSchema !== null);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-40 text-[11px] text-[var(--color-ah-text-subtle)]" data-testid="metadata-tab-loading">
+        Loading metadata...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-40 px-4 text-center" data-testid="metadata-tab-error">
+        <p className="text-[12px] font-semibold text-[var(--color-ah-danger)] mb-1">
+          Failed to load metadata ({error.status || "network"})
+        </p>
+        <p className="text-[11px] text-[var(--color-ah-text-subtle)]">
+          The /storage/metadata endpoint returned an error. Check the control-plane logs.
+        </p>
+      </div>
+    );
+  }
+
+  if (!sidecar) {
+    return (
+      <div className="flex flex-col items-center justify-center h-40 px-4 text-center" data-testid="metadata-tab-empty">
+        <p className="text-[12px] font-semibold text-[var(--color-ah-text)] mb-1">
+          No metadata yet
+        </p>
+        <p className="text-[11px] text-[var(--color-ah-text-subtle)] max-w-xs">
+          {metadataFunction
+            ? <>The <span className="font-[var(--font-ah-mono)]">{metadataFunction.name}</span> function has not yet written a sidecar for this file. It will appear here automatically once the pipeline runs.</>
+            : <>This file kind is not processed by any metadata function.</>}
+        </p>
+      </div>
+    );
+  }
+
+  // Schema-dispatched rendering. `video@1` renders directly; `frame@1` and
+  // `image-proxy@legacy` fall through to a pretty-printed raw view until
+  // their dedicated renderers land (FrameMetadataRenderer is a follow-up).
+  const schema = detectSchema(sidecar.data);
+  return (
+    <div className="overflow-auto px-4 py-3" style={{ maxHeight: "calc(100vh - 200px)" }} data-testid="metadata-tab">
+      <div className="text-[10px] font-[var(--font-ah-mono)] text-[var(--color-ah-text-subtle)] mb-2 flex items-center gap-2">
+        <span>schema:</span>
+        <span className="text-[var(--color-ah-text-muted)]">{schema}</span>
+        <span className="opacity-50">·</span>
+        <span>{sidecar.bytes} bytes</span>
+      </div>
+      {schema === "video@1" ? (
+        <VideoMetadataRenderer payload={sidecar.data} />
+      ) : (
+        <details open>
+          <summary className="cursor-pointer text-[11px] text-[var(--color-ah-text-muted)] mb-2">
+            Raw sidecar (dynamic renderer not yet available for {schema})
+          </summary>
+          <pre className="text-[10px] font-[var(--font-ah-mono)] text-[var(--color-ah-text-muted)] whitespace-pre-wrap break-words bg-[var(--color-ah-bg)] p-2 rounded border border-[var(--color-ah-border-muted)]">
+            {JSON.stringify(sidecar.data, null, 2)}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }
@@ -1067,7 +1154,7 @@ function StreamsTab({ asset }: { asset: AssetRow }) {
 
 export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("info");
+  const [activeTab, setActiveTab] = useState<TabId>("metadata");
   const [info, setInfo] = useState<VersionDetailInfo | null>(null);
   const [history, setHistory] = useState<VersionDetailHistoryEvent[] | null>(null);
   const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
@@ -1118,7 +1205,15 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
   const tabs = getTabsForMediaType(mediaType);
 
   // Reset on asset change
-  useEffect(() => { setInfo(null); setHistory(null); setExrMeta(null); setActiveTab("info"); }, [asset.id]);
+  useEffect(() => {
+    setInfo(null);
+    setHistory(null);
+    setExrMeta(null);
+    // Reset to the first available tab for this media type — "metadata"
+    // when supported, "info" otherwise.
+    const mt = inferMediaType(asset.title, asset.sourceUri);
+    setActiveTab(mt === "image" || mt === "video" || mt === "raw" ? "metadata" : "info");
+  }, [asset.id, asset.title, asset.sourceUri]);
 
   return (
     <div ref={panelRef} tabIndex={-1}
@@ -1142,6 +1237,7 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
       <TabBar activeTab={activeTab} onTabChange={setActiveTab} tabs={tabs} />
 
       <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`} className="flex-1 overflow-hidden">
+        {activeTab === "metadata" && <MetadataTab asset={asset} />}
         {activeTab === "info" && <InfoTab info={loadingInfo ? null : info} asset={asset} exrMeta={exrMeta} onAdvanced={onAdvanced} />}
         {activeTab === "streams" && <StreamsTab asset={asset} />}
         {activeTab === "history" && <HistoryTab events={loadingHistory ? null : history} />}
