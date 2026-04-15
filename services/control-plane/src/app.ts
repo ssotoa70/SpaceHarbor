@@ -48,6 +48,7 @@ import { registerShotRoutes } from "./routes/shots.js";
 import { registerDeliveryRoutes } from "./routes/delivery.js";
 import { registerNavBadgeRoutes } from "./routes/nav-badges.js";
 import { registerStorageBrowseRoutes } from "./routes/storage-browse.js";
+import { registerStorageMetadataRoutes } from "./routes/storage-metadata.js";
 import { registerExrMetadataRoutes } from "./routes/exr-metadata.js";
 import { registerVideoMetadataRoutes } from "./routes/video-metadata.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
@@ -374,6 +375,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // S3 storage browse — direct file discovery without Trino
     void registerStorageBrowseRoutes(app, prefixes);
+
+    // S3 single-file sidecar reader — powers dynamic metadata panel in web-ui
+    void registerStorageMetadataRoutes(app, prefixes);
 
     // DataEngine function catalogue + pipeline listing
     void registerDataEngineRoutes(app, functionRegistry, prefixes);
