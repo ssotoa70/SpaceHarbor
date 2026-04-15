@@ -2681,6 +2681,73 @@ export async function fetchStorageMetadata(
   return (await response.json()) as StorageMetadataResponse;
 }
 
+// ---------------------------------------------------------------------------
+// DataEngine pipelines — live discovery via /dataengine/pipelines/active.
+// Authoritative source for "which DataEngine metadata function processes
+// which file kind, which DB schema/table it writes to, and what sidecar
+// schema id identifies its payload envelope".
+//
+// Shape mirrors the control-plane's DiscoveredPipeline interface. The
+// web-ui treats `live` as optional enrichment — `config` is always
+// present and is enough to render labels. When VAST is unreachable or
+// the function name doesn't exist, the entry is still returned with a
+// `status` flag and the UI degrades gracefully.
+// ---------------------------------------------------------------------------
+
+export type PipelineFileKind = "image" | "video" | "raw_camera";
+
+export interface DataEnginePipelineConfig {
+  fileKind: PipelineFileKind;
+  functionName: string;
+  extensions: string[];
+  targetSchema: string;
+  targetTable: string;
+  sidecarSchemaId: string;
+  displayLabel?: string;
+}
+
+export interface LiveFunctionRecord {
+  guid: string;
+  name: string;
+  description: string;
+  owner: { id?: string; name?: string } | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  vrn: string | null;
+  lastRevisionNumber: number | null;
+}
+
+export type DiscoveredPipelineStatus = "ok" | "function-not-found" | "vast-unreachable";
+
+export interface DiscoveredPipeline {
+  config: DataEnginePipelineConfig;
+  live: LiveFunctionRecord | null;
+  status: DiscoveredPipelineStatus;
+  statusDetail?: string;
+}
+
+export interface DataEnginePipelinesResponse {
+  pipelines: DiscoveredPipeline[];
+}
+
+export async function fetchActiveDataEnginePipelines(
+  options: { force?: boolean; signal?: AbortSignal } = {},
+): Promise<DataEnginePipelinesResponse> {
+  const query = options.force ? "?force=true" : "";
+  const url = `${API_BASE_URL}/api/v1/dataengine/pipelines/active${query}`;
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: withAuth(), signal: options.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiRequestError(0, `network error: ${String(err)}`);
+  }
+  if (!response.ok) {
+    throw new ApiRequestError(response.status);
+  }
+  return (await response.json()) as DataEnginePipelinesResponse;
+}
+
 export async function fetchExrMetadataStats(): Promise<ExrMetadataStats | null> {
   try {
     const response = await fetch(
