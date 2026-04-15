@@ -1,0 +1,29 @@
+[
+  {
+    "fileKind": "image",
+    "functionName": "frame-metadata-extractor",
+    "extensions": [".exr", ".dpx", ".cin", ".tif", ".tiff", ".png", ".tga", ".hdr", ".rgbe", ".jp2", ".j2c", ".j2k"],
+    "targetSchema": "frame_metadata",
+    "targetTable": "files",
+    "sidecarSchemaId": "frame@1",
+    "displayLabel": "Frame Metadata"
+  },
+  {
+    "fileKind": "video",
+    "functionName": "video-metadata-extractor",
+    "extensions": [".mp4", ".mov", ".mxf", ".avi", ".mkv", ".m4v", ".webm", ".m2ts"],
+    "targetSchema": "video_metadata",
+    "targetTable": "files",
+    "sidecarSchemaId": "video@1",
+    "displayLabel": "Video Metadata"
+  },
+  {
+    "fileKind": "raw_camera",
+    "functionName": "video-metadata-extractor",
+    "extensions": [".r3d", ".braw"],
+    "targetSchema": "video_metadata",
+    "targetTable": "files",
+    "sidecarSchemaId": "video@1",
+    "displayLabel": "Raw Camera Metadata"
+  }
+]

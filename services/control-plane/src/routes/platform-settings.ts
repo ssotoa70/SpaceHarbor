@@ -22,6 +22,7 @@ import {
   InvalidPipelineConfigError,
   type DataEnginePipelineConfig,
 } from "../data-engine/pipeline-config.js";
+import { planSeed, FileSeedLoader, type SeedLoader } from "../data-engine/pipeline-seed.js";
 
 /**
  * Enforce admin:system_config permission when IAM is enabled, or require an API
@@ -249,6 +250,12 @@ interface OperationalSettings {
   ldap: LdapConfigStored | null;
   scim: ScimConfigStored | null;
   dataEnginePipelines: DataEnginePipelineConfig[];
+  /**
+   * Sentinel: true once the first-boot seed has successfully run.
+   * Prevents re-seeding after an admin has cleared the pipeline list
+   * via the Settings UI. Never returned in GET responses.
+   */
+  dataEnginePipelinesSeeded: boolean;
 }
 
 const defaultOperationalSettings: OperationalSettings = {
@@ -259,6 +266,7 @@ const defaultOperationalSettings: OperationalSettings = {
   ldap: null,
   scim: null,
   dataEnginePipelines: [],
+  dataEnginePipelinesSeeded: false,
 };
 
 /** Module-level store. Loaded from SettingsStore on startup; persisted on write. */
@@ -299,7 +307,56 @@ function loadOperationalStore(store: SettingsStore): void {
       ldap: saved.ldap ?? null,
       scim: saved.scim ?? null,
       dataEnginePipelines: loadedPipelines,
+      dataEnginePipelinesSeeded: saved.dataEnginePipelinesSeeded === true,
     };
+  }
+}
+
+/**
+ * Run the first-boot seed for `dataEnginePipelines` if needed. Called
+ * once during bootstrap after `loadOperationalStore`. The seed loader
+ * is injectable so tests can supply an in-memory loader without touching
+ * disk. Fastify's logger is passed in so reasons surface in the same
+ * structured log stream as the rest of the bootstrap output — this
+ * module does not own a logger.
+ */
+export function bootstrapDataEnginePipelinesSeed(
+  loader: SeedLoader = new FileSeedLoader(),
+  log?: { info: (msg: string, ctx?: Record<string, unknown>) => void; warn: (msg: string, ctx?: Record<string, unknown>) => void },
+): { action: string; reason?: string } {
+  const outcome = planSeed({
+    current: operationalStore.dataEnginePipelines,
+    alreadySeeded: operationalStore.dataEnginePipelinesSeeded,
+    loader,
+  });
+
+  switch (outcome.action) {
+    case "seeded": {
+      operationalStore.dataEnginePipelines = [...outcome.pipelines];
+      operationalStore.dataEnginePipelinesSeeded = true;
+      persistOperationalStore();
+      log?.info(
+        `DataEngine pipelines seeded (${outcome.pipelines.length} entries) from default-pipelines.json`,
+      );
+      return { action: "seeded" };
+    }
+    case "skipped": {
+      // Belt-and-suspenders: if the list is non-empty but the sentinel is
+      // false (legacy data), set the sentinel so this code path never runs
+      // again. No log needed for "already-seeded" — it's the common case.
+      if (outcome.reason === "nonempty-without-sentinel") {
+        operationalStore.dataEnginePipelinesSeeded = true;
+        persistOperationalStore();
+        log?.info(
+          "DataEngine pipelines already configured — marking sentinel to skip future seeds",
+        );
+      }
+      return { action: "skipped", reason: outcome.reason };
+    }
+    case "failed": {
+      log?.warn(`DataEngine pipelines seed failed: ${outcome.reason}`);
+      return { action: "failed", reason: outcome.reason };
+    }
   }
 }
 
@@ -311,6 +368,23 @@ function loadOperationalStore(store: SettingsStore): void {
  */
 export function getDataEnginePipelines(): readonly DataEnginePipelineConfig[] {
   return operationalStore.dataEnginePipelines;
+}
+
+/**
+ * Test-only helper — inject a fresh SettingsStore and reload the
+ * operational store from it. Mirrors what `registerPlatformSettingsRoutes`
+ * does for the store handling, but without loading the full fastify
+ * app. Used by seed bootstrap tests to set up isolated state per test.
+ */
+export function __setSettingsStoreForTests(store: SettingsStore): void {
+  settingsStoreRef = store;
+  // Reset to defaults so a fresh store yields fresh in-memory state,
+  // then layer anything persisted in the store on top.
+  operationalStore = {
+    ...defaultOperationalSettings,
+    storage: { ...defaultOperationalSettings.storage },
+  };
+  loadOperationalStore(store);
 }
 
 /**
@@ -497,6 +571,12 @@ export async function registerPlatformSettingsRoutes(
     loadOperationalStore(store);
     const iamOverrides = store.get("platform.iam") as Partial<IamFeatureFlags> | null;
     if (iamOverrides) setIamRuntimeOverrides(iamOverrides);
+
+    // First-boot seed for DataEngine pipeline routing table. Runs exactly
+    // once per install via the sentinel in operational settings. Failures
+    // are logged but never block startup — the admin can still configure
+    // pipelines manually via PUT /platform/settings.
+    bootstrapDataEnginePipelinesSeed(new FileSeedLoader(), app.log);
   }
 
   for (const prefix of prefixes) {
