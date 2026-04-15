@@ -13,8 +13,11 @@ import {
 import type { AssetRow } from "../types";
 import { formatTC } from "../utils/timecode";
 import { formatFileSize, formatDuration, inferMediaType } from "../utils/media-types";
-import { dataEngineFunctionsForFilename } from "../utils/metadata-routing";
 import { useStorageSidecar } from "../hooks/useStorageSidecar";
+import {
+  useDataEnginePipelines,
+  findPipelineForFilename,
+} from "../hooks/useDataEnginePipelines";
 import { VideoMetadataRenderer, detectSchema } from "./metadata";
 
 // ---------------------------------------------------------------------------
@@ -354,8 +357,11 @@ function TabBar({ activeTab, onTabChange, tabs }: { activeTab: TabId; onTabChang
 
 export function MetadataTab({ asset }: { asset: AssetRow }) {
   const { sidecar, loading, error } = useStorageSidecar(asset.sourceUri);
-  const functions = dataEngineFunctionsForFilename(asset.title);
-  const metadataFunction = functions.find((f) => f.tableSchema !== null);
+  // Live discovered pipelines replace the old hardcoded DataEngine function
+  // table. Falls back to "no pipeline configured" when the hook is still
+  // loading or when the admin hasn't configured this file kind in Settings.
+  const { pipelines } = useDataEnginePipelines();
+  const matchedPipeline = findPipelineForFilename(pipelines, asset.title);
 
   if (loading) {
     return (
@@ -385,9 +391,9 @@ export function MetadataTab({ asset }: { asset: AssetRow }) {
           No metadata yet
         </p>
         <p className="text-[11px] text-[var(--color-ah-text-subtle)] max-w-xs">
-          {metadataFunction
-            ? <>The <span className="font-[var(--font-ah-mono)]">{metadataFunction.name}</span> function has not yet written a sidecar for this file. It will appear here automatically once the pipeline runs.</>
-            : <>This file kind is not processed by any metadata function.</>}
+          {matchedPipeline
+            ? <>The <span className="font-[var(--font-ah-mono)]">{matchedPipeline.config.functionName}</span> function has not yet written a sidecar for this file. It will appear here automatically once the pipeline runs.</>
+            : <>This file kind is not processed by any configured DataEngine pipeline.</>}
         </p>
       </div>
     );
@@ -990,19 +996,21 @@ function attrDisplayValue(attr: ExrAttributeMetadata): string {
 // ---------------------------------------------------------------------------
 
 function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLookupResult | null }) {
-  const functions = dataEngineFunctionsForFilename(asset.title);
-  // File-kind-agnostic readiness signal. The hook reads the `_metadata.json`
-  // sidecar via the control-plane `/storage/metadata` route. Any pipeline
-  // (frame-metadata-extractor for images, video-metadata-extractor for video
-  // and raw camera) becomes "ready" when its sidecar exists. `exrMeta?.found`
-  // is kept as a fallback for legacy EXR pages where the VastDB lookup ran
-  // without the sidecar hook — the hook short-circuits on cache hit so this
-  // is free when both are present.
+  // Live discovered pipelines — zero hardcoded function names, schemas,
+  // or tables. The admin controls which functions handle which file
+  // kinds via PlatformSettings, and the control-plane merges that with
+  // live VAST function records (description, owner, status) via the
+  // /dataengine/pipelines/active endpoint.
+  const { pipelines, loading: pipelinesLoading } = useDataEnginePipelines();
+  const matchedPipeline = findPipelineForFilename(pipelines, asset.title);
+
+  // File-kind-agnostic readiness signal from the actual sidecar on S3.
+  // `exrMeta?.found` is kept as a fallback for legacy EXR pages where the
+  // old VastDB lookup path ran without the sidecar hook.
   const { sidecar, loading: sidecarLoading } = useStorageSidecar(asset.sourceUri);
   const sidecarReady = sidecar !== null;
   const legacyExrReady = exrMeta?.found === true;
   const metadataReady = sidecarReady || legacyExrReady;
-  const metadataFunctionName = functions.find((f) => f.tableSchema !== null)?.name ?? null;
 
   return (
     <div className="overflow-auto px-4 py-3" style={{ maxHeight: "calc(100vh - 200px)" }}>
@@ -1016,49 +1024,45 @@ function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLook
         )}
       </dl>
 
-      <SectionHeader title="DataEngine Jobs" />
-      {functions.length === 0 ? (
+      <SectionHeader title="DataEngine Pipeline" />
+      {pipelinesLoading && !matchedPipeline ? (
+        <p className="text-[11px] text-[var(--color-ah-text-subtle)]">Loading pipeline config...</p>
+      ) : !matchedPipeline ? (
         <p className="text-[11px] text-[var(--color-ah-text-subtle)]">
-          This file kind is not processed by any DataEngine function.
+          This file kind is not processed by any configured DataEngine pipeline.
         </p>
       ) : (
         <div className="space-y-2">
-          {functions.map((func) => {
-            // Proxy-only functions (oiio/video proxy generators) are green
-            // once the asset record carries a thumbnail — we don't yet have
-            // a readiness signal distinct from metadata so we mark those
-            // "ready" if the asset has a thumbnail, "pending" otherwise.
-            const hasThumb = Boolean(asset.thumbnail?.uri);
-            const ready = func.tableSchema === null ? hasThumb : metadataReady;
-            return (
-              <div
-                key={func.name}
-                className={`flex items-center justify-between px-3 py-2 rounded bg-[var(--color-ah-bg)] border ${ready ? "border-green-500/30" : "border-[var(--color-ah-border-muted)]"}`}
-              >
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[11px] font-[var(--font-ah-mono)] text-[var(--color-ah-text)] truncate">
-                    {func.name}
-                  </span>
-                  <span className="text-[10px] text-[var(--color-ah-text-subtle)] truncate">
-                    {func.description}
-                  </span>
-                  {func.tableSchema && (
-                    <span className="text-[10px] font-[var(--font-ah-mono)] text-[var(--color-ah-text-subtle)] truncate">
-                      → {func.tableSchema}
-                    </span>
-                  )}
-                </div>
-                <span className={`text-[10px] font-[var(--font-ah-mono)] ml-2 shrink-0 ${ready ? "text-green-400" : "text-[var(--color-ah-text-subtle)]"}`}>
-                  {ready ? "done" : "pending"}
+          <div
+            className={`flex items-center justify-between px-3 py-2 rounded bg-[var(--color-ah-bg)] border ${metadataReady ? "border-green-500/30" : "border-[var(--color-ah-border-muted)]"}`}
+          >
+            <div className="flex flex-col min-w-0">
+              <span className="text-[11px] font-[var(--font-ah-mono)] text-[var(--color-ah-text)] truncate">
+                {matchedPipeline.config.functionName}
+              </span>
+              {matchedPipeline.live?.description && (
+                <span className="text-[10px] text-[var(--color-ah-text-subtle)] truncate">
+                  {matchedPipeline.live.description}
                 </span>
-              </div>
-            );
-          })}
-          {!metadataReady && metadataFunctionName && (
+              )}
+              <span className="text-[10px] font-[var(--font-ah-mono)] text-[var(--color-ah-text-subtle)] truncate">
+                → {matchedPipeline.config.targetSchema}.{matchedPipeline.config.targetTable}
+              </span>
+              {matchedPipeline.status !== "ok" && (
+                <span className="text-[10px] text-[var(--color-ah-warning,#f59e0b)] truncate">
+                  VAST: {matchedPipeline.status}{matchedPipeline.statusDetail ? ` — ${matchedPipeline.statusDetail}` : ""}
+                </span>
+              )}
+            </div>
+            <span className={`text-[10px] font-[var(--font-ah-mono)] ml-2 shrink-0 ${metadataReady ? "text-green-400" : "text-[var(--color-ah-text-subtle)]"}`}>
+              {metadataReady ? "done" : "pending"}
+            </span>
+          </div>
+          {!metadataReady && (
             <p className="text-[11px] text-[var(--color-ah-text-subtle)] pt-1">
               {sidecarLoading
-                ? `Checking ${metadataFunctionName} output...`
-                : `Metadata will appear here once ${metadataFunctionName} has processed this file.`}
+                ? `Checking ${matchedPipeline.config.functionName} output...`
+                : `Metadata will appear here once ${matchedPipeline.config.functionName} has processed this file.`}
             </p>
           )}
         </div>

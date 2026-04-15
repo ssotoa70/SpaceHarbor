@@ -3,8 +3,44 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../api";
 import { __resetSidecarCacheForTests } from "../hooks/useStorageSidecar";
+import { __resetPipelineCacheForTests } from "../hooks/useDataEnginePipelines";
 import { MetadataTab } from "./AssetDetailPanel";
 import type { AssetRow } from "../types";
+
+/** Matching the seed values for the live cluster — used by every test
+ *  that exercises the empty-state copy which names the responsible
+ *  function. The MetadataTab uses `findPipelineForFilename` against
+ *  this list to decide which function name to show. */
+const frameDiscovered: api.DiscoveredPipeline = {
+  config: {
+    fileKind: "image",
+    functionName: "frame-metadata-extractor",
+    extensions: [".exr", ".dpx", ".tif", ".tiff", ".png"],
+    targetSchema: "frame_metadata",
+    targetTable: "files",
+    sidecarSchemaId: "frame@1",
+  },
+  live: null,
+  status: "vast-unreachable",
+};
+const videoDiscovered: api.DiscoveredPipeline = {
+  config: {
+    fileKind: "video",
+    functionName: "video-metadata-extractor",
+    extensions: [".mp4", ".mov", ".mxf"],
+    targetSchema: "video_metadata",
+    targetTable: "files",
+    sidecarSchemaId: "video@1",
+  },
+  live: null,
+  status: "vast-unreachable",
+};
+
+function stubPipelinesApi() {
+  vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+    pipelines: [frameDiscovered, videoDiscovered],
+  });
+}
 
 const videoAsset: AssetRow = {
   id: "asset-video",
@@ -63,6 +99,8 @@ function videoSidecarResponse(): api.StorageMetadataResponse {
 describe("MetadataTab", () => {
   beforeEach(() => {
     __resetSidecarCacheForTests();
+    __resetPipelineCacheForTests();
+    stubPipelinesApi();
   });
 
   afterEach(() => {
@@ -97,13 +135,16 @@ describe("MetadataTab", () => {
     expect(screen.getByText(/video-metadata-extractor/)).toBeInTheDocument();
   });
 
-  it("shows 'not processed by any metadata function' for audio files", async () => {
+  it("shows 'not processed by any configured pipeline' for audio files", async () => {
     const spy = vi.spyOn(api, "fetchStorageMetadata").mockResolvedValue(null);
     render(<MetadataTab asset={audioAsset} />);
-    // audio is ineligible — hook shouldn't fetch
+    // audio is ineligible — sidecar hook shouldn't fetch
     expect(spy).not.toHaveBeenCalled();
-    expect(screen.getByTestId("metadata-tab-empty")).toBeInTheDocument();
-    expect(screen.getByText(/not processed by any metadata function/i)).toBeInTheDocument();
+    // Wait for the pipelines fetch to resolve so the empty state reflects
+    // the "no matching pipeline" path (not the initial loading path)
+    await waitFor(() =>
+      expect(screen.getByText(/not processed by any configured DataEngine pipeline/i)).toBeInTheDocument(),
+    );
   });
 
   it("renders an error state when the API throws", async () => {
