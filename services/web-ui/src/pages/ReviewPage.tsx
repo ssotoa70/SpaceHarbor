@@ -13,6 +13,7 @@ import {
 import type { ReviewCommentData } from "../api";
 import { Badge, Button, Card } from "../design-system";
 import { AssetMetadataPanel } from "../components/AssetMetadataPanel";
+import { useStorageSidecar } from "../hooks/useStorageSidecar";
 import { CloseIcon } from "../components/CloseIcon";
 import { ProvenancePanel } from "../components/ProvenancePanel";
 import { MediaTypeIcon } from "../components/MediaTypeIcon";
@@ -26,6 +27,26 @@ import type { AssetRow, RejectedAssetRow } from "../types";
 export type ReviewDecision = "approve" | "reject" | "hold";
 
 type ReviewTab = "queue" | "feedback";
+
+/**
+ * Metadata side panel wrapper — mounts a single hook call so the panel
+ * and its provenance block only render when an asset is selected, while
+ * still following the "hooks at top level" rule.
+ */
+function SelectedAssetSidePanel({ asset }: { asset: AssetRow }) {
+  const { sidecar } = useStorageSidecar(asset.sourceUri);
+  return (
+    <div className="h-full overflow-auto p-3" data-testid="review-asset-side-panel">
+      <h3 className="text-sm font-semibold mb-2 truncate">{asset.title}</h3>
+      <AssetMetadataPanel asset={asset} variant="panel" sidecar={sidecar?.data} />
+      <ProvenancePanel
+        versionId={asset.version?.parent_version_id ?? asset.id}
+        createdAt={asset.createdAt}
+        variant="card"
+      />
+    </div>
+  );
+}
 
 /** Resolve the best playback URI: prefer proxy, fall back to sourceUri for HTTP assets */
 function resolvePlaybackUri(asset: AssetRow | null): string | null {
@@ -545,15 +566,7 @@ export function ReviewPage() {
         {/* ── Right: AssetMetadataPanel (320px) ── */}
         <div className="w-80 shrink-0 border-l border-[var(--color-ah-border-muted)] overflow-hidden">
           {selected ? (
-            <div className="h-full overflow-auto p-3">
-              <h3 className="text-sm font-semibold mb-2 truncate">{selected.title}</h3>
-              <AssetMetadataPanel asset={selected} variant="panel" />
-              <ProvenancePanel
-                versionId={selected.version?.parent_version_id ?? selected.id}
-                createdAt={selected.createdAt}
-                variant="card"
-              />
-            </div>
+            <SelectedAssetSidePanel asset={selected} />
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-[var(--color-ah-text-subtle)]">
               No asset selected

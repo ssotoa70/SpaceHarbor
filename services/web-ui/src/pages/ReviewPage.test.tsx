@@ -2,8 +2,19 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { ReviewPage } from "./ReviewPage";
+import { __resetSidecarCacheForTests } from "../hooks/useStorageSidecar";
 
-vi.mock("../api", () => ({
+vi.mock("../api", () => {
+  const ApiRequestError = class extends Error {
+    readonly status: number;
+    constructor(status: number, message?: string) {
+      super(message ?? `request failed: ${status}`);
+      this.name = "ApiRequestError";
+      this.status = status;
+    }
+  };
+  return ({
+    ApiRequestError,
   fetchApprovalQueue: vi.fn().mockResolvedValue({
     assets: [
       { id: "a1", title: "shot_010_v003.exr", status: "qc_pending", sourceUri: "/review/shot010.mov", jobId: "j1" },
@@ -18,7 +29,9 @@ vi.mock("../api", () => ({
   fetchFrameComments: vi.fn().mockResolvedValue([]),
   createFrameComment: vi.fn().mockResolvedValue({ id: "c1", body: "test", status: "open", authorId: "user", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), sessionId: null, submissionId: null, versionId: null, parentCommentId: null, authorRole: null, frameNumber: 0, timecode: "00:00:00:00", annotationType: null }),
   resolveFrameComment: vi.fn().mockResolvedValue(null),
-}));
+  fetchStorageMetadata: vi.fn().mockResolvedValue(null),
+  });
+});
 
 vi.mock("../components/ReviewPlayer", () => ({
   ReviewPlayer: ({ src, title }: { src: string | null; title: string }) => (
@@ -45,6 +58,7 @@ vi.mock("../contexts/PlaybackContext", () => ({
 describe("ReviewPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetSidecarCacheForTests();
   });
 
   it("renders three-panel layout with queue sidebar", () => {
@@ -157,5 +171,16 @@ describe("ReviewPage", () => {
     expect(screen.getByText("File Info")).toBeInTheDocument();
     expect(screen.getByText("Production Info")).toBeInTheDocument();
     expect(screen.getByText("Pipeline Info")).toBeInTheDocument();
+  });
+
+  it("invokes fetchStorageMetadata with the selected asset's sourceUri", async () => {
+    const apiModule = await import("../api");
+    const mock = vi.mocked(apiModule.fetchStorageMetadata);
+    mock.mockClear();
+    render(<ReviewPage />);
+    const items = await screen.findAllByText("shot_010_v003.exr");
+    fireEvent.click(items[0]);
+    await screen.findByTestId("review-asset-side-panel");
+    expect(mock).toHaveBeenCalledWith("/review/shot010.mov");
   });
 });

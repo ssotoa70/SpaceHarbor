@@ -2629,6 +2629,58 @@ export async function fetchVideoMetadataLookup(path: string): Promise<VideoMetad
   }
 }
 
+// ---------------------------------------------------------------------------
+// Storage metadata lookup — reads the _metadata.json sidecar from S3 via the
+// control-plane route. Schema-agnostic: the response envelope exposes the
+// raw sidecar object under `data`, and the dynamic metadata renderer on the
+// component side decides how to display each field.
+//
+// 404 (sidecar not yet written) and 415 (file kind has no extractor) are
+// NOT exceptional — they return `null` so callers can render an empty state
+// without try/catch boilerplate. 5xx and network errors throw ApiRequestError.
+// ---------------------------------------------------------------------------
+
+export type StorageSidecarFileKind = "image" | "video" | "raw_camera";
+
+export interface StorageMetadataResponse {
+  schema_version: string | number | null;
+  file_kind: StorageSidecarFileKind;
+  source_uri: string;
+  sidecar_key: string;
+  bucket: string;
+  bytes: number;
+  data: Record<string, unknown>;
+}
+
+export interface FetchStorageMetadataOptions {
+  signal?: AbortSignal;
+}
+
+export async function fetchStorageMetadata(
+  sourceUri: string,
+  options: FetchStorageMetadataOptions = {},
+): Promise<StorageMetadataResponse | null> {
+  if (!sourceUri) return null;
+  const url = `${API_BASE_URL}/api/v1/storage/metadata?sourceUri=${encodeURIComponent(sourceUri)}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: withAuth(),
+      signal: options.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiRequestError(0, `network error: ${String(err)}`);
+  }
+  if (response.status === 404 || response.status === 415 || response.status === 400) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new ApiRequestError(response.status);
+  }
+  return (await response.json()) as StorageMetadataResponse;
+}
+
 export async function fetchExrMetadataStats(): Promise<ExrMetadataStats | null> {
   try {
     const response = await fetch(
