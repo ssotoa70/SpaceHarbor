@@ -1,14 +1,24 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { Badge } from "../design-system";
 import { extractVastPath, formatFileSize } from "../utils/media-types";
+import { metadataKindForFilename } from "../utils/metadata-routing";
 import { formatTC } from "../utils/timecode";
 import type { AssetRow } from "../types";
+
+import { detectSchema, VideoMetadataRenderer } from "./metadata";
 
 interface AssetMetadataPanelProps {
   asset: AssetRow;
   /** Render as a collapsible bottom section (for MediaPreview) vs. full panel */
   variant?: "panel" | "inline";
+  /**
+   * Raw sidecar payload from the metadata extractor, when available.
+   * When provided AND the detected schema is video@1, the dynamic
+   * `VideoMetadataRenderer` replaces the hardcoded File Info section.
+   * The current image-proxy rendering remains for image files.
+   */
+  sidecar?: unknown;
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -56,10 +66,17 @@ const statusVariant = (s: string) => {
   return "warning" as const;
 };
 
-export function AssetMetadataPanel({ asset, variant = "panel" }: AssetMetadataPanelProps) {
+export function AssetMetadataPanel({ asset, variant = "panel", sidecar }: AssetMetadataPanelProps) {
   const vastPath = extractVastPath(asset.sourceUri);
   const meta = asset.metadata;
   const prod = asset.productionMetadata;
+
+  const metadataKind = useMemo(
+    () => metadataKindForFilename(asset.title || asset.sourceUri),
+    [asset.title, asset.sourceUri],
+  );
+  const sidecarSchema = useMemo(() => detectSchema(sidecar), [sidecar]);
+  const renderDynamicVideo = metadataKind === "video" && sidecarSchema === "video@1";
 
   const resolution = meta?.resolution
     ? `${meta.resolution.width} x ${meta.resolution.height}`
@@ -79,7 +96,13 @@ export function AssetMetadataPanel({ asset, variant = "panel" }: AssetMetadataPa
 
   return (
     <div className={containerClass} data-testid="asset-metadata-panel">
-      {/* ── File Info ── */}
+      {renderDynamicVideo ? (
+        <div data-testid="asset-metadata-panel-video-dynamic">
+          <VideoMetadataRenderer payload={sidecar} />
+        </div>
+      ) : null}
+      {/* ── File Info (image / legacy path) ── */}
+      {!renderDynamicVideo && (
       <details open className="group">
         <summary className="flex items-center gap-2 cursor-pointer py-2 px-1 text-xs font-medium text-[var(--color-ah-text-muted)] tracking-wide uppercase select-none hover:text-[var(--color-ah-text)]">
           <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0 transition-transform group-open:rotate-90">
@@ -115,6 +138,7 @@ export function AssetMetadataPanel({ asset, variant = "panel" }: AssetMetadataPa
           <MetaRow label="Created" value={asset.createdAt ? new Date(asset.createdAt).toLocaleString() : undefined} />
         </dl>
       </details>
+      )}
 
       {/* ── Production Info ── */}
       <details open className="group">
