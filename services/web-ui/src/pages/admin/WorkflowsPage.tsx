@@ -6,7 +6,8 @@
  * + the ability to start a new instance and transition one (approval,
  * cancel).
  *
- * DSL is edited as raw JSON. A React Flow canvas editor lands in Phase 5.
+ * DSL editor: tab-toggle between Canvas (React Flow) and JSON. Both views
+ * write to the same parsed DSL; switching preserves edits.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card } from "../../design-system";
@@ -15,6 +16,8 @@ import {
   listWorkflowInstances, startWorkflow, getWorkflowInstance, transitionWorkflowInstance, cancelWorkflowInstance,
   type WorkflowDefinition, type WorkflowInstance, type WorkflowDsl, type WorkflowTransition,
 } from "../../api";
+import { WorkflowCanvas } from "../../components/workflow/WorkflowCanvas";
+import { validateDsl as validateDslClient } from "../../components/workflow/dsl-mapper";
 
 const EXAMPLE_DSL: WorkflowDsl = {
   nodes: [
@@ -353,31 +356,71 @@ function DefinitionDialog({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const initialDsl: WorkflowDsl = existing?.dslJson
+    ? (JSON.parse(existing.dslJson) as WorkflowDsl)
+    : EXAMPLE_DSL;
+
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
-  const [dslJson, setDslJson] = useState(
-    existing?.dslJson
-      ? JSON.stringify(JSON.parse(existing.dslJson), null, 2)
-      : JSON.stringify(EXAMPLE_DSL, null, 2),
-  );
+  const [view, setView] = useState<"canvas" | "json">("canvas");
+  const [dsl, setDsl] = useState<WorkflowDsl>(initialDsl);
+  const [dslJson, setDslJson] = useState(JSON.stringify(initialDsl, null, 2));
+  const [jsonParseError, setJsonParseError] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const parsedDsl = useMemo(() => {
-    try { return JSON.parse(dslJson) as WorkflowDsl; } catch { return undefined; }
-  }, [dslJson]);
+  // Canvas mutates `dsl` directly; switching to JSON view re-renders the
+  // textarea content from the latest dsl. Switching back from JSON parses
+  // the text into dsl (or surfaces a parse error and blocks switching).
+  const switchToCanvas = useCallback(() => {
+    if (view === "canvas") return;
+    try {
+      const parsed = JSON.parse(dslJson) as WorkflowDsl;
+      setDsl(parsed);
+      setJsonParseError(null);
+      setView("canvas");
+    } catch (e) {
+      setJsonParseError(e instanceof Error ? e.message : "Invalid JSON");
+    }
+  }, [view, dslJson]);
 
-  const canSubmit = name.trim().length > 0 && parsedDsl !== undefined;
+  const switchToJson = useCallback(() => {
+    if (view === "json") return;
+    setDslJson(JSON.stringify(dsl, null, 2));
+    setJsonParseError(null);
+    setView("json");
+  }, [view, dsl]);
+
+  const handleCanvasChange = useCallback((next: WorkflowDsl) => {
+    setDsl(next);
+  }, []);
+
+  const handleJsonChange = useCallback((text: string) => {
+    setDslJson(text);
+    try {
+      const parsed = JSON.parse(text) as WorkflowDsl;
+      setDsl(parsed);
+      setJsonParseError(null);
+    } catch (e) {
+      setJsonParseError(e instanceof Error ? e.message : "Invalid JSON");
+    }
+  }, []);
+
+  const validation = useMemo(() => validateDslClient(dsl), [dsl]);
+
+  const canSubmit =
+    name.trim().length > 0 &&
+    jsonParseError === null &&
+    validation.ok;
 
   const handleSubmit = useCallback(async () => {
-    if (!parsedDsl) return;
     setSubmitting(true); setError(null);
     try {
       if (mode === "create") {
-        await createWorkflow({ name: name.trim(), description: description.trim() || undefined, dsl: parsedDsl, enabled });
+        await createWorkflow({ name: name.trim(), description: description.trim() || undefined, dsl, enabled });
       } else if (existing) {
-        await updateWorkflow(existing.id, { description: description.trim() || undefined, dsl: parsedDsl, enabled });
+        await updateWorkflow(existing.id, { description: description.trim() || undefined, dsl, enabled });
       }
       await onSaved();
     } catch (e) {
@@ -385,11 +428,11 @@ function DefinitionDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [mode, existing, name, description, parsedDsl, enabled, onSaved]);
+  }, [mode, existing, name, description, dsl, enabled, onSaved]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
-      <Card className="w-[720px] max-w-[95vw] max-h-[90vh] overflow-auto" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+      <Card className="w-[1080px] max-w-[97vw] max-h-[94vh] overflow-auto" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
         <h3 className="text-lg font-semibold mb-3">{mode === "create" ? "New Workflow" : `Edit ${existing?.name} v${existing?.version}`}</h3>
 
         {error && <div className="mb-3 p-2 rounded bg-red-500/10 border border-red-500/30 text-sm text-red-400">{error}</div>}
@@ -406,18 +449,45 @@ function DefinitionDialog({
             <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
               className="mt-1 w-full px-3 py-2 rounded border border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg)]" />
           </label>
-          <label className="block">
-            <span className="text-xs font-medium text-[var(--color-ah-text-muted)]">DSL (nodes + edges JSON)</span>
-            <textarea value={dslJson} onChange={(e) => setDslJson(e.target.value)}
-              rows={18}
-              className={`mt-1 w-full px-3 py-2 rounded border font-[var(--font-ah-mono)] text-xs ${
-                parsedDsl === undefined ? "border-red-500/50 bg-red-500/5" : "border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg)]"
-              }`} />
-            {parsedDsl === undefined && <p className="mt-1 text-xs text-red-400">Invalid JSON</p>}
+
+          <div className="block">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-[var(--color-ah-text-muted)]">DSL</span>
+              <div role="tablist" className="flex gap-1 text-xs">
+                <button type="button" role="tab" aria-selected={view === "canvas"}
+                  onClick={switchToCanvas}
+                  className={`px-2 py-1 rounded ${view === "canvas" ? "bg-[var(--color-ah-accent)]/15 text-[var(--color-ah-accent)]" : "text-[var(--color-ah-text-muted)] hover:text-[var(--color-ah-text)]"}`}>
+                  Canvas
+                </button>
+                <button type="button" role="tab" aria-selected={view === "json"}
+                  onClick={switchToJson}
+                  className={`px-2 py-1 rounded ${view === "json" ? "bg-[var(--color-ah-accent)]/15 text-[var(--color-ah-accent)]" : "text-[var(--color-ah-text-muted)] hover:text-[var(--color-ah-text)]"}`}>
+                  JSON
+                </button>
+              </div>
+            </div>
+            {view === "canvas" ? (
+              <WorkflowCanvas value={dsl} onChange={handleCanvasChange} height={500} />
+            ) : (
+              <>
+                <textarea value={dslJson} onChange={(e) => handleJsonChange(e.target.value)}
+                  rows={20}
+                  className={`w-full px-3 py-2 rounded border font-[var(--font-ah-mono)] text-xs ${
+                    jsonParseError ? "border-red-500/50 bg-red-500/5" : "border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg)]"
+                  }`} />
+                {jsonParseError && <p className="mt-1 text-xs text-red-400">{jsonParseError}</p>}
+              </>
+            )}
+            {!validation.ok && (
+              <ul className="mt-2 text-xs text-red-400 list-disc list-inside">
+                {validation.errors.map((m, i) => <li key={i}>{m}</li>)}
+              </ul>
+            )}
             <p className="mt-1 text-xs text-[var(--color-ah-text-subtle)]">
-              Must include a node of kind <code>start</code>. Node kinds: start, end, approval, http, branch, wait_for_event, script, enqueue_job.
+              Must include a <code>start</code> node. Kinds: start, end, approval, http, branch, wait_for_event, script, enqueue_job.
             </p>
-          </label>
+          </div>
+
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
             <span>Enabled</span>
