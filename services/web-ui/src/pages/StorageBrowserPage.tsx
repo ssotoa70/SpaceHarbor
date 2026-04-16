@@ -8,6 +8,7 @@ import {
   fetchProcessingStatus,
   deriveDisplayState,
   ingestAsset,
+  requestProcessing,
   type StorageEndpoint,
   type StorageBrowseFile,
   type StorageBrowseFolder,
@@ -388,6 +389,9 @@ export function StorageBrowserPage() {
   const [ingesting, setIngesting] = useState<Set<string>>(new Set());
   const [ingested, setIngested] = useState<Set<string>>(new Set());
   const [ingestError, setIngestError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState<Set<string>>(new Set());
+  const [processed, setProcessed] = useState<Set<string>>(new Set());
+  const [processError, setProcessError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<StorageBrowseFile | null>(null);
   // Processing status keyed by sourceUri — populated after each browse via
   // the batch /storage/processing-status endpoint. Empty map means "unknown"
@@ -501,6 +505,25 @@ export function StorageBrowserPage() {
       setIngestError(`Failed to ingest ${file.key.split("/").pop()}: ${err instanceof Error ? err.message : "unknown error"}`);
     } finally {
       setIngesting((prev) => {
+        const next = new Set(prev);
+        next.delete(file.key);
+        return next;
+      });
+    }
+  };
+
+  const handleProcess = async (file: StorageBrowseFile) => {
+    setProcessing((prev) => new Set(prev).add(file.key));
+    setProcessError(null);
+    try {
+      await requestProcessing(file.sourceUri, selectedEndpoint || undefined);
+      setProcessed((prev) => new Set(prev).add(file.key));
+    } catch (err) {
+      setProcessError(
+        `Failed to trigger processing for ${file.key.split("/").pop()}: ${err instanceof Error ? err.message : "unknown error"}`,
+      );
+    } finally {
+      setProcessing((prev) => {
         const next = new Set(prev);
         next.delete(file.key);
         return next;
@@ -631,6 +654,19 @@ export function StorageBrowserPage() {
           <button onClick={() => setIngestError(null)} className="text-red-400 hover:text-red-200 ml-2">x</button>
         </div>
       )}
+      {processError && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded p-3 text-red-300 text-sm flex justify-between items-center">
+          <span>{processError}</span>
+          <button onClick={() => setProcessError(null)} className="text-red-400 hover:text-red-200 ml-2">x</button>
+        </div>
+      )}
+
+      {processed.size > 0 && (
+        <div className="bg-cyan-500/10 border border-cyan-500/30 rounded p-3 text-cyan-300 text-sm flex justify-between items-center">
+          <span>Triggered processing for {processed.size} file{processed.size > 1 ? "s" : ""} — artifacts will appear once the pipeline finishes.</span>
+          <button onClick={() => setProcessed(new Set())} className="text-cyan-400 hover:text-cyan-200 ml-2">x</button>
+        </div>
+      )}
 
       {ingested.size > 0 && (
         <div className="bg-green-500/10 border border-green-500/30 rounded p-3 text-green-300 text-sm flex justify-between items-center">
@@ -722,43 +758,35 @@ export function StorageBrowserPage() {
                       : "-"}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    {/*
-                      Per-row action label is contextual based on processing state
-                      AND file_kind. Formats the pipeline doesn't own (txt/pdf/etc.)
-                      show no action at all. Raw camera files in metadata_only final
-                      state show a subtle Reprocess affordance in case the user wants
-                      to re-extract metadata.
-
-                      Today the button still calls the legacy registration path
-                      (handleIngest → ingestAsset) — Commit 3 will swap the handler
-                      body to publish a CloudEvent to the correct DataEngine trigger
-                      based on file_kind → image/video trigger group mapping.
-                    */}
                     {displayState === "not_applicable" ? (
                       <span className="text-xs text-gray-600">—</span>
+                    ) : processed.has(file.key) ? (
+                      <span className="text-xs px-2 py-1 rounded bg-cyan-600/20 text-cyan-300">
+                        Triggered
+                      </span>
                     ) : ingested.has(file.key) || displayState === "ready" || displayState === "metadata_only" ? (
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleIngest(file); }}
-                        disabled={isIngesting}
+                        onClick={(e) => { e.stopPropagation(); handleProcess(file); }}
+                        disabled={processing.has(file.key)}
                         className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         title={displayState === "metadata_only"
                           ? "Re-extract metadata (raw camera — no proxy will be generated)"
                           : "Re-run the processing pipeline for this file"}
                       >
-                        {isIngesting ? "..." : "Reprocess"}
+                        {processing.has(file.key) ? "..." : "Reprocess"}
                       </button>
-                    ) : displayState === "processing" ? (
+                    ) : displayState === "processing" || processing.has(file.key) ? (
                       <span className="text-xs px-2 py-1 rounded bg-cyan-600/20 text-cyan-300">
                         Processing…
                       </span>
                     ) : (
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleIngest(file); }}
-                        disabled={isIngesting}
+                        onClick={(e) => { e.stopPropagation(); handleProcess(file); }}
+                        disabled={processing.has(file.key)}
                         className="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         title="Run the processing pipeline for this file"
                       >
-                        {isIngesting ? "..." : "Process"}
+                        {processing.has(file.key) ? "..." : "Process"}
                       </button>
                     )}
                   </td>

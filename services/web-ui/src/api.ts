@@ -403,6 +403,42 @@ export async function ingestAsset(input: { title: string; sourceUri: string; pro
   return (await response.json()) as IngestResult;
 }
 
+// ---------------------------------------------------------------------------
+// Storage processing trigger — S3 copy-in-place to re-fire DataEngine
+// element triggers. Used by the Storage Browser Process/Reprocess buttons.
+// ---------------------------------------------------------------------------
+
+export interface ProcessingTriggerResult {
+  triggered: boolean;
+  sourceUri: string;
+  bucket: string;
+  key: string;
+  fileKind: string;
+  method: string;
+  message: string;
+}
+
+export async function requestProcessing(
+  sourceUri: string,
+  endpointId?: string,
+): Promise<ProcessingTriggerResult> {
+  const body: Record<string, string> = { sourceUri };
+  if (endpointId) body.endpointId = endpointId;
+  const response = await fetch(`${API_BASE_URL}/api/v1/storage/process`, {
+    method: "POST",
+    headers: withAuth({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({})) as Record<string, unknown>;
+    throw new ApiRequestError(
+      response.status,
+      typeof err.message === "string" ? err.message : `Processing trigger failed: ${response.status}`,
+    );
+  }
+  return (await response.json()) as ProcessingTriggerResult;
+}
+
 export interface UploadUrlResult {
   uploadUrl: string;
   storageKey: string;

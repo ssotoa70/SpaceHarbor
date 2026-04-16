@@ -52,6 +52,7 @@ import { registerStorageMetadataRoutes } from "./routes/storage-metadata.js";
 import { registerExrMetadataRoutes } from "./routes/exr-metadata.js";
 import { registerVideoMetadataRoutes } from "./routes/video-metadata.js";
 import { registerDataEnginePipelineRoutes } from "./routes/dataengine-pipelines.js";
+import { registerStorageProcessRoutes } from "./routes/storage-process.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 import { TrinoClient } from "./db/trino-client.js";
@@ -382,6 +383,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // DataEngine pipelines — live merge of Settings + VAST function records
     void registerDataEnginePipelineRoutes(app, prefixes);
+
+    // Storage processing trigger — S3 copy-in-place to fire element triggers
+    void registerStorageProcessRoutes(app, prefixes);
 
     // DataEngine function catalogue + pipeline listing
     void registerDataEngineRoutes(app, functionRegistry, prefixes);
