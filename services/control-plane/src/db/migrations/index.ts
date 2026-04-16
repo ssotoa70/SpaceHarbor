@@ -21,10 +21,11 @@ import { migration as m014 } from "./014_processed_events.js";
 import { migration as m015 } from "./015_s3_compensation_log.js";
 import { migration as m016 } from "./016_custom_field_definitions.js";
 import { migration as m017 } from "./017_version_context_sentinels.js";
+import { migration as m018 } from "./018_checkins.js";
 
 export type { Migration } from "./types.js";
 
 export const migrations: Migration[] = [
   m001, m002, m003, m004, m005, m006, m007, m008, m009, m010,
-  m011, m012, m013, m014, m015, m016, m017,
+  m011, m012, m013, m014, m015, m016, m017, m018,
 ];
