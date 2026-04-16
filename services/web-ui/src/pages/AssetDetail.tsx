@@ -10,6 +10,8 @@ import {
   type ExrMetadataLookupResult,
 } from "../api";
 import { Badge, Button, Card, Skeleton } from "../design-system";
+import { CustomFieldsPanel } from "../components/CustomFieldsPanel";
+import { VersionDispatchCard } from "../components/VersionDispatchCard";
 
 const statusVariant = (s: string) => {
   if (s === "completed" || s === "qc_approved") return "success" as const;
@@ -178,6 +180,20 @@ export function AssetDetail() {
                   </div>
                 </div>
               )}
+            </Card>
+          )}
+
+          {/* Custom Fields — runtime-extensible metadata */}
+          <Card>
+            <h2 className="text-sm font-semibold mb-3">Custom Fields</h2>
+            <CustomFieldsPanel entityType="asset" entityId={asset.id} />
+          </Card>
+
+          {/* DataEngine processing status — only when there's a linked version */}
+          {asset.currentVersionId && (
+            <Card>
+              <h2 className="text-sm font-semibold mb-3">Processing</h2>
+              <VersionDispatchCard versionId={asset.currentVersionId} />
             </Card>
           )}
         </div>

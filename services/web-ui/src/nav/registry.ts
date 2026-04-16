@@ -49,6 +49,13 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
     section: "LIBRARY",
     icon: "M2 4h12v2H2zM2 8h12v2H2zM2 12h12v2H2z",
   },
+  {
+    id: "checkin",
+    to: "/library/checkin",
+    label: "Check In",
+    section: "LIBRARY",
+    icon: "M8 2v8m0 0l3-3m-3 3L5 7M2 12h12v2H2z",
+  },
 
   // ── WORK ──
   {

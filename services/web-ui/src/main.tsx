@@ -123,6 +123,9 @@ const DispatchesPage = React.lazy(() =>
 const BreakersPage = React.lazy(() =>
   import("./pages/admin/BreakersPage").then((m) => ({ default: m.BreakersPage }))
 );
+const CheckinPage = React.lazy(() =>
+  import("./pages/CheckinPage").then((m) => ({ default: m.CheckinPage }))
+);
 
 /* ── Suspense wrapper ── */
 
@@ -174,6 +177,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="library/hierarchy" element={<Lazy><HierarchyBrowser /></Lazy>} />
             <Route path="library/materials" element={<Lazy><MaterialBrowser /></Lazy>} />
             <Route path="library/storage" element={<Lazy><StorageBrowserPage /></Lazy>} />
+            <Route path="library/checkin" element={<Lazy><CheckinPage /></Lazy>} />
 
             {/* ── WORK section ── */}
             <Route path="work/queue" element={<Lazy><MyQueuePage /></Lazy>} />
