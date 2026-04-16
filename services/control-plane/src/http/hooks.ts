@@ -19,6 +19,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { PersistenceAdapter } from "../persistence/types.js";
+import { eventBus } from "../events/bus.js";
 
 // NOTE: These hooks attach directly to the FastifyInstance so they fire for
 // EVERY route (Fastify plugin encapsulation would scope them only to routes
@@ -103,18 +104,38 @@ export function attachAuditHooks(app: FastifyInstance, persistence: PersistenceA
     // IAM subsystem already logs auth decisions via auth_decisions table.
     if (statusCode >= 400 && statusCode < 500 && statusCode !== 409) return;
 
+    const method = request.method;
+    const path = request.url.split("?")[0];
+    const actor = resolveActor(request);
+
     try {
       await persistence.recordRequestAudit({
         message: `request completed`,
         correlationId: request.id,
-        actor: resolveActor(request),
-        method: request.method,
-        path: request.url.split("?")[0],
+        actor,
+        method,
+        path,
         statusCode,
       });
     } catch (err) {
       // Audit must never break a request. Log and swallow.
       request.log.warn({ err }, "[audit-hook] failed to persist audit row");
+    }
+
+    // Fan out a generic audit.mutation event onto the bus so triggers can
+    // subscribe to mutations across the whole control-plane without each
+    // route having to remember to publish. Route-level events (checkin.committed,
+    // version.published, etc.) fire in parallel for semantic subscribers.
+    try {
+      eventBus.publish({
+        type: "audit.mutation",
+        subject: `request:${request.id}`,
+        data: { method, path, statusCode },
+        actor: actor ?? null,
+        correlationId: request.id,
+      });
+    } catch (err) {
+      request.log.warn({ err }, "[audit-hook] failed to publish event");
     }
   });
 }

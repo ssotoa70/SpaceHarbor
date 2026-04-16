@@ -27,6 +27,7 @@ import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
+import { eventBus } from "../events/bus.js";
 import {
   CUSTOM_FIELD_DATA_TYPES,
   CUSTOM_FIELD_ENTITY_TYPES,
@@ -249,6 +250,13 @@ export async function registerCustomFieldsRoute(
               now: new Date().toISOString(),
             },
           );
+          eventBus.publish({
+            type: "custom_field.defined",
+            subject: `custom_field:${record.id}`,
+            data: { id: record.id, entityType: record.entityType, name: record.name, dataType: record.dataType },
+            actor: createdBy,
+            correlationId: request.id,
+          });
           return reply.status(201).send({ definition: recordToResponse(record) });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -360,6 +368,13 @@ export async function registerCustomFieldsRoute(
         if (!ok) {
           return sendError(request, reply, 404, "NOT_FOUND", `Definition not found or already deleted: ${request.params.id}`);
         }
+        eventBus.publish({
+          type: "custom_field.deleted",
+          subject: `custom_field:${request.params.id}`,
+          data: { id: request.params.id },
+          actor: request.identity ?? "unknown",
+          correlationId: request.id,
+        });
         return reply.status(204).send();
       },
     );
@@ -516,6 +531,14 @@ export async function registerCustomFieldsRoute(
           if (!def) continue;
           fields[def.name] = readValueFromRecord(v, def.dataType);
         }
+
+        eventBus.publish({
+          type: "custom_field.values_set",
+          subject: `${entity_type}:${entity_id}`,
+          data: { entityType: entity_type, entityId: entity_id, fieldNames: Object.keys(request.body.fields) },
+          actor: createdBy,
+          correlationId: request.id,
+        });
 
         return { entityType: entity_type, entityId: entity_id, fields, validationErrors: [] };
       },

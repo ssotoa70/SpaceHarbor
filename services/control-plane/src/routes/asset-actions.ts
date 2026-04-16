@@ -6,6 +6,7 @@ import { errorEnvelopeSchema } from "../http/schemas.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
 import type { WorkflowStatus } from "../domain/models.js";
 import { canTransitionWorkflowStatus } from "../workflow/transitions.js";
+import { eventBus } from "../events/bus.js";
 
 const CONTEXT_MENU_STATUSES: Record<string, WorkflowStatus> = {
   qc_pending: "qc_pending",
@@ -114,6 +115,15 @@ export async function registerAssetActionRoutes(
         });
 
         const refreshed = rows.find((r) => r.id === id);
+
+        eventBus.publish({
+          type: `asset.status.${targetStatus}`,
+          subject: `asset:${id}`,
+          data: { assetId: id, previousStatus: currentStatus, newStatus: targetStatus, reason },
+          actor: performer,
+          correlationId: request.id,
+        });
+
         return reply.send({
           asset: { ...refreshed, status: targetStatus },
           previousStatus: currentStatus,
@@ -222,6 +232,14 @@ export async function registerAssetActionRoutes(
           correlationId: request.id,
         });
 
+        eventBus.publish({
+          type: "asset.note.added",
+          subject: `asset:${id}`,
+          data: { assetId: id, noteId: note.id, createdBy: note.createdBy },
+          actor: note.createdBy,
+          correlationId: request.id,
+        });
+
         return reply.status(201).send({ note });
       },
     );
@@ -289,6 +307,14 @@ export async function registerAssetActionRoutes(
           performedBy: performer,
           at: new Date().toISOString(),
           note: `Asset archived by ${performer}`,
+        });
+
+        eventBus.publish({
+          type: "asset.archived",
+          subject: `asset:${id}`,
+          data: { assetId: id, dependentCount: deps.length, forced: deps.length > 0 },
+          actor: performer,
+          correlationId: request.id,
         });
 
         return reply.send({
