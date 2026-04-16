@@ -112,26 +112,6 @@ registerHandler("wait_for_event", (_node) => {
   return { action: "wait", reason: `waiting for external event at node ${_node.id}` };
 });
 
-registerHandler("http", async (node) => {
-  const config = (node.config ?? {}) as { url?: string; method?: string; headers?: Record<string, string>; body?: unknown };
-  if (!config.url) return { action: "fail", error: "http node missing config.url" };
-  try {
-    const res = await fetch(config.url, {
-      method: config.method ?? "POST",
-      headers: { "content-type": "application/json", ...(config.headers ?? {}) },
-      body: config.body !== undefined ? JSON.stringify(config.body) : undefined,
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) return { action: "fail", error: `HTTP ${res.status}` };
-  } catch (err) {
-    return { action: "fail", error: err instanceof Error ? err.message : String(err) };
-  }
-  // Fall through to advance
-  const next = nextEdgeByNodeId(node, { action: "advance" as const });
-  return next;
-});
-
-// Rebind http's "advance" behavior since the above returned a placeholder.
 registerHandler("http", async (node, ctx) => {
   const config = (node.config ?? {}) as { url?: string; method?: string; headers?: Record<string, string>; body?: unknown };
   if (!config.url) return { action: "fail", error: "http node missing config.url" };
@@ -286,6 +266,10 @@ export async function runWorkflowStep(
 /**
  * Drive the workflow synchronously until it hits a wait/complete/fail boundary.
  * Caps at 32 iterations to prevent infinite loops from bad DSL.
+ *
+ * "Wait boundary" detection: the `wait` action leaves currentNodeId unchanged
+ * (the engine writes the same node back). We detect it by comparing the node
+ * id before vs after each step — if it didn't advance, we stop.
  */
 export async function runWorkflowToBoundary(
   persistence: PersistenceAdapter,
@@ -294,22 +278,24 @@ export async function runWorkflowToBoundary(
   maxSteps = 32,
 ): Promise<WorkflowInstanceRecord | null> {
   let instance: WorkflowInstanceRecord | null = null;
+  let prevNodeId: string | null = null;
+
   for (let i = 0; i < maxSteps; i++) {
+    // Snapshot node id BEFORE the step so we can detect wait (no advance).
+    const beforeStep = await persistence.getWorkflowInstance(instanceId);
+    if (!beforeStep) return null;
+    const beforeNodeId = beforeStep.currentNodeId;
+
     instance = await runWorkflowStep(persistence, instanceId, correlationId);
     if (!instance) return null;
     if (instance.state === "completed" || instance.state === "failed" || instance.state === "cancelled") break;
-    // If the instance is running but the current node is a wait node, it will
-    // keep returning wait — break once we detect we're stuck on the same node.
-    // The handler itself writes the wait state; we detect by asking:
-    // "does the current node have a handler that returns wait?" — simplest
-    // heuristic: break after one `wait` step. The handler result isn't
-    // returned here, but a wait means currentNodeId DIDN'T change. Compare
-    // against the previous.
-    // We use updatedAt increment — but the simplest: check if currentNodeId
-    // changed since last step. If not, we're waiting.
-    const prevNodeId = instance.currentNodeId;
-    const next = await persistence.getWorkflowInstance(instanceId);
-    if (next && next.currentNodeId === prevNodeId) break;
+
+    // Wait = node did not advance this step.
+    if (instance.currentNodeId === beforeNodeId) break;
+
+    // Safety: detect oscillation A→B→A which would imply a DSL bug.
+    if (prevNodeId !== null && prevNodeId === instance.currentNodeId) break;
+    prevNodeId = beforeNodeId;
   }
   return instance;
 }
@@ -326,12 +312,6 @@ function nextEdge(dsl: WorkflowDsl, fromNodeId: string, instance: WorkflowInstan
     if (evaluateWhen(edge.when, context)) return edge;
   }
   return outgoing[0];
-}
-
-function nextEdgeByNodeId(_node: WorkflowNode, _state: { action: string }): HandlerResult {
-  // Placeholder used by an interim version of the http handler; left here
-  // intentionally — it's overridden by the later registerHandler call.
-  return { action: "complete" };
 }
 
 function evaluateWhen(cond: Record<string, unknown>, context: Record<string, unknown>): boolean {

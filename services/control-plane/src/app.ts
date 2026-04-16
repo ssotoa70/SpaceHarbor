@@ -115,6 +115,31 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   // Decorate request with identity (must happen before hooks run)
   app.decorateRequest("identity", null);
+  // `rawBody` is populated by the JSON content-type parser below for
+  // routes that need to verify signatures against the exact request bytes
+  // (inbound webhooks HMAC check).
+  app.decorateRequest("rawBody", null);
+
+  // Replace Fastify's default JSON parser with one that stashes the raw
+  // string onto request.rawBody before parsing. Other routes keep seeing
+  // `request.body` as the parsed object.
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (request, body, done) => {
+      (request as unknown as { rawBody: string | null }).rawBody = body as string;
+      if (!body || (body as string).length === 0) {
+        done(null, undefined);
+        return;
+      }
+      try {
+        done(null, JSON.parse(body as string));
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
 
   // Phase 1.3: Security response headers (HSTS, X-Content-Type-Options, X-Frame-Options)
   registerSecurityHeaders(app);
@@ -220,7 +245,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
           urlPath.endsWith("/device/code") ||
           urlPath.endsWith("/device/token") ||
           urlPath.endsWith("/openapi.json") ||
-          urlPath.startsWith("/api/docs")
+          urlPath.startsWith("/api/docs") ||
+          // Inbound webhook handler (/webhooks/:id + /api/v1/webhooks/:id).
+          // Auth is the HMAC signature — a missing/bad signature returns 401
+          // from the route handler, not from this hook.
+          /^(\/api\/v1)?\/webhooks\/[^/]+$/.test(urlPath)
         ) {
           return;
         }

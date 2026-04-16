@@ -287,7 +287,12 @@ export async function registerWebhookRoutes(
         if (!endpoint || endpoint.direction !== "inbound" || endpoint.revokedAt) {
           return sendError(request, reply, 404, "NOT_FOUND", `Inbound webhook not found or revoked`);
         }
-        const rawBody = typeof request.body === "string" ? request.body : JSON.stringify(request.body ?? {});
+        // rawBody is populated by the JSON content-type parser in app.ts.
+        // HMAC must be computed against the exact bytes the client sent —
+        // stringify-then-hash would lose whitespace + key-order fidelity.
+        const rawBody =
+          (request as unknown as { rawBody?: string }).rawBody ??
+          (typeof request.body === "string" ? request.body : JSON.stringify(request.body ?? {}));
         const sig = request.headers["x-spaceharbor-signature"] as string | undefined;
         if (!verifyInboundSignature(endpoint.id, rawBody, sig)) {
           return sendError(request, reply, 401, "INVALID_SIGNATURE", "HMAC-SHA256 signature mismatch");
