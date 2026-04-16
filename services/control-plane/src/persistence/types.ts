@@ -909,6 +909,13 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
   getCustomFieldValues(entityType: string, entityId: string): Promise<CustomFieldValueRecord[]>;
   setCustomFieldValue(input: CustomFieldValueInput, ctx: WriteContext): Promise<CustomFieldValueRecord>;
   deleteCustomFieldValue(definitionId: string, entityType: string, entityId: string, ctx: WriteContext): Promise<boolean>;
+
+  // ── Naming templates (migration 023) ──
+  listNamingTemplates(filter?: { scope?: string; enabled?: boolean; includeDeleted?: boolean }): Promise<NamingTemplateRecord[]>;
+  getNamingTemplate(id: string): Promise<NamingTemplateRecord | null>;
+  createNamingTemplate(input: NamingTemplateInput, ctx: WriteContext): Promise<NamingTemplateRecord>;
+  updateNamingTemplate(id: string, updates: NamingTemplateUpdate, ctx: WriteContext): Promise<NamingTemplateRecord | null>;
+  softDeleteNamingTemplate(id: string, ctx: WriteContext): Promise<boolean>;
 }
 
 export interface AssetNote {
@@ -1302,4 +1309,37 @@ export interface CustomFieldValueInput {
   valueBool?: boolean | null;
   valueDate?: string | null;
   createdBy: string;
+}
+
+// ── Naming templates (migration 023) ──
+
+export interface NamingTemplateRecord {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: string;
+  template: string;
+  sampleContextJson: string | null;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface NamingTemplateInput {
+  name: string;
+  description?: string | null;
+  scope: string;
+  template: string;
+  sampleContextJson?: string | null;
+  enabled?: boolean;
+  createdBy: string;
+}
+
+export interface NamingTemplateUpdate {
+  description?: string | null;
+  template?: string;
+  sampleContextJson?: string | null;
+  enabled?: boolean;
 }

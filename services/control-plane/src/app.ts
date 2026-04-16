@@ -60,6 +60,7 @@ import { registerCheckinRoute } from "./routes/checkin.js";
 import { registerTriggersRoute } from "./routes/triggers.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerWorkflowsRoute } from "./routes/workflows.js";
+import { registerNamingTemplatesRoute } from "./routes/naming-templates.js";
 import { registerBreakersRoute } from "./routes/breakers.js";
 import { registerDispatchesRoute } from "./routes/dispatches.js";
 import { registerPromMetricsRoute } from "./routes/prom-metrics.js";
@@ -411,6 +412,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerTriggersRoute(app, persistence, prefixes);
     void registerWebhookRoutes(app, persistence, prefixes);
     void registerWorkflowsRoute(app, persistence, prefixes);
+    void registerNamingTemplatesRoute(app, persistence, prefixes);
     void registerBreakersRoute(app, prefixes);
     void registerDispatchesRoute(app, persistence, dispatchPoller, prefixes);
     void registerPromMetricsRoute(app, persistence);

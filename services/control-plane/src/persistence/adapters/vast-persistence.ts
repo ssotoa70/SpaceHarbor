@@ -1299,4 +1299,28 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   ) {
     return this.localFallback.deleteCustomFieldValue(definitionId, entityType, entityId, ctx);
   }
+
+  // ── Naming templates (migration 023) — local fallback (Phase 5 deferred persistence split) ──
+  async listNamingTemplates(filter?: { scope?: string; enabled?: boolean; includeDeleted?: boolean }) {
+    return this.localFallback.listNamingTemplates(filter);
+  }
+  async getNamingTemplate(id: string) {
+    return this.localFallback.getNamingTemplate(id);
+  }
+  async createNamingTemplate(
+    input: Parameters<PersistenceAdapter["createNamingTemplate"]>[0],
+    ctx: WriteContext,
+  ) {
+    return this.localFallback.createNamingTemplate(input, ctx);
+  }
+  async updateNamingTemplate(
+    id: string,
+    updates: Parameters<PersistenceAdapter["updateNamingTemplate"]>[1],
+    ctx: WriteContext,
+  ) {
+    return this.localFallback.updateNamingTemplate(id, updates, ctx);
+  }
+  async softDeleteNamingTemplate(id: string, ctx: WriteContext) {
+    return this.localFallback.softDeleteNamingTemplate(id, ctx);
+  }
 }

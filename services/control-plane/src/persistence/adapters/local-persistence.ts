@@ -481,6 +481,21 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     updatedAt: string;
   }>();
 
+  // Naming templates (migration 023)
+  private readonly namingTemplates = new Map<string, {
+    id: string;
+    name: string;
+    description: string | null;
+    scope: string;
+    template: string;
+    sampleContextJson: string | null;
+    enabled: boolean;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+    deletedAt: string | null;
+  }>();
+
   private readonly outboundCounters = {
     attempts: 0,
     success: 0,
@@ -3646,6 +3661,83 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     if (!existingKey) return false;
     this.customFieldValues.delete(existingKey[0]);
     this.recordAudit(`custom field value deleted: ${entityType}/${entityId}`, ctx.correlationId, new Date());
+    return true;
+  }
+
+  // ── Naming templates (migration 023) ──
+
+  async listNamingTemplates(filter?: { scope?: string; enabled?: boolean; includeDeleted?: boolean }) {
+    return [...this.namingTemplates.values()].filter((t) => {
+      if (!filter?.includeDeleted && t.deletedAt !== null) return false;
+      if (filter?.scope && t.scope !== filter.scope) return false;
+      if (filter?.enabled !== undefined && t.enabled !== filter.enabled) return false;
+      return true;
+    });
+  }
+
+  async getNamingTemplate(id: string) {
+    return this.namingTemplates.get(id) ?? null;
+  }
+
+  async createNamingTemplate(
+    input: Parameters<PersistenceAdapter["createNamingTemplate"]>[0],
+    ctx: WriteContext,
+  ) {
+    const collision = [...this.namingTemplates.values()].find(
+      (t) => t.deletedAt === null && t.scope === input.scope && t.name === input.name,
+    );
+    if (collision) {
+      throw new Error(`naming template already exists: ${input.scope}.${input.name}`);
+    }
+    const now = this.resolveNow(ctx).toISOString();
+    const record = {
+      id: randomUUID(),
+      name: input.name,
+      description: input.description ?? null,
+      scope: input.scope,
+      template: input.template,
+      sampleContextJson: input.sampleContextJson ?? null,
+      enabled: input.enabled ?? true,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null as string | null,
+    };
+    this.namingTemplates.set(record.id, record);
+    this.recordAudit(`naming template created: ${record.scope}.${record.name}`, ctx.correlationId, new Date());
+    return record;
+  }
+
+  async updateNamingTemplate(
+    id: string,
+    updates: Parameters<PersistenceAdapter["updateNamingTemplate"]>[1],
+    ctx: WriteContext,
+  ) {
+    const existing = this.namingTemplates.get(id);
+    if (!existing || existing.deletedAt !== null) return null;
+    const now = this.resolveNow(ctx).toISOString();
+    const updated = {
+      ...existing,
+      description: updates.description !== undefined ? (updates.description ?? null) : existing.description,
+      template: updates.template ?? existing.template,
+      sampleContextJson:
+        updates.sampleContextJson !== undefined
+          ? (updates.sampleContextJson ?? null)
+          : existing.sampleContextJson,
+      enabled: updates.enabled !== undefined ? updates.enabled : existing.enabled,
+      updatedAt: now,
+    };
+    this.namingTemplates.set(id, updated);
+    this.recordAudit(`naming template updated: ${updated.scope}.${updated.name}`, ctx.correlationId, new Date());
+    return updated;
+  }
+
+  async softDeleteNamingTemplate(id: string, ctx: WriteContext) {
+    const existing = this.namingTemplates.get(id);
+    if (!existing || existing.deletedAt !== null) return false;
+    const now = this.resolveNow(ctx).toISOString();
+    this.namingTemplates.set(id, { ...existing, deletedAt: now, updatedAt: now });
+    this.recordAudit(`naming template deleted: ${existing.scope}.${existing.name}`, ctx.correlationId, new Date());
     return true;
   }
 }

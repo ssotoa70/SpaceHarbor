@@ -3637,3 +3637,107 @@ export interface CheckinState {
 export async function getCheckinState(checkinId: string): Promise<CheckinState> {
   return apiFetch<CheckinState>(`/assets/checkin/${encodeURIComponent(checkinId)}`);
 }
+
+/* ── Naming Templates (Phase 5.1) ── */
+
+export type NamingTemplateScope =
+  | "asset_filename"
+  | "version_label"
+  | "export_filename"
+  | "shot_name";
+
+export const NAMING_TEMPLATE_SCOPES: readonly NamingTemplateScope[] = [
+  "asset_filename",
+  "version_label",
+  "export_filename",
+  "shot_name",
+];
+
+export interface NamingTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: NamingTemplateScope;
+  template: string;
+  sampleContext: Record<string, unknown> | null;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  tokens: string[];
+}
+
+export interface CreateNamingTemplateInput {
+  name: string;
+  scope: NamingTemplateScope;
+  template: string;
+  description?: string | null;
+  sampleContext?: Record<string, unknown> | null;
+  enabled?: boolean;
+}
+
+export interface UpdateNamingTemplateInput {
+  description?: string | null;
+  template?: string;
+  sampleContext?: Record<string, unknown> | null;
+  enabled?: boolean;
+}
+
+export interface NamingTemplatePreview {
+  rendered: string;
+  tokens: string[];
+  errors: Array<{ token: string; message: string }>;
+  validation: { ok: boolean; errors: string[] };
+}
+
+export async function listNamingTemplates(filter?: {
+  scope?: NamingTemplateScope;
+  enabled?: boolean;
+  includeDeleted?: boolean;
+}): Promise<NamingTemplate[]> {
+  const params = new URLSearchParams();
+  if (filter?.scope) params.set("scope", filter.scope);
+  if (filter?.enabled !== undefined) params.set("enabled", String(filter.enabled));
+  if (filter?.includeDeleted) params.set("include_deleted", "true");
+  const q = params.toString();
+  const data = await apiFetch<{ templates: NamingTemplate[] }>(
+    `/naming-templates${q ? `?${q}` : ""}`,
+  );
+  return data.templates;
+}
+
+export async function createNamingTemplate(
+  input: CreateNamingTemplateInput,
+): Promise<NamingTemplate> {
+  const data = await apiFetch<{ template: NamingTemplate }>(
+    `/naming-templates`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return data.template;
+}
+
+export async function updateNamingTemplate(
+  id: string,
+  input: UpdateNamingTemplateInput,
+): Promise<NamingTemplate> {
+  const data = await apiFetch<{ template: NamingTemplate }>(
+    `/naming-templates/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+  return data.template;
+}
+
+export async function deleteNamingTemplate(id: string): Promise<void> {
+  await apiFetch<void>(`/naming-templates/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function previewNamingTemplate(
+  template: string,
+  context: Record<string, unknown>,
+): Promise<NamingTemplatePreview> {
+  return apiFetch<NamingTemplatePreview>(`/naming-templates/preview`, {
+    method: "POST",
+    body: JSON.stringify({ template, context }),
+  });
+}

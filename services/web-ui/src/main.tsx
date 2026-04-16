@@ -117,6 +117,9 @@ const WebhooksPage = React.lazy(() =>
 const WorkflowsPage = React.lazy(() =>
   import("./pages/admin/WorkflowsPage").then((m) => ({ default: m.WorkflowsPage }))
 );
+const NamingTemplatesPage = React.lazy(() =>
+  import("./pages/admin/NamingTemplatesPage").then((m) => ({ default: m.NamingTemplatesPage }))
+);
 const DispatchesPage = React.lazy(() =>
   import("./pages/admin/DispatchesPage").then((m) => ({ default: m.DispatchesPage }))
 );
@@ -208,6 +211,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="automation/triggers" element={<Lazy><TriggersPage /></Lazy>} />
             <Route path="automation/webhooks" element={<Lazy><WebhooksPage /></Lazy>} />
             <Route path="automation/workflows" element={<Lazy><WorkflowsPage /></Lazy>} />
+            <Route path="automation/naming-templates" element={<Lazy><NamingTemplatesPage /></Lazy>} />
             <Route path="automation/dispatches" element={<Lazy><DispatchesPage /></Lazy>} />
 
             {/* ── ADMIN section ── */}
