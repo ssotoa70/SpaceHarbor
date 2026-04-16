@@ -26,6 +26,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import type { PersistenceAdapter, WebhookEndpointRecord, WebhookDeliveryStatus } from "../persistence/types.js";
 import type { PlatformEvent } from "../events/bus.js";
+import { webhookDeliveryTotal } from "../infra/metrics.js";
 
 const MAX_ATTEMPTS = 5;
 const BASE_BACKOFF_MS = 500;
@@ -117,6 +118,7 @@ export async function deliverWebhook(
       completedAt: new Date().toISOString(),
     });
 
+    webhookDeliveryTotal.inc({ status });
     if (status === "succeeded") {
       await persistence.recordWebhookUsed(webhook.id, { correlationId: deliveryId, now: new Date().toISOString() });
       return;

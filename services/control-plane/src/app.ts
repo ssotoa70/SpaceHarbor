@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { resolveCorrelationId } from "./http/correlation.js";
-import { attachAuditHooks, attachLimitTripwire } from "./http/hooks.js";
+import { attachAuditHooks, attachLimitTripwire, attachMetricsHooks } from "./http/hooks.js";
 import { registerOpenApi } from "./http/openapi.js";
 import { createPersistenceAdapter } from "./persistence/factory.js";
 import type { PersistenceAdapter } from "./persistence/types.js";
@@ -62,6 +62,7 @@ import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerWorkflowsRoute } from "./routes/workflows.js";
 import { registerBreakersRoute } from "./routes/breakers.js";
 import { registerDispatchesRoute } from "./routes/dispatches.js";
+import { registerPromMetricsRoute } from "./routes/prom-metrics.js";
 import { TriggerConsumer } from "./automation/trigger-consumer.js";
 import { DataEngineDispatchService, DispatchPollingDetector } from "./automation/dataengine-dispatch.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
@@ -158,6 +159,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   //    SPACEHARBOR_MAX_LIST_LIMIT (default 500) before route handlers see them.
   //  - attachAuditHooks runs after persistence is resolved (see below).
   attachLimitTripwire(app);
+  attachMetricsHooks(app);
 
   // CORS support for cross-origin browser requests (web-ui on different port/host)
   const allowedOrigins = new Set([
@@ -251,6 +253,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
           urlPath.endsWith("/device/token") ||
           urlPath.endsWith("/openapi.json") ||
           urlPath.startsWith("/api/docs") ||
+          // Prometheus /metrics — OpenMetrics convention is unauthenticated.
+          // Most scrapers don't support bearer auth; scrape from inside the
+          // cluster network or front it with nginx basic-auth if needed.
+          urlPath === "/metrics" ||
           // Inbound webhook handler (/webhooks/:id + /api/v1/webhooks/:id).
           // Auth is the HMAC signature — a missing/bad signature returns 401
           // from the route handler, not from this hook.
@@ -406,6 +412,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerWorkflowsRoute(app, persistence, prefixes);
     void registerBreakersRoute(app, prefixes);
     void registerDispatchesRoute(app, persistence, dispatchPoller, prefixes);
+    void registerPromMetricsRoute(app, persistence);
     void registerAuditRoute(app, persistence, prefixes);
     void registerIncidentRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);

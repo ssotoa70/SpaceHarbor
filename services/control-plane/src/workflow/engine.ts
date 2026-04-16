@@ -32,6 +32,7 @@
  */
 
 import type { PersistenceAdapter, WorkflowDefinitionRecord, WorkflowInstanceRecord } from "../persistence/types.js";
+import { workflowTransitionTotal } from "../infra/metrics.js";
 
 export type NodeKind =
   | "start"
@@ -209,6 +210,7 @@ export async function runWorkflowStep(
 
   switch (result.action) {
     case "advance":
+      workflowTransitionTotal.inc({ to_state: "running" });
       await persistence.recordWorkflowTransition(
         { instanceId, fromNodeId: instance.currentNodeId, toNodeId: result.nextNodeId, eventType: externalEvent?.type, actor: externalEvent?.actor, payloadJson: externalEvent?.payload ? JSON.stringify(externalEvent.payload) : undefined },
         { correlationId, now },
@@ -237,6 +239,7 @@ export async function runWorkflowStep(
         { correlationId, now },
       );
     case "complete":
+      workflowTransitionTotal.inc({ to_state: "completed" });
       return persistence.updateWorkflowInstance(
         instanceId,
         {
@@ -249,6 +252,7 @@ export async function runWorkflowStep(
         { correlationId, now },
       );
     case "fail":
+      workflowTransitionTotal.inc({ to_state: "failed" });
       return persistence.updateWorkflowInstance(
         instanceId,
         {

@@ -28,6 +28,7 @@ import { randomUUID } from "node:crypto";
 import type { PersistenceAdapter, TriggerRecord } from "../persistence/types.js";
 import { eventBus, type PlatformEvent } from "../events/bus.js";
 import { deliverWebhook } from "./outbound-webhook.js";
+import { triggerFiredTotal } from "../infra/metrics.js";
 
 export class TriggerConsumer {
   private unsubscribe: (() => void) | null = null;
@@ -66,6 +67,7 @@ export class TriggerConsumer {
     const ctx = { correlationId: event.correlationId ?? `trigger-${trigger.id}`, now: new Date().toISOString() };
     try {
       await this.persistence.recordTriggerFire(trigger.id, ctx);
+      triggerFiredTotal.inc({ action_kind: trigger.actionKind });
 
       switch (trigger.actionKind) {
         case "http_call": {

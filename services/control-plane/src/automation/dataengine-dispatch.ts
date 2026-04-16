@@ -62,6 +62,7 @@ import { inferFileKind, type FileKind } from "../storage/file-kinds.js";
 import { getStorageEndpoints, getDataEnginePipelines } from "../routes/platform-settings.js";
 import { setVastTlsSkip, restoreVastTls } from "../vast/vast-fetch.js";
 import { s3Breaker } from "../infra/circuit-breaker.js";
+import { dispatchCreatedTotal, dispatchCompletedTotal, dispatchAbandonedTotal } from "../infra/metrics.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -194,6 +195,9 @@ export class DataEngineDispatchService {
       now: new Date().toISOString(),
     };
     const dispatches = await this.persistence.createDataEngineDispatches(inputs, writeCtx);
+    for (const input of inputs) {
+      dispatchCreatedTotal.inc({ file_kind: input.fileKind, expected_function: input.expectedFunction });
+    }
 
     eventBus.publish({
       type: "version.processing.started",
@@ -283,6 +287,7 @@ export class DispatchPollingDetector {
             { correlationId: dispatch.correlationId ?? `poller-${dispatch.id}`, now },
           );
           abandoned++;
+          dispatchAbandonedTotal.inc({ file_kind: dispatch.fileKind });
           eventBus.publish({
             type: "version.processing.abandoned",
             subject: `version:${dispatch.versionId}`,
@@ -343,6 +348,7 @@ export class DispatchPollingDetector {
             { correlationId: dispatch.correlationId ?? `poller-${dispatch.id}`, now },
           );
           completed++;
+          dispatchCompletedTotal.inc({ file_kind: kind });
 
           // Attach the proxy/thumbnail back to the Version row so the UI
           // can render the preview without re-querying the dispatch ledger.

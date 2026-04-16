@@ -65,6 +65,7 @@ import { getStorageEndpoints } from "./platform-settings.js";
 import { setVastTlsSkip, restoreVastTls } from "../vast/vast-fetch.js";
 import { eventBus } from "../events/bus.js";
 import { s3Breaker } from "../infra/circuit-breaker.js";
+import { checkinReserveTotal, checkinCommitTotal, checkinAbortTotal } from "../infra/metrics.js";
 
 // ---------------------------------------------------------------------------
 // Types (client-facing)
@@ -646,6 +647,7 @@ export async function registerCheckinRoute(
           writeCtx,
         );
 
+        checkinReserveTotal.inc();
         eventBus.publish({
           type: "checkin.reserved",
           subject: `checkin:${checkin.id}`,
@@ -816,6 +818,7 @@ export async function registerCheckinRoute(
               await persistence.updateCheckinState(checkin.id, { state: "compensating", lastError: msg }, writeCtx);
               await runCompensationInline(persistence, checkin.txId, writeCtx).catch(() => {});
               await persistence.updateCheckinState(checkin.id, { state: "aborted", abortedAt: new Date().toISOString() }, writeCtx);
+              checkinAbortTotal.inc({ reason: "commit-s3-fail" });
               eventBus.publish({
                 type: "checkin.failed",
                 subject: `checkin:${checkin.id}`,
@@ -864,6 +867,7 @@ export async function registerCheckinRoute(
             writeCtx,
           );
 
+          checkinCommitTotal.inc();
           eventBus.publish({
             type: "checkin.committed",
             subject: `version:${checkin.versionId}`,
@@ -940,6 +944,7 @@ export async function registerCheckinRoute(
           writeCtx,
         );
 
+        checkinAbortTotal.inc({ reason: "client" });
         eventBus.publish({
           type: "checkin.aborted",
           subject: `checkin:${checkin.id}`,

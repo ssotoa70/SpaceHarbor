@@ -4,6 +4,12 @@ if (process.env.SPACEHARBOR_VAST_SKIP_TLS !== "false" && process.env.SPACEHARBOR
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 }
 
+// OpenTelemetry must be initialized BEFORE any instrumented modules are
+// imported so the SDK can monkey-patch them on first require. No-op when
+// OTEL_EXPORTER_OTLP_ENDPOINT is unset.
+import { initTracing, shutdownTracing } from "./infra/tracing.js";
+initTracing();
+
 import { buildApp } from "./app.js";
 
 const port = Number.parseInt(process.env.PORT ?? "8080", 10);
@@ -40,6 +46,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   try {
     await app.close();
+    await shutdownTracing();
     clearTimeout(killTimer);
     app.log.info("[server] shutdown complete");
     process.exit(0);

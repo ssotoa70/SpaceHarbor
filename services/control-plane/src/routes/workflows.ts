@@ -24,6 +24,7 @@ import { errorEnvelopeSchema } from "../http/schemas.js";
 import { paginateSortedArray, parsePaginationParams, paginationQuerySchema } from "../http/pagination.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
 import { runWorkflowToBoundary, type WorkflowDsl } from "../workflow/engine.js";
+import { workflowInstanceTotal } from "../infra/metrics.js";
 
 function validateDsl(dsl: unknown): { ok: true; dsl: WorkflowDsl } | { ok: false; message: string } {
   if (!dsl || typeof dsl !== "object") return { ok: false, message: "dsl must be an object" };
@@ -259,6 +260,7 @@ export async function registerWorkflowsRoute(
           },
           { correlationId: request.id, now: new Date().toISOString() },
         );
+        workflowInstanceTotal.inc({ definition_name: def.name });
         // Drive the engine to the first wait/complete/fail
         const driven = await runWorkflowToBoundary(persistence, instance.id, request.id);
         return reply.status(201).send({ instance: driven ?? instance });

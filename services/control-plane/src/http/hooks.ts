@@ -20,6 +20,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { PersistenceAdapter } from "../persistence/types.js";
 import { eventBus } from "../events/bus.js";
+import { httpRequestDuration, httpRequestsTotal, normalizeRouteLabel } from "../infra/metrics.js";
 
 // NOTE: These hooks attach directly to the FastifyInstance so they fire for
 // EVERY route (Fastify plugin encapsulation would scope them only to routes
@@ -92,6 +93,49 @@ function resolveActor(request: FastifyRequest): string | undefined {
   const identity = (request as FastifyRequest & { identity?: string }).identity;
   if (identity) return identity;
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Prometheus RED metrics hook
+// ---------------------------------------------------------------------------
+
+/**
+ * Attaches onRequest + onResponse hooks that record per-request metrics:
+ *   - spaceharbor_http_requests_total{method, route, status}
+ *   - spaceharbor_http_request_duration_seconds{method, route, status}
+ *
+ * Routes are labeled by the matched Fastify route template (e.g. `/assets/:id`),
+ * not the raw URL, so cardinality stays bounded. Unmatched 404s fall back to
+ * normalizeRouteLabel() which collapses obvious id params.
+ *
+ * The /metrics endpoint itself is excluded to avoid self-polling noise.
+ */
+export function attachMetricsHooks(app: FastifyInstance): void {
+  // Stamp a high-resolution start timestamp on every request.
+  app.addHook("onRequest", async (request: FastifyRequest) => {
+    (request as FastifyRequest & { _metricsStart?: bigint })._metricsStart = process.hrtime.bigint();
+  });
+
+  app.addHook("onResponse", async (request: FastifyRequest, reply: FastifyReply) => {
+    const path = request.url.split("?")[0];
+    if (path === "/metrics" || path === "/api/v1/metrics") return;
+
+    const started = (request as FastifyRequest & { _metricsStart?: bigint })._metricsStart;
+    if (started === undefined) return;
+    const durationSec = Number(process.hrtime.bigint() - started) / 1e9;
+
+    // Prefer Fastify's matched route template; fall back to normalized URL.
+    const matched = (request as FastifyRequest & { routeOptions?: { url?: string } }).routeOptions?.url;
+    const route = matched ?? normalizeRouteLabel(request.url);
+    const labels = {
+      method: request.method,
+      route,
+      status: String(reply.statusCode),
+    };
+
+    httpRequestsTotal.inc(labels);
+    httpRequestDuration.observe(labels, durationSec);
+  });
 }
 
 export function attachAuditHooks(app: FastifyInstance, persistence: PersistenceAdapter): void {
