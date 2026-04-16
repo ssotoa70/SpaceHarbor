@@ -1,0 +1,12 @@
+apiVersion: v2
+name: spaceharbor
+description: VAST-native Media Asset Management platform (control-plane + web-ui)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - mam
+  - vast
+  - media
+  - vfx
+home: https://github.com/ssotoa70/SpaceHarbor

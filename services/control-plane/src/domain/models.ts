@@ -168,6 +168,15 @@ export interface AuditEvent {
   message: string;
   at: string;
   signal?: AuditSignal;
+  /**
+   * SHA-256 hash of this row's canonical payload chained to prev_hash.
+   * Computed as sha256(prev_hash || canonical_json({id, message, at, signal})).
+   * The first row in a chain uses prev_hash = "0000...0000" (32 zero bytes hex).
+   * Verification: re-compute this hash for every row; if it diverges, the
+   * chain has been tampered with.
+   */
+  prevHash?: string;
+  rowHash?: string;
 }
 
 export interface AuditSignal {

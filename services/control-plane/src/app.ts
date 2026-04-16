@@ -63,6 +63,7 @@ import { registerWorkflowsRoute } from "./routes/workflows.js";
 import { registerBreakersRoute } from "./routes/breakers.js";
 import { registerDispatchesRoute } from "./routes/dispatches.js";
 import { registerPromMetricsRoute } from "./routes/prom-metrics.js";
+import { registerAuditVerifyRoute } from "./routes/audit-verify.js";
 import { TriggerConsumer } from "./automation/trigger-consumer.js";
 import { DataEngineDispatchService, DispatchPollingDetector } from "./automation/dataengine-dispatch.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
@@ -413,6 +414,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerBreakersRoute(app, prefixes);
     void registerDispatchesRoute(app, persistence, dispatchPoller, prefixes);
     void registerPromMetricsRoute(app, persistence);
+    void registerAuditVerifyRoute(app, persistence, prefixes);
     void registerAuditRoute(app, persistence, prefixes);
     void registerIncidentRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);

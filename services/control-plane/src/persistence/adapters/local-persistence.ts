@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hashAuditRow, AUDIT_GENESIS_HASH } from "../../infra/audit-chain.js";
 
 import type {
   AnnotationHookMetadata,
@@ -1484,12 +1485,19 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   }
 
   private recordAudit(message: string, correlationId: string, now: Date, signal?: AuditSignal): AuditEvent {
-    const event: AuditEvent = {
+    // The chain is ordered oldest-first for hashing purposes, but we store
+    // newest-first in memory (unshift). `auditEvents[0]` is the most recent
+    // row, so its prev_hash links back to auditEvents[1].
+    const prevHash = this.auditEvents[0]?.rowHash ?? AUDIT_GENESIS_HASH;
+    const partial: Omit<AuditEvent, "rowHash"> = {
       id: randomUUID(),
       message: `[corr:${correlationId}] ${message}`,
       at: now.toISOString(),
-      ...(signal ? { signal } : {})
+      ...(signal ? { signal } : {}),
+      prevHash,
     };
+    const rowHash = hashAuditRow(partial);
+    const event: AuditEvent = { ...partial, rowHash };
     this.auditEvents.unshift(event);
     return event;
   }

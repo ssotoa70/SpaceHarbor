@@ -1,0 +1,81 @@
+# SpaceHarbor Helm chart default values.
+# Override per environment via `helm install -f values-prod.yaml`.
+
+controlPlane:
+  image:
+    repository: spaceharbor-control-plane
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # Three replicas by default — one runs background timers
+  # (via backgroundWorker flag), the other two handle HTTP only.
+  replicas: 3
+  backgroundWorkerReplicaName: spaceharbor-control-plane-worker
+
+  resources:
+    limits:
+      cpu: "2"
+      memory: 2Gi
+    requests:
+      cpu: "500m"
+      memory: 512Mi
+
+  # Env pulled from these sources. Secrets come from an External Secrets
+  # operator reference (spec/external-secret.yaml) — DO NOT put plaintext
+  # credentials in this file.
+  env:
+    NODE_ENV: production
+    SPACEHARBOR_IAM_ENABLED: "true"
+    SPACEHARBOR_SHUTDOWN_TIMEOUT_MS: "30000"
+    SPACEHARBOR_PERSISTENCE_BACKEND: "vast"
+    SPACEHARBOR_MAX_LIST_LIMIT: "500"
+    SPACEHARBOR_DISPATCH_POLL_INTERVAL_MS: "15000"
+
+  # Secrets are sourced via envFrom:
+  #   - Kubernetes Secret 'spaceharbor-secrets' (SPACEHARBOR_JWT_SECRET,
+  #     VAST_*, SPACEHARBOR_S3_*, SPACEHARBOR_WEBHOOK_*, etc.)
+  # External Secrets operator users: see deploy/helm/spaceharbor/examples/external-secret.yaml
+  envFromSecret: spaceharbor-secrets
+
+  healthCheck:
+    livenessPath: /health
+    readinessPath: /health/ready
+
+  # Enable Prometheus scraping via pod annotations.
+  prometheus:
+    scrape: true
+    port: 8080
+    path: /metrics
+
+  # OTel endpoint — empty disables tracing.
+  otlpEndpoint: ""
+
+webUi:
+  image:
+    repository: spaceharbor-web-ui
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    limits: { cpu: "500m", memory: 256Mi }
+    requests: { cpu: "100m", memory: 64Mi }
+
+ingress:
+  enabled: true
+  className: nginx
+  host: spaceharbor.example.com
+  tls:
+    enabled: true
+    secretName: spaceharbor-tls
+
+# Enable a PersistentVolumeClaim for settings-data.
+settingsVolume:
+  size: 1Gi
+  storageClass: ""      # empty = use cluster default
+
+# Autoscaling on the HTTP-only replicas (background-worker is pinned).
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70

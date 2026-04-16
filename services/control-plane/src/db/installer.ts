@@ -235,6 +235,73 @@ export async function install(args: InstallerArgs): Promise<{ applied: number; c
 }
 
 // ---------------------------------------------------------------------------
+// Rollback: play `downStatements` in LIFO order down to targetVersion.
+// Only migrations that declare downStatements can be rolled back; a missing
+// downStatements field on any migration in the chain aborts the rollback.
+// ---------------------------------------------------------------------------
+
+export async function rollback(
+  args: InstallerArgs & { targetVersion: number },
+): Promise<{ rolledBack: number; currentVersion: number }> {
+  validateSchemaName(args.schema);
+  const client = new TrinoClient({
+    endpoint: args.trinoEndpoint,
+    accessKey: args.accessKey,
+    secretKey: args.secretKey,
+  });
+
+  // Discover current version
+  const currentVersionRes = await client.query(
+    `SELECT MAX(version) AS v FROM vast."${args.schema}".schema_version`,
+  );
+  const currentVersion = Number(currentVersionRes.data[0]?.[0] ?? 0);
+  if (args.targetVersion >= currentVersion) {
+    console.log(`Already at version ${currentVersion}; target ${args.targetVersion} is not lower.`);
+    return { rolledBack: 0, currentVersion };
+  }
+
+  // Select migrations to roll back: versions (target, current]
+  const toRollback = migrations
+    .filter((m) => m.version > args.targetVersion && m.version <= currentVersion)
+    .sort((a, b) => b.version - a.version); // LIFO
+
+  // Verify every one declares downStatements
+  const missing = toRollback.filter((m) => !m.downStatements || m.downStatements.length === 0);
+  if (missing.length > 0) {
+    console.error(
+      `Cannot roll back: migrations ${missing.map((m) => m.version).join(", ")} ` +
+      `do not declare downStatements. Add down SQL to these migrations or target a different version.`,
+    );
+    process.exit(1);
+  }
+
+  console.log(`Rolling back from v${currentVersion} to v${args.targetVersion} (${toRollback.length} migration(s))`);
+
+  let rolledBack = 0;
+  for (const migration of toRollback) {
+    console.log(`  rolling back ${migration.version}: ${migration.description}`);
+    if (args.dryRun) {
+      for (const sql of migration.downStatements!) {
+        console.log(`    DRY: ${sql.slice(0, 80)}...`);
+      }
+      continue;
+    }
+    for (const sql of migration.downStatements!) {
+      try {
+        await client.query(sql);
+      } catch (err) {
+        console.error(`    FAILED: ${err instanceof Error ? err.message : String(err)}`);
+        // continue — partial rollback is better than halt-and-catch-fire
+      }
+    }
+    rolledBack++;
+  }
+
+  console.log(`Rolled back ${rolledBack} migration(s).`);
+  return { rolledBack, currentVersion: args.targetVersion };
+}
+
+// ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
 
@@ -275,7 +342,17 @@ async function main(): Promise<void> {
   }
 
   try {
-    await install(args);
+    // Rollback mode — first non-flag arg of "rollback" triggers it.
+    const positional = process.argv.slice(2).filter((a) => !a.startsWith("--") && a !== "-h");
+    if (positional[0] === "rollback") {
+      if (args.targetVersion === undefined) {
+        console.error("rollback requires --target-version <N>");
+        process.exit(1);
+      }
+      await rollback(args as InstallerArgs & { targetVersion: number });
+    } else {
+      await install(args);
+    }
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
