@@ -1078,4 +1078,16 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     if (!this.trinoClient) return this.localFallback.getDownstreamUsageCount(entityType, entityId);
     return tq.queryDownstreamUsageCount(this.trinoClient, entityType, entityId);
   }
+
+  async getAssetNotes(assetId: string) {
+    return this.localFallback.getAssetNotes(assetId);
+  }
+
+  async createAssetNote(assetId: string, input: { body: string; createdBy: string; correlationId: string }) {
+    return this.localFallback.createAssetNote(assetId, input);
+  }
+
+  async archiveAsset(assetId: string, ctx: WriteContext) {
+    return this.localFallback.archiveAsset(assetId, ctx);
+  }
 }

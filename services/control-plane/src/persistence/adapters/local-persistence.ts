@@ -263,6 +263,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   private readonly renderFarmMetrics = new Map<string, RenderFarmMetric>();
   private readonly downstreamUsageCounts = new Map<string, DownstreamUsageCount>();
 
+  // Asset notes
+  private readonly assetNotes = new Map<string, Array<{ id: string; assetId: string; body: string; createdBy: string; createdAt: string }>>();
+
+  // Archived asset IDs
+  private readonly archivedAssets = new Set<string>();
+
   private readonly outboundCounters = {
     attempts: 0,
     success: 0,
@@ -327,6 +333,9 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.storageMetrics.clear();
     this.renderFarmMetrics.clear();
     this.downstreamUsageCounts.clear();
+    // Asset notes + archive
+    this.assetNotes.clear();
+    this.archivedAssets.clear();
   }
 
   async createIngestAsset(input: IngestInput, context: WriteContext): Promise<IngestResult> {
@@ -2580,5 +2589,35 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   async getDownstreamUsageCount(entityType: string, entityId: string): Promise<DownstreamUsageCount | null> {
     const key = `${entityType}:${entityId}`;
     return this.downstreamUsageCounts.get(key) ?? null;
+  }
+
+  // ── Asset Notes ──
+
+  async getAssetNotes(assetId: string) {
+    return this.assetNotes.get(assetId) ?? [];
+  }
+
+  async createAssetNote(assetId: string, input: { body: string; createdBy: string; correlationId: string }) {
+    const note = {
+      id: randomUUID(),
+      assetId,
+      body: input.body,
+      createdBy: input.createdBy,
+      createdAt: new Date().toISOString(),
+    };
+    if (!this.assetNotes.has(assetId)) {
+      this.assetNotes.set(assetId, []);
+    }
+    this.assetNotes.get(assetId)!.push(note);
+    this.recordAudit(`Note added to asset ${assetId}`, input.correlationId, new Date());
+    return note;
+  }
+
+  // ── Asset Archive ──
+
+  async archiveAsset(assetId: string, ctx: WriteContext) {
+    this.archivedAssets.add(assetId);
+    this.assets.delete(assetId);
+    this.recordAudit(`Asset ${assetId} archived`, ctx.correlationId, new Date());
   }
 }

@@ -439,6 +439,95 @@ export async function requestProcessing(
   return (await response.json()) as ProcessingTriggerResult;
 }
 
+// ---------------------------------------------------------------------------
+// Asset context menu actions
+// ---------------------------------------------------------------------------
+
+export type ContextMenuStatus = "qc_pending" | "approved" | "rejected" | "on_hold";
+
+export async function updateAssetStatus(
+  assetId: string,
+  status: ContextMenuStatus,
+  reason?: string,
+): Promise<{ asset: AssetRow; previousStatus: string; newStatus: string }> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/assets/${encodeURIComponent(assetId)}/status`,
+    {
+      method: "PATCH",
+      headers: withAuth({ "content-type": "application/json" }),
+      body: JSON.stringify({ status, reason }),
+    },
+  );
+  if (!response.ok) {
+    const err = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new ApiRequestError(
+      response.status,
+      typeof err.message === "string" ? err.message : `Status update failed: ${response.status}`,
+    );
+  }
+  return (await response.json()) as { asset: AssetRow; previousStatus: string; newStatus: string };
+}
+
+export interface AssetNote {
+  id: string;
+  assetId: string;
+  body: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export async function fetchAssetNotes(assetId: string): Promise<AssetNote[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/assets/${encodeURIComponent(assetId)}/notes`,
+    { headers: withAuth() },
+  );
+  if (!response.ok) return [];
+  const body = (await response.json()) as { notes: AssetNote[] };
+  return body.notes;
+}
+
+export async function addAssetNote(assetId: string, noteBody: string): Promise<AssetNote> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/assets/${encodeURIComponent(assetId)}/notes`,
+    {
+      method: "POST",
+      headers: withAuth({ "content-type": "application/json" }),
+      body: JSON.stringify({ body: noteBody }),
+    },
+  );
+  if (!response.ok) {
+    throw new ApiRequestError(response.status, "Failed to add note");
+  }
+  const result = (await response.json()) as { note: AssetNote };
+  return result.note;
+}
+
+export interface ArchiveResult {
+  archived: boolean;
+  assetId: string;
+  dependencies: Array<{ id: string; targetEntityId: string; type: string }>;
+  message: string;
+}
+
+export async function archiveAsset(assetId: string, force = false): Promise<ArchiveResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/assets/${encodeURIComponent(assetId)}/archive`,
+    {
+      method: "POST",
+      headers: withAuth({ "content-type": "application/json" }),
+      body: JSON.stringify({ force }),
+    },
+  );
+  if (!response.ok) {
+    const err = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new ApiRequestError(
+      response.status,
+      typeof err.message === "string" ? err.message : `Archive failed: ${response.status}`,
+    );
+  }
+  return (await response.json()) as ArchiveResult;
+}
+
 export interface UploadUrlResult {
   uploadUrl: string;
   storageKey: string;

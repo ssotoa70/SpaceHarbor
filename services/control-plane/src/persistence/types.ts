@@ -789,4 +789,19 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
   addSubmission(input: AddSubmissionInput, ctx: WriteContext): Promise<ReviewSessionSubmission>;
   listSubmissionsBySession(sessionId: string): Promise<ReviewSessionSubmission[]>;
   updateSubmissionStatus(id: string, fromStatus: SubmissionStatus, toStatus: SubmissionStatus, ctx: WriteContext): Promise<ReviewSessionSubmission | null>;
+
+  // Asset Notes
+  getAssetNotes(assetId: string): Promise<AssetNote[]>;
+  createAssetNote(assetId: string, input: { body: string; createdBy: string; correlationId: string }): Promise<AssetNote>;
+
+  // Asset Archive (soft-delete)
+  archiveAsset(assetId: string, ctx: WriteContext): Promise<void>;
+}
+
+export interface AssetNote {
+  id: string;
+  assetId: string;
+  body: string;
+  createdBy: string;
+  createdAt: string;
 }

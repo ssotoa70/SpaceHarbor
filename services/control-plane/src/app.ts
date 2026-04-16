@@ -53,6 +53,7 @@ import { registerExrMetadataRoutes } from "./routes/exr-metadata.js";
 import { registerVideoMetadataRoutes } from "./routes/video-metadata.js";
 import { registerDataEnginePipelineRoutes } from "./routes/dataengine-pipelines.js";
 import { registerStorageProcessRoutes } from "./routes/storage-process.js";
+import { registerAssetActionRoutes } from "./routes/asset-actions.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 import { TrinoClient } from "./db/trino-client.js";
@@ -343,6 +344,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerHealthRoute(app, persistence, { iamFlags });
     void registerApprovalRoutes(app, persistence, prefixes);
     void registerAssetsRoute(app, persistence, prefixes);
+    void registerAssetActionRoutes(app, persistence, prefixes);
     void registerAuditRoute(app, persistence, prefixes);
     void registerIncidentRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);

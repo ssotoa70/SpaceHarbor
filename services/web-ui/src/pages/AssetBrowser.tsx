@@ -8,6 +8,7 @@ import { AssetDetailPanel } from "../components/AssetDetailPanel";
 import { metadataKindForFilename } from "../utils/metadata-routing";
 
 import { AssetSelectionToolbar } from "../components/AssetSelectionToolbar";
+import { AssetContextMenu } from "../components/AssetContextMenu";
 import { CloseIcon } from "../components/CloseIcon";
 import { MediaTypeIcon } from "../components/MediaTypeIcon";
 import type { PipelineStage } from "../types";
@@ -157,9 +158,10 @@ interface ThumbnailCardProps {
   onSelect: (id: string) => void;
   onPreview: (asset: AssetRow) => void;
   onDetail: (asset: AssetRow) => void;
+  onContextMenu?: (e: React.MouseEvent, asset: AssetRow) => void;
 }
 
-function ThumbnailCard({ asset, selected, onSelect, onPreview, onDetail }: ThumbnailCardProps) {
+function ThumbnailCard({ asset, selected, onSelect, onPreview, onDetail, onContextMenu }: ThumbnailCardProps) {
   const [hovered, setHovered] = useState(false);
   const [resolvedThumb, setResolvedThumb] = useState<string | null>(null);
   const mediaType = inferMediaType(asset.title, asset.sourceUri);
@@ -198,6 +200,7 @@ function ThumbnailCard({ asset, selected, onSelect, onPreview, onDetail }: Thumb
       onMouseLeave={() => setHovered(false)}
       onClick={() => onDetail(asset)}
       onDoubleClick={() => onPreview(asset)}
+      onContextMenu={(e) => { if (onContextMenu) { e.preventDefault(); onContextMenu(e, asset); } }}
     >
       {/* ── Thumbnail area ── */}
       <div
@@ -300,9 +303,10 @@ interface SequenceCardProps {
   sequence: AssetSequence;
   onPreview: (asset: AssetRow) => void;
   onDetail: (asset: AssetRow) => void;
+  onContextMenu?: (e: React.MouseEvent, asset: AssetRow) => void;
 }
 
-function SequenceCard({ sequence, onPreview, onDetail }: SequenceCardProps) {
+function SequenceCard({ sequence, onPreview, onDetail, onContextMenu }: SequenceCardProps) {
   const gradient = getThumbGradient("image");
   const rep = sequence.representative;
   const totalSize = sequence.assets.reduce((sum, a) => sum + (a.metadata?.file_size_bytes ?? 0), 0);
@@ -328,6 +332,7 @@ function SequenceCard({ sequence, onPreview, onDetail }: SequenceCardProps) {
       className="group relative cursor-pointer transition-all overflow-hidden rounded-[9px] border border-[var(--color-ah-border)] hover:border-[var(--color-ah-accent)]/40 hover:shadow-[0_4px_22px_rgba(0,0,0,.45),0_0_14px_rgba(6,182,212,.09)] hover:-translate-y-0.5 bg-[var(--color-ah-bg-raised)]"
       onClick={() => onDetail(rep)}
       onDoubleClick={() => onPreview(rep)}
+      onContextMenu={(e) => { if (onContextMenu) { e.preventDefault(); onContextMenu(e, rep); } }}
     >
       {/* Thumbnail area */}
       <div
@@ -1222,6 +1227,24 @@ export function AssetBrowser() {
     }, { replace: true });
   }, [setSearchParams]);
 
+  const [contextMenu, setContextMenu] = useState<{ asset: AssetRow; x: number; y: number } | null>(null);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, asset: AssetRow) => {
+    e.preventDefault();
+    setContextMenu({ asset, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleContextStatusChanged = useCallback((_asset: AssetRow) => {
+    void fetchAssets().then(setAssets);
+    setContextMenu(null);
+  }, []);
+
+  const handleContextArchived = useCallback((archivedId: string) => {
+    setAssets((prev) => prev.filter((a) => a.id !== archivedId));
+    if (detailAsset?.id === archivedId) setDetailAsset(null);
+    setContextMenu(null);
+  }, [detailAsset]);
+
   const [apiError, setApiError] = useState(false);
 
   useEffect(() => {
@@ -1431,6 +1454,7 @@ export function AssetBrowser() {
                     sequence={entry}
                     onPreview={setPreviewAsset}
                     onDetail={setDetailAsset}
+                    onContextMenu={handleContextMenu}
                   />
                 ) : (
                   <ThumbnailCard
@@ -1440,6 +1464,7 @@ export function AssetBrowser() {
                     onSelect={toggleSelect}
                     onPreview={setPreviewAsset}
                     onDetail={setDetailAsset}
+                    onContextMenu={handleContextMenu}
                   />
                 )
               )}
@@ -1482,6 +1507,7 @@ export function AssetBrowser() {
                         }}
                         onClick={() => setDetailAsset(asset)}
                         onDoubleClick={() => setPreviewAsset(asset)}
+                        onContextMenu={(e) => { e.preventDefault(); handleContextMenu(e, asset); }}
                       >
                         <span className="w-6 px-1 flex items-center justify-center"><MediaTypeIcon type={mt} size={14} className="text-[var(--color-ah-text-muted)]" /></span>
                         <span className="flex-[2] px-1 truncate">{asset.title}</span>
@@ -1518,6 +1544,7 @@ export function AssetBrowser() {
                         }}
                         onClick={() => setDetailAsset(asset)}
                         onDoubleClick={() => setPreviewAsset(asset)}
+                        onContextMenu={(e) => { e.preventDefault(); handleContextMenu(e, asset); }}
                       >
                         <span className="flex-[2] px-2 truncate">{asset.title}</span>
                         <span className="w-28 px-2 font-[var(--font-ah-mono)] text-xs text-[var(--color-ah-text-muted)]">{seqShot || "-"}</span>
@@ -1535,6 +1562,16 @@ export function AssetBrowser() {
       )}
 
       {previewAsset && <MediaPreview asset={previewAsset} assets={assets} onClose={() => setPreviewAsset(null)} onNavigate={setPreviewAsset} />}
+
+      {contextMenu && (
+        <AssetContextMenu
+          asset={contextMenu.asset}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          onStatusChanged={handleContextStatusChanged}
+          onArchived={handleContextArchived}
+        />
+      )}
       </div>{/* end main content */}
 
       {/* ── Detail panel — slides in as fixed-width column; grid reflows naturally ── */}
