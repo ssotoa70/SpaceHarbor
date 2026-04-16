@@ -844,6 +844,13 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
   recordWorkflowTransition(input: WorkflowTransitionInput, ctx: WriteContext): Promise<void>;
   listWorkflowTransitions(instanceId: string): Promise<WorkflowTransitionRecord[]>;
 
+  // ── DataEngine dispatches (migration 022) ──
+  createDataEngineDispatches(inputs: DataEngineDispatchInput[], ctx: WriteContext): Promise<DataEngineDispatchRecord[]>;
+  listDataEngineDispatches(filter?: { versionId?: string; checkinId?: string; status?: string; limit?: number }): Promise<DataEngineDispatchRecord[]>;
+  listPendingDispatchesForPolling(now: string, limit?: number): Promise<DataEngineDispatchRecord[]>;
+  getDataEngineDispatch(id: string): Promise<DataEngineDispatchRecord | null>;
+  updateDataEngineDispatch(id: string, update: Partial<DataEngineDispatchUpdate>, ctx: WriteContext): Promise<DataEngineDispatchRecord | null>;
+
   // ── Atomic check-in state ──
   createCheckin(input: CheckinInput, ctx: WriteContext): Promise<CheckinRecord>;
   getCheckin(id: string): Promise<CheckinRecord | null>;
@@ -1116,6 +1123,58 @@ export interface WorkflowTransitionRecord {
   actor: string | null;
   payloadJson: string | null;
   at: string;
+}
+
+export type DataEngineDispatchStatus = "pending" | "completed" | "failed" | "abandoned";
+
+export interface DataEngineDispatchInput {
+  checkinId?: string;
+  versionId: string;
+  fileRole: string;
+  fileKind: "image" | "video" | "raw_camera";
+  sourceS3Bucket: string;
+  sourceS3Key: string;
+  expectedFunction: string;
+  metadataTargetSchema?: string;
+  metadataTargetTable?: string;
+  deadlineAt: string;
+  correlationId?: string;
+}
+
+export interface DataEngineDispatchUpdate {
+  status: DataEngineDispatchStatus;
+  proxyUrl: string | null;
+  thumbnailUrl: string | null;
+  metadataRowId: string | null;
+  lastError: string | null;
+  completedAt: string | null;
+  lastPolledAt: string | null;
+  pollAttempts: number;
+}
+
+export interface DataEngineDispatchRecord {
+  id: string;
+  checkinId: string | null;
+  versionId: string;
+  fileRole: string;
+  fileKind: string;
+  sourceS3Bucket: string;
+  sourceS3Key: string;
+  expectedFunction: string;
+  status: DataEngineDispatchStatus;
+  proxyUrl: string | null;
+  thumbnailUrl: string | null;
+  metadataTargetSchema: string | null;
+  metadataTargetTable: string | null;
+  metadataRowId: string | null;
+  lastError: string | null;
+  deadlineAt: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  pollAttempts: number;
+  lastPolledAt: string | null;
+  correlationId: string | null;
 }
 
 export type CheckinState = "reserved" | "committed" | "compensating" | "aborted";

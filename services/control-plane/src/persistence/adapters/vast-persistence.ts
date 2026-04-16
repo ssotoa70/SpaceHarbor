@@ -1186,6 +1186,23 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     return this.localFallback.listWorkflowTransitions(instanceId);
   }
 
+  // ── DataEngine dispatches (migration 022) ──
+  async createDataEngineDispatches(inputs: Parameters<PersistenceAdapter["createDataEngineDispatches"]>[0], ctx: WriteContext) {
+    return this.localFallback.createDataEngineDispatches(inputs, ctx);
+  }
+  async listDataEngineDispatches(filter?: Parameters<PersistenceAdapter["listDataEngineDispatches"]>[0]) {
+    return this.localFallback.listDataEngineDispatches(filter);
+  }
+  async listPendingDispatchesForPolling(now: string, limit?: number) {
+    return this.localFallback.listPendingDispatchesForPolling(now, limit);
+  }
+  async getDataEngineDispatch(id: string) {
+    return this.localFallback.getDataEngineDispatch(id);
+  }
+  async updateDataEngineDispatch(id: string, update: Parameters<PersistenceAdapter["updateDataEngineDispatch"]>[1], ctx: WriteContext) {
+    return this.localFallback.updateDataEngineDispatch(id, update, ctx);
+  }
+
   // ── Atomic check-in state ──
   // Delegated to local fallback for now. Trino-backed checkins table
   // (migration 018) is wired when the VAST adapter split lands in Phase 3.

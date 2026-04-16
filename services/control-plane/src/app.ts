@@ -61,7 +61,9 @@ import { registerTriggersRoute } from "./routes/triggers.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerWorkflowsRoute } from "./routes/workflows.js";
 import { registerBreakersRoute } from "./routes/breakers.js";
+import { registerDispatchesRoute } from "./routes/dispatches.js";
 import { TriggerConsumer } from "./automation/trigger-consumer.js";
+import { DataEngineDispatchService, DispatchPollingDetector } from "./automation/dataengine-dispatch.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 import { TrinoClient } from "./db/trino-client.js";
@@ -99,6 +101,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   persistence.reset();
   const auditRetention = createAuditRetentionRunner(persistence);
   const triggerConsumer = new TriggerConsumer(persistence);
+  const dispatchService = new DataEngineDispatchService(persistence);
+  const dispatchPoller = new DispatchPollingDetector(persistence);
   const leaseReaping = createLeaseReapingRunner(persistence);
   const prefixes = ["", "/api/v1"];
 
@@ -401,6 +405,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerWebhookRoutes(app, persistence, prefixes);
     void registerWorkflowsRoute(app, persistence, prefixes);
     void registerBreakersRoute(app, prefixes);
+    void registerDispatchesRoute(app, persistence, dispatchPoller, prefixes);
     void registerAuditRoute(app, persistence, prefixes);
     void registerIncidentRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);
@@ -901,17 +906,24 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const isBackgroundWorker =
       process.env.SPACEHARBOR_BACKGROUND_WORKER !== "false";
 
+    // dispatchService is a bus subscriber — it fires on checkin.committed
+    // regardless of worker role. Every replica that receives the event
+    // writes dispatch rows (idempotent: multiple replicas writing the same
+    // checkin is prevented by the bus only firing locally). Keep it ON.
+    dispatchService.start();
+
     if (isBackgroundWorker) {
       auditRetention.start();
       leaseReaping.start();
       rateLimiter.start();
       triggerConsumer.start();
+      dispatchPoller.start();
       if (subscriber) {
         await subscriber.start();
       }
       app.log.info(
         { backgroundWorker: true },
-        "[startup] background runners started (audit-retention, lease-reap, rate-limit, triggers, kafka)",
+        "[startup] background runners started (audit-retention, lease-reap, rate-limit, triggers, dispatch-poller, kafka)",
       );
     } else {
       app.log.info(
@@ -923,11 +935,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   app.addHook("onClose", async () => {
     const isBackgroundWorker = process.env.SPACEHARBOR_BACKGROUND_WORKER !== "false";
+    dispatchService.stop();
     if (isBackgroundWorker) {
       auditRetention.stop();
       leaseReaping.stop();
       rateLimiter.stop();
       triggerConsumer.stop();
+      dispatchPoller.stop();
       if (subscriber) {
         await subscriber.stop();
       }

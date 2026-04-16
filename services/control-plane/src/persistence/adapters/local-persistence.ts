@@ -116,6 +116,7 @@ import type {
   WebhookDirection,
   WebhookDeliveryStatus,
   WorkflowInstanceState,
+  DataEngineDispatchStatus,
 } from "../types.js";
 
 interface QueueEntry {
@@ -380,6 +381,32 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     at: string;
   }> = [];
 
+  // DataEngine dispatches (migration 022)
+  private readonly dataEngineDispatches = new Map<string, {
+    id: string;
+    checkinId: string | null;
+    versionId: string;
+    fileRole: string;
+    fileKind: string;
+    sourceS3Bucket: string;
+    sourceS3Key: string;
+    expectedFunction: string;
+    status: DataEngineDispatchStatus;
+    proxyUrl: string | null;
+    thumbnailUrl: string | null;
+    metadataTargetSchema: string | null;
+    metadataTargetTable: string | null;
+    metadataRowId: string | null;
+    lastError: string | null;
+    deadlineAt: string;
+    createdAt: string;
+    updatedAt: string;
+    completedAt: string | null;
+    pollAttempts: number;
+    lastPolledAt: string | null;
+    correlationId: string | null;
+  }>();
+
   // Atomic check-in state
   private readonly checkins = new Map<string, {
     id: string;
@@ -526,7 +553,7 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     // Atomic check-in
     this.checkins.clear();
     this.s3CompensationLog.clear();
-    // Version files + Triggers + Webhooks + Workflows
+    // Version files + Triggers + Webhooks + Workflows + Dispatches
     this.versionFiles.clear();
     this.triggers.clear();
     this.webhookEndpoints.clear();
@@ -534,6 +561,7 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.workflowDefinitions.clear();
     this.workflowInstances.clear();
     this.workflowTransitions.length = 0;
+    this.dataEngineDispatches.clear();
   }
 
   async createIngestAsset(input: IngestInput, context: WriteContext): Promise<IngestResult> {
@@ -2824,6 +2852,97 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.archivedAssets.add(assetId);
     this.assets.delete(assetId);
     this.recordAudit(`Asset ${assetId} archived`, ctx.correlationId, new Date());
+  }
+
+  // ── DataEngine dispatches (migration 022) ──
+
+  async createDataEngineDispatches(
+    inputs: Parameters<PersistenceAdapter["createDataEngineDispatches"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    const created: Array<ReturnType<typeof this.buildDispatch>> = [];
+    for (const input of inputs) {
+      const record = this.buildDispatch(input, now);
+      this.dataEngineDispatches.set(record.id, record);
+      created.push(record);
+    }
+    return created;
+  }
+
+  private buildDispatch(
+    input: Parameters<PersistenceAdapter["createDataEngineDispatches"]>[0][number],
+    now: string,
+  ) {
+    return {
+      id: randomUUID(),
+      checkinId: input.checkinId ?? null,
+      versionId: input.versionId,
+      fileRole: input.fileRole,
+      fileKind: input.fileKind,
+      sourceS3Bucket: input.sourceS3Bucket,
+      sourceS3Key: input.sourceS3Key,
+      expectedFunction: input.expectedFunction,
+      status: "pending" as const,
+      proxyUrl: null,
+      thumbnailUrl: null,
+      metadataTargetSchema: input.metadataTargetSchema ?? null,
+      metadataTargetTable: input.metadataTargetTable ?? null,
+      metadataRowId: null,
+      lastError: null,
+      deadlineAt: input.deadlineAt,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+      pollAttempts: 0,
+      lastPolledAt: null,
+      correlationId: input.correlationId ?? null,
+    };
+  }
+
+  async listDataEngineDispatches(filter?: { versionId?: string; checkinId?: string; status?: string; limit?: number }) {
+    let rows = [...this.dataEngineDispatches.values()];
+    if (filter?.versionId) rows = rows.filter((r) => r.versionId === filter.versionId);
+    if (filter?.checkinId) rows = rows.filter((r) => r.checkinId === filter.checkinId);
+    if (filter?.status) rows = rows.filter((r) => r.status === filter.status);
+    rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const limit = filter?.limit ?? 200;
+    return rows.slice(0, limit);
+  }
+
+  async listPendingDispatchesForPolling(now: string, limit = 50) {
+    return [...this.dataEngineDispatches.values()]
+      .filter((r) => r.status === "pending" && r.deadlineAt > now)
+      .sort((a, b) => (a.lastPolledAt ?? a.createdAt).localeCompare(b.lastPolledAt ?? b.createdAt))
+      .slice(0, limit);
+  }
+
+  async getDataEngineDispatch(id: string) {
+    return this.dataEngineDispatches.get(id) ?? null;
+  }
+
+  async updateDataEngineDispatch(
+    id: string,
+    update: Parameters<PersistenceAdapter["updateDataEngineDispatch"]>[1],
+    ctx: WriteContext,
+  ) {
+    const existing = this.dataEngineDispatches.get(id);
+    if (!existing) return null;
+    const now = this.resolveNow(ctx).toISOString();
+    const updated = {
+      ...existing,
+      status: update.status ?? existing.status,
+      proxyUrl: update.proxyUrl !== undefined ? update.proxyUrl : existing.proxyUrl,
+      thumbnailUrl: update.thumbnailUrl !== undefined ? update.thumbnailUrl : existing.thumbnailUrl,
+      metadataRowId: update.metadataRowId !== undefined ? update.metadataRowId : existing.metadataRowId,
+      lastError: update.lastError !== undefined ? update.lastError : existing.lastError,
+      completedAt: update.completedAt !== undefined ? update.completedAt : existing.completedAt,
+      lastPolledAt: update.lastPolledAt !== undefined ? update.lastPolledAt : existing.lastPolledAt,
+      pollAttempts: update.pollAttempts ?? existing.pollAttempts,
+      updatedAt: now,
+    };
+    this.dataEngineDispatches.set(id, updated);
+    return updated;
   }
 
   // ── Atomic check-in state ──
