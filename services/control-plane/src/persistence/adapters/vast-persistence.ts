@@ -1091,6 +1091,10 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     return this.localFallback.archiveAsset(assetId, ctx);
   }
 
+  async recordRequestAudit(event: Parameters<PersistenceAdapter["recordRequestAudit"]>[0]): Promise<void> {
+    return this.localFallback.recordRequestAudit(event);
+  }
+
   // ── Custom Fields ──
   // Currently delegated to the local fallback. Trino-backed persistence
   // lands alongside the broader VAST adapter split in Phase 3 of the

@@ -797,6 +797,23 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
   // Asset Archive (soft-delete)
   archiveAsset(assetId: string, ctx: WriteContext): Promise<void>;
 
+  /**
+   * Framework-enforced audit emission (append-only).
+   *
+   * Called by Fastify `onResponse` hook for every mutation. Unlike the
+   * domain-specific `appendApprovalAuditEntry` / `appendDccAuditEntry`
+   * methods, this is a generic primitive that captures the HTTP request
+   * envelope (method, path, status, actor, correlation_id).
+   */
+  recordRequestAudit(event: {
+    message: string;
+    correlationId: string;
+    actor?: string;
+    method?: string;
+    path?: string;
+    statusCode?: number;
+  }): Promise<void>;
+
   // Custom Fields (runtime-extensible entity metadata)
   listCustomFieldDefinitions(entityType?: string, includeDeleted?: boolean): Promise<CustomFieldDefinitionRecord[]>;
   getCustomFieldDefinition(id: string): Promise<CustomFieldDefinitionRecord | null>;

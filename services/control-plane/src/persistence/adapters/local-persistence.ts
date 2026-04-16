@@ -2654,6 +2654,23 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.recordAudit(`Asset ${assetId} archived`, ctx.correlationId, new Date());
   }
 
+  // ── Framework-enforced Audit (Fastify hooks) ──
+
+  async recordRequestAudit(event: {
+    message: string;
+    correlationId: string;
+    actor?: string;
+    method?: string;
+    path?: string;
+    statusCode?: number;
+  }): Promise<void> {
+    const decorated =
+      event.method && event.path
+        ? `${event.method} ${event.path} → ${event.statusCode ?? "?"} by ${event.actor ?? "anonymous"}: ${event.message}`
+        : event.message;
+    this.recordAudit(decorated, event.correlationId, new Date());
+  }
+
   // ── Custom Fields — Definitions ──
 
   async listCustomFieldDefinitions(entityType?: string, includeDeleted = false) {
