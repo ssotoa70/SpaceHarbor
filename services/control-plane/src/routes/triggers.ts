@@ -18,6 +18,7 @@ import type { FastifyInstance } from "fastify";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
+import { paginateSortedArray, parsePaginationParams, paginationQuerySchema } from "../http/pagination.js";
 import type { PersistenceAdapter, TriggerActionKind } from "../persistence/types.js";
 
 const ACTION_KINDS: TriggerActionKind[] = [
@@ -55,7 +56,7 @@ export async function registerTriggersRoute(
   for (const prefix of prefixes) {
     const op = prefix === "/api/v1" ? "v1" : "legacy";
 
-    app.get<{ Querystring: { enabled?: string } }>(
+    app.get<{ Querystring: { enabled?: string; cursor?: string; limit?: string; offset?: string } }>(
       withPrefix(prefix, "/triggers"),
       {
         schema: {
@@ -64,10 +65,19 @@ export async function registerTriggersRoute(
           summary: "List all triggers",
           querystring: {
             type: "object",
-            properties: { enabled: { type: "string" } },
+            properties: {
+              enabled: { type: "string" },
+              ...paginationQuerySchema,
+            },
           },
           response: {
-            200: { type: "object", properties: { triggers: { type: "array", items: triggerResponseSchema } } },
+            200: {
+              type: "object",
+              properties: {
+                triggers: { type: "array", items: triggerResponseSchema },
+                nextCursor: { type: ["string", "null"] },
+              },
+            },
           },
         },
       },
@@ -75,8 +85,12 @@ export async function registerTriggersRoute(
         const filter: { enabled?: boolean } = {};
         if (request.query.enabled === "true") filter.enabled = true;
         if (request.query.enabled === "false") filter.enabled = false;
-        const triggers = await persistence.listTriggers(filter);
-        return { triggers };
+        const pageParams = parsePaginationParams(request.query, { defaultLimit: 50 });
+        const all = await persistence.listTriggers(filter);
+        // Sort DESC by createdAt for cursor pagination
+        all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const { items, nextCursor } = paginateSortedArray(all, pageParams, (t) => `${t.createdAt}|${t.id}`);
+        return { triggers: items, nextCursor };
       },
     );
 

@@ -494,6 +494,7 @@ export const assetsResponseSchema = {
       type: "array",
       items: assetQueueRowSchema
     },
+    nextCursor: { type: ["string", "null"] },
     pagination: {
       type: "object",
       properties: {

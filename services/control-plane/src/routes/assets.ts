@@ -3,12 +3,18 @@ import type { FastifyInstance } from "fastify";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import { assetsResponseSchema, assetDetailResponseSchema, errorEnvelopeSchema } from "../http/schemas.js";
+import {
+  paginateSortedArray,
+  parsePaginationParams,
+  paginationQuerySchema,
+} from "../http/pagination.js";
 import type { WorkflowStatus } from "../domain/models.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
 
 interface AssetsQuerystring {
   limit?: string;
   offset?: string;
+  cursor?: string;
   status?: string;
   q?: string;
 }
@@ -151,8 +157,7 @@ export async function registerAssetsRoute(
           querystring: {
             type: "object",
             properties: {
-              limit: { type: "string", description: "Maximum number of results to return (1–200, default 50)" },
-              offset: { type: "string", description: "Number of results to skip for pagination (default 0)" },
+              ...paginationQuerySchema,
               status: { type: "string", description: "Filter by workflow status (e.g. pending, qc_pending, qc_approved)" },
               q: { type: "string", description: "Full-text search query matched against title and sourceUri" }
             }
@@ -163,8 +168,7 @@ export async function registerAssetsRoute(
         }
       },
       async (request) => {
-        const limit = Math.min(Math.max(parseInt(request.query.limit ?? "50", 10) || 50, 1), 200);
-        const offset = Math.max(parseInt(request.query.offset ?? "0", 10) || 0, 0);
+        const pageParams = parsePaginationParams(request.query, { defaultLimit: 50 });
         const statusFilter = request.query.status;
         const searchQuery = request.query.q?.toLowerCase();
 
@@ -182,12 +186,18 @@ export async function registerAssetsRoute(
           );
         }
 
+        // Stable DESC sort by id (sort key for cursor). Assets don't carry
+        // createdAt on the queue-row shape; id is random UUIDv4 → sufficient
+        // for stable pagination within the same server snapshot.
+        rows.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+
         const total = rows.length;
-        const paginated = rows.slice(offset, offset + limit);
+        const { items, nextCursor } = paginateSortedArray(rows, pageParams, (r) => r.id);
 
         return {
-          assets: paginated,
-          pagination: { total, limit, offset }
+          assets: items,
+          nextCursor,
+          pagination: { total, limit: pageParams.limit, offset: pageParams.offset ?? 0 }
         };
       }
     );

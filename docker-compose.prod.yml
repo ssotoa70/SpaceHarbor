@@ -1,0 +1,81 @@
+## ---------------------------------------------------------------------------
+## SpaceHarbor — multi-replica production overlay.
+##
+## Usage:
+##   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+##
+## Runs three control-plane replicas behind a simple Traefik load balancer.
+## Exactly ONE replica has SPACEHARBOR_BACKGROUND_WORKER=true so timers,
+## audit retention, lease reaping, rate limiter, trigger consumer, and the
+## Kafka subscriber only fire on that node. The other two handle HTTP only.
+##
+## When Phase 4 lands real leader-election (Trino advisory-lock or Redis
+## lease), all three replicas will run the background runners with the
+## same gate flipped to true and elect a leader at runtime — this file
+## becomes unnecessary then. Until then, the env-gate is the simplest
+## primitive that prevents double-execution.
+##
+## DO NOT use this in dev — it triples the resource footprint and the
+## single-instance `control-plane` container becomes a separate network
+## identity from `control-plane-a/b/c`.
+## ---------------------------------------------------------------------------
+
+services:
+  control-plane:
+    deploy:
+      replicas: 0  # Disable the baseline single-replica service; replicas are named below.
+
+  control-plane-a:
+    extends:
+      file: docker-compose.yml
+      service: control-plane
+    container_name: spaceharbor-control-plane-a
+    environment:
+      SPACEHARBOR_BACKGROUND_WORKER: "true"   # ← the ONE worker replica
+    ports:
+      - "8080:8080"
+
+  control-plane-b:
+    extends:
+      file: docker-compose.yml
+      service: control-plane
+    container_name: spaceharbor-control-plane-b
+    environment:
+      SPACEHARBOR_BACKGROUND_WORKER: "false"
+    ports:
+      - "8081:8080"
+
+  control-plane-c:
+    extends:
+      file: docker-compose.yml
+      service: control-plane
+    container_name: spaceharbor-control-plane-c
+    environment:
+      SPACEHARBOR_BACKGROUND_WORKER: "false"
+    ports:
+      - "8082:8080"
+
+  # Traefik fronts the three replicas. Any reverse proxy works — we picked
+  # Traefik for zero-config service discovery via Docker labels.
+  traefik:
+    image: traefik:v3
+    container_name: spaceharbor-traefik
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --api.dashboard=true
+      - --api.insecure=true
+    ports:
+      - "80:80"
+      - "8088:8080"  # Traefik dashboard (dev-only; disable for prod)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - frontend
+    labels:
+      - traefik.http.routers.cp.rule=PathPrefix(`/`)
+      - traefik.http.services.cp.loadbalancer.server.port=8080
+      - traefik.http.routers.cp.service=cp
+      - traefik.http.services.cp.loadbalancer.healthcheck.path=/health
+      - traefik.http.services.cp.loadbalancer.healthcheck.interval=10s

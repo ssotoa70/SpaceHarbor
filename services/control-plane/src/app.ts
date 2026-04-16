@@ -60,6 +60,7 @@ import { registerCheckinRoute } from "./routes/checkin.js";
 import { registerTriggersRoute } from "./routes/triggers.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerWorkflowsRoute } from "./routes/workflows.js";
+import { registerBreakersRoute } from "./routes/breakers.js";
 import { TriggerConsumer } from "./automation/trigger-consumer.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
@@ -399,6 +400,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerTriggersRoute(app, persistence, prefixes);
     void registerWebhookRoutes(app, persistence, prefixes);
     void registerWorkflowsRoute(app, persistence, prefixes);
+    void registerBreakersRoute(app, prefixes);
     void registerAuditRoute(app, persistence, prefixes);
     void registerIncidentRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);
@@ -887,22 +889,48 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       }
     }
 
-    auditRetention.start();
-    leaseReaping.start();
-    rateLimiter.start();
-    triggerConsumer.start();
-    if (subscriber) {
-      await subscriber.start();
+    // Background-worker gate: SPACEHARBOR_BACKGROUND_WORKER controls whether
+    // this replica runs the periodic/event-driven background runners. In a
+    // single-replica deployment (docker compose dev) the default is true.
+    // In a multi-replica prod deployment set it to "true" on exactly one
+    // replica and "false" on the rest to prevent double-firing of timers
+    // and duplicate Kafka consumption.
+    //
+    // A proper leader-election primitive (Trino advisory lock or Redis lease)
+    // lands in Phase 4; the env-gate is the simplest safe default today.
+    const isBackgroundWorker =
+      process.env.SPACEHARBOR_BACKGROUND_WORKER !== "false";
+
+    if (isBackgroundWorker) {
+      auditRetention.start();
+      leaseReaping.start();
+      rateLimiter.start();
+      triggerConsumer.start();
+      if (subscriber) {
+        await subscriber.start();
+      }
+      app.log.info(
+        { backgroundWorker: true },
+        "[startup] background runners started (audit-retention, lease-reap, rate-limit, triggers, kafka)",
+      );
+    } else {
+      app.log.info(
+        { backgroundWorker: false },
+        "[startup] background runners DISABLED (SPACEHARBOR_BACKGROUND_WORKER=false)",
+      );
     }
   });
 
   app.addHook("onClose", async () => {
-    auditRetention.stop();
-    leaseReaping.stop();
-    rateLimiter.stop();
-    triggerConsumer.stop();
-    if (subscriber) {
-      await subscriber.stop();
+    const isBackgroundWorker = process.env.SPACEHARBOR_BACKGROUND_WORKER !== "false";
+    if (isBackgroundWorker) {
+      auditRetention.stop();
+      leaseReaping.stop();
+      rateLimiter.stop();
+      triggerConsumer.stop();
+      if (subscriber) {
+        await subscriber.stop();
+      }
     }
   });
 

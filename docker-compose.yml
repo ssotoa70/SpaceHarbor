@@ -80,6 +80,12 @@ services:
       SPACEHARBOR_S3_REGION: ${SPACEHARBOR_S3_REGION:-us-east-1}
       SPACEHARBOR_S3_ACCESS_KEY_ID: ${SPACEHARBOR_S3_ACCESS_KEY_ID:-}
       SPACEHARBOR_S3_SECRET_ACCESS_KEY: ${SPACEHARBOR_S3_SECRET_ACCESS_KEY:-}
+      # Phase 3: background-worker gate. Single-replica deploys leave this
+      # true. Multi-replica deploys set true on exactly one replica and
+      # false on the rest to prevent double-firing of timers + Kafka.
+      SPACEHARBOR_BACKGROUND_WORKER: ${SPACEHARBOR_BACKGROUND_WORKER:-true}
+      # Phase 3: shutdown drain for rolling deploys.
+      SPACEHARBOR_SHUTDOWN_TIMEOUT_MS: ${SPACEHARBOR_SHUTDOWN_TIMEOUT_MS:-30000}
       # External function query bridges
       VASTDB_QUERY_URL: http://vastdb-query:8070
     ports:

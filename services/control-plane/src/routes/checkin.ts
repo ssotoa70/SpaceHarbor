@@ -64,6 +64,7 @@ import type { PersistenceAdapter, WriteContext, VersionFileRole, VersionFileInpu
 import { getStorageEndpoints } from "./platform-settings.js";
 import { setVastTlsSkip, restoreVastTls } from "../vast/vast-fetch.js";
 import { eventBus } from "../events/bus.js";
+import { s3Breaker } from "../infra/circuit-breaker.js";
 
 // ---------------------------------------------------------------------------
 // Types (client-facing)
@@ -540,17 +541,19 @@ export async function registerCheckinRoute(
 
             let uploadId: string;
             try {
-              const resp = await s3.send(
+              const resp = await s3Breaker.execute(() => s3.send(
                 new CreateMultipartUploadCommand({
                   Bucket: ep.bucket,
                   Key: key,
                   ContentType: plan.contentType,
                 }),
-              );
+              ));
               if (!resp.UploadId) throw new Error("S3 CreateMultipartUpload returned no UploadId");
               uploadId = resp.UploadId;
             } catch (e) {
               // Roll back any multipart uploads already opened in this reserve call
+              // (compensation path — bypass the breaker so we can still abort
+              // even when the circuit is half-open / recently opened).
               for (const opened of files) {
                 try {
                   await s3.send(new AbortMultipartUploadCommand({
@@ -798,14 +801,14 @@ export async function registerCheckinRoute(
               .sort((a, b) => a.partNumber - b.partNumber)
               .map((p) => ({ PartNumber: p.partNumber, ETag: p.eTag }));
             try {
-              await s3.send(
+              await s3Breaker.execute(() => s3.send(
                 new CompleteMultipartUploadCommand({
                   Bucket: entry.planned.s3Bucket,
                   Key: entry.planned.s3Key,
                   UploadId: entry.planned.s3UploadId,
                   MultipartUpload: { Parts: sortedParts },
                 }),
-              );
+              ));
             } catch (e) {
               s3.destroy();
               restoreVastTls();

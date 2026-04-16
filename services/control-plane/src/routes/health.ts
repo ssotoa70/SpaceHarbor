@@ -76,6 +76,7 @@ export async function registerHealthRoute(
             service: { type: "string" },
             uptime: { type: "number" },
             timestamp: { type: "string" },
+            backgroundWorker: { type: "boolean" },
             iam: {
               type: "object",
               properties: {
@@ -96,6 +97,7 @@ export async function registerHealthRoute(
       service: "control-plane",
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
+      backgroundWorker: process.env.SPACEHARBOR_BACKGROUND_WORKER !== "false",
     };
 
     // Phase 3.3: IAM subsystem health

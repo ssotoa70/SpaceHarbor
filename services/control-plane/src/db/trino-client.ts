@@ -7,6 +7,7 @@
  */
 
 import { vastFetch } from "../vast/vast-fetch.js";
+import { trinoBreaker } from "../infra/circuit-breaker.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -115,6 +116,13 @@ export class TrinoClient {
    * Follows the nextUri polling chain until the query completes.
    */
   async query(sql: string): Promise<TrinoQueryResult> {
+    // Run every Trino query through the circuit breaker so a VAST DB
+    // outage doesn't cascade into every control-plane request timing out.
+    // The breaker opens after 5 consecutive failures and stays open for 30s.
+    return trinoBreaker.execute(() => this._queryInner(sql));
+  }
+
+  private async _queryInner(sql: string): Promise<TrinoQueryResult> {
     const url = `${this.endpoint}/v1/statement`;
 
     const controller = new AbortController();

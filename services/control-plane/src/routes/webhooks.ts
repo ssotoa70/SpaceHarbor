@@ -22,6 +22,7 @@ import type { FastifyInstance } from "fastify";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
+import { paginateSortedArray, parsePaginationParams, paginationQuerySchema } from "../http/pagination.js";
 import type { PersistenceAdapter, WebhookDirection } from "../persistence/types.js";
 import { cacheWebhookSecret, verifyInboundSignature, invalidateWebhookSecret } from "../automation/outbound-webhook.js";
 import { eventBus } from "../events/bus.js";
@@ -220,7 +221,7 @@ export async function registerWebhookRoutes(
     );
 
     // ── Delivery log ──
-    app.get<{ Querystring: { webhookId?: string; status?: string; limit?: string } }>(
+    app.get<{ Querystring: { webhookId?: string; status?: string; cursor?: string; limit?: string; offset?: string } }>(
       withPrefix(prefix, "/webhook-deliveries"),
       {
         schema: {
@@ -232,33 +233,31 @@ export async function registerWebhookRoutes(
             properties: {
               webhookId: { type: "string" },
               status: { type: "string" },
-              limit: { type: "string" },
+              ...paginationQuerySchema,
             },
           },
           response: {
             200: {
               type: "object",
               properties: {
-                deliveries: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    additionalProperties: true,
-                  },
-                },
+                deliveries: { type: "array", items: { type: "object", additionalProperties: true } },
+                nextCursor: { type: ["string", "null"] },
               },
             },
           },
         },
       },
       async (request) => {
-        const limit = request.query.limit ? Math.min(500, parseInt(request.query.limit, 10) || 100) : 100;
-        const rows = await persistence.listWebhookDeliveries({
+        const pageParams = parsePaginationParams(request.query, { defaultLimit: 100 });
+        const all = await persistence.listWebhookDeliveries({
           webhookId: request.query.webhookId,
           status: request.query.status,
-          limit,
+          limit: 500,
         });
-        return { deliveries: rows };
+        // Persistence returns rows in insertion order (newest first) — pre-sort explicit
+        all.sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0));
+        const { items, nextCursor } = paginateSortedArray(all, pageParams, (d) => `${d.startedAt}|${d.id}`);
+        return { deliveries: items, nextCursor };
       },
     );
 

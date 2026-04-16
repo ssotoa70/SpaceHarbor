@@ -21,6 +21,7 @@ import type { FastifyInstance } from "fastify";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
+import { paginateSortedArray, parsePaginationParams, paginationQuerySchema } from "../http/pagination.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
 import { runWorkflowToBoundary, type WorkflowDsl } from "../workflow/engine.js";
 
@@ -264,7 +265,7 @@ export async function registerWorkflowsRoute(
       },
     );
 
-    app.get<{ Querystring: { definitionId?: string; state?: string; parentEntityType?: string; parentEntityId?: string; limit?: string } }>(
+    app.get<{ Querystring: { definitionId?: string; state?: string; parentEntityType?: string; parentEntityId?: string; cursor?: string; limit?: string; offset?: string } }>(
       withPrefix(prefix, "/workflow-instances"),
       {
         schema: {
@@ -278,22 +279,33 @@ export async function registerWorkflowsRoute(
               state: { type: "string" },
               parentEntityType: { type: "string" },
               parentEntityId: { type: "string" },
-              limit: { type: "string" },
+              ...paginationQuerySchema,
             },
           },
-          response: { 200: { type: "object", properties: { instances: { type: "array", items: instanceSchema } } } },
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                instances: { type: "array", items: instanceSchema },
+                nextCursor: { type: ["string", "null"] },
+              },
+            },
+          },
         },
       },
       async (request) => {
-        const limit = request.query.limit ? Math.min(500, parseInt(request.query.limit, 10) || 100) : 100;
-        const instances = await persistence.listWorkflowInstances({
+        const pageParams = parsePaginationParams(request.query, { defaultLimit: 50 });
+        // Fetch a superset (up to 500) then cursor-slice. The persistence
+        // layer already sorts by startedAt DESC.
+        const all = await persistence.listWorkflowInstances({
           definitionId: request.query.definitionId,
           state: request.query.state,
           parentEntityType: request.query.parentEntityType,
           parentEntityId: request.query.parentEntityId,
-          limit,
+          limit: 500,
         });
-        return { instances };
+        const { items, nextCursor } = paginateSortedArray(all, pageParams, (i) => `${i.startedAt}|${i.id}`);
+        return { instances: items, nextCursor };
       },
     );
 
