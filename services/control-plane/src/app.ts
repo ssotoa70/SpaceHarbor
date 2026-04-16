@@ -753,23 +753,49 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const adminEmail = process.env.SPACEHARBOR_ADMIN_EMAIL?.trim();
     let roleBindingSvc = (app as any).roleBindingService as RoleBindingService | PersistentRoleBindingService;
 
+    // In-memory IAM fallback is gated by SPACEHARBOR_ALLOW_INMEMORY_IAM_FALLBACK.
+    // In dev, it defaults to true (first-boot before "Deploy Schema" runs). In
+    // production the default is false — a Trino hiccup MUST NOT silently wipe
+    // durable role bindings, which creates a lock-out hazard on next restart.
+    const allowInMemoryIamFallback =
+      process.env.SPACEHARBOR_ALLOW_INMEMORY_IAM_FALLBACK === "true" ||
+      (isDev && process.env.SPACEHARBOR_ALLOW_INMEMORY_IAM_FALLBACK !== "false");
+
     if (adminEmail && roleBindingSvc) {
       let existingUsers: unknown[] = [];
+      let trinoAvailable = true;
       try {
         existingUsers = await Promise.resolve(roleBindingSvc.listUsers());
       } catch (trinoErr) {
-        app.log.warn(
+        trinoAvailable = false;
+        const errMsg = (trinoErr as Error)?.message ?? String(trinoErr);
+        if (!allowInMemoryIamFallback) {
+          app.log.error(
+            `[bootstrap] Trino query failed during startup and in-memory fallback is disabled. ` +
+            `Error: ${errMsg}. ` +
+            `Set SPACEHARBOR_ALLOW_INMEMORY_IAM_FALLBACK=true to allow fallback (dangerous: ` +
+            `wipes durable role bindings), or ensure VAST Database is reachable and ` +
+            `"Deploy Schema" has been run.`
+          );
+          throw new Error(
+            `IAM persistence unavailable (${errMsg}) and fallback disabled — aborting startup`
+          );
+        }
+        app.log.error(
           `[bootstrap] Trino query failed during startup — falling back to in-memory IAM. ` +
-          `Error: ${(trinoErr as Error)?.message ?? trinoErr}. ` +
+          `Error: ${errMsg}. ` +
           `Run "Deploy Schema" in Settings to create IAM tables.`
         );
-        // Fall back to in-memory role binding
+        // Fall back to in-memory role binding (dev only, or explicitly opted-in prod)
         const fallback = new RoleBindingService();
         (app as any).roleBindingService = fallback;
         (app as any).roleBindingType = "in-memory";
         roleBindingSvc = fallback;
         setRoleBindingService(fallback);
       }
+      // Expose IAM reachability on readiness probe — ops dashboards can alert
+      // when persistenceType flips to "in-memory" unexpectedly.
+      (app as any).iamTrinoAvailable = trinoAvailable;
       if (existingUsers.length === 0) {
         const { randomBytes: rb } = await import("node:crypto");
         let adminPassword = process.env.SPACEHARBOR_ADMIN_PASSWORD?.trim() || "";

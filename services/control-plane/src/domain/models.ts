@@ -365,6 +365,14 @@ export interface Version {
   notes: string | null;
   taskId: string | null;
   reviewStatus: ReviewStatus;
+  // Parallel version stream (migration 017). Defaults to "main" when the
+  // column is absent or NULL (pre-existing rows).
+  context: string;
+  // Sentinel pointer bookkeeping. `isSentinel=true` marks a synthetic row
+  // whose only purpose is to carry `sentinelName` ∈ {latest,current,approved}.
+  isSentinel: boolean;
+  sentinelName: string | null;
+  manifestId: string | null;
 }
 
 export interface VersionApproval {

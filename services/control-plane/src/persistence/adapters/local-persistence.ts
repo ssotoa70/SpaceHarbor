@@ -1440,9 +1440,12 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     if (!this.shots.has(input.shotId)) {
       throw new ReferentialIntegrityError(`Shot not found: ${input.shotId}`);
     }
-    // Auto-increment version_number per shot
+    // Auto-increment version_number scoped to (shotId, context). The local
+    // adapter is single-threaded (JS event loop) so there is no race to
+    // retry around — unlike the VAST Trino adapter which needs retry-on-conflict.
+    const context = input.context ?? "main";
     const existingVersions = Array.from(this.versions.values()).filter(
-      (v) => v.shotId === input.shotId
+      (v) => v.shotId === input.shotId && (v.context ?? "main") === context && !v.isSentinel,
     );
     const versionNumber =
       existingVersions.length === 0
@@ -1485,7 +1488,11 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       publishedAt: null,
       notes: input.notes ?? null,
       taskId: input.taskId ?? null,
-      reviewStatus: input.reviewStatus ?? "wip"
+      reviewStatus: input.reviewStatus ?? "wip",
+      context,
+      isSentinel: false,
+      sentinelName: null,
+      manifestId: null,
     };
     this.versions.set(version.id, version);
     // Update shot's latestVersionId

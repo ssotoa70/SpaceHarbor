@@ -155,6 +155,15 @@ export interface CreateVersionInput {
   reviewStatus?: ReviewStatus;
   headHandle?: number;
   tailHandle?: number;
+  /**
+   * Parallel version stream (e.g. "main", "comp", "anim", "client").
+   * Defaults to "main" when omitted. Versions are numbered independently
+   * within each context for the same shot — enables parallel histories.
+   *
+   * Uniqueness of (shotId, context, versionNumber) is enforced by the
+   * persistence adapter via a retry-on-conflict loop (see migration 017).
+   */
+  context?: string;
 }
 
 export interface CreateEpisodeInput {

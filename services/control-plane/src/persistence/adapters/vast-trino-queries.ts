@@ -126,6 +126,15 @@ function getNum(row: unknown[], r: TrinoQueryResult, name: string): number | nul
   return v != null ? Number(v) : null;
 }
 
+function getBool(row: unknown[], r: TrinoQueryResult, name: string): boolean | null {
+  const v = getVal<unknown>(row, r, name);
+  if (v === null || v === undefined) return null;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") return v === "true" || v === "t" || v === "1";
+  return null;
+}
+
 function getReqStr(row: unknown[], r: TrinoQueryResult, name: string): string {
   return getStr(row, r, name) ?? "";
 }
@@ -302,7 +311,12 @@ export function mapRowToVersion(row: unknown[], r: TrinoQueryResult): Version {
     publishedAt: getStr(row, r, "published_at"),
     notes: getStr(row, r, "notes"),
     taskId: null, // Derived via version_tasks join table
-    reviewStatus: (getStr(row, r, "review_status") ?? "wip") as ReviewStatus
+    reviewStatus: (getStr(row, r, "review_status") ?? "wip") as ReviewStatus,
+    // Migration 017: columns default when the row pre-dates the migration.
+    context: getStr(row, r, "context") ?? "main",
+    isSentinel: getBool(row, r, "is_sentinel") ?? false,
+    sentinelName: getStr(row, r, "sentinel_name"),
+    manifestId: getStr(row, r, "manifest_id"),
   };
 }
 
@@ -628,39 +642,128 @@ export async function insertShot(client: TrinoClient, input: CreateShotInput, ct
   };
 }
 
+/**
+ * Queries the max version_number for a given (shot_id, context) pair.
+ * Used by insertVersion to compute the next version number scoped to a
+ * parallel stream rather than globally across a shot.
+ */
+async function queryMaxVersionNumberForContext(
+  client: TrinoClient,
+  shotId: string,
+  context: string,
+): Promise<number> {
+  // Treat pre-migration rows (context IS NULL) as context="main" so
+  // legacy callers continue to get contiguous numbering.
+  const ctxFilter =
+    context === "main"
+      ? `(context IS NULL OR context = ${esc(context)})`
+      : `context = ${esc(context)}`;
+  const r = await client.query(
+    `SELECT COALESCE(MAX(version_number), 0) AS max_v FROM ${S}.versions WHERE shot_id = ${esc(shotId)} AND ${ctxFilter}`,
+  );
+  if (r.data.length === 0) return 0;
+  const v = r.data[0][0];
+  return typeof v === "number" ? v : Number(v ?? 0);
+}
+
+/**
+ * Inserts a new version with scoped (shot, context) version-number allocation
+ * and retry-on-conflict to close the race window called out in the MAM
+ * readiness review.
+ *
+ * VAST does not support native UNIQUE constraints or SERIALIZABLE transactions.
+ * We simulate uniqueness at the app layer by:
+ *   1. SELECT MAX(version_number) scoped to (shot_id, context)
+ *   2. INSERT with version_number = max + 1
+ *   3. After insert, SELECT to verify no other row raced us to the same number
+ *   4. If a duplicate exists, DELETE our row and retry (up to 5 attempts)
+ *
+ * The duplicate-check race is small (single-digit ms) but not zero on a busy
+ * shot. A proper fix requires VAST to support conditional INSERT or a
+ * Kafka-serialized version-issuer per shot (Phase 2 of the roadmap).
+ */
 export async function insertVersion(client: TrinoClient, input: CreateVersionInput, ctx: WriteContext): Promise<Version> {
-  // Determine next version number
-  const existing = await queryVersionsByShot(client, input.shotId);
-  const versionNumber = existing.length > 0 ? existing[0].versionNumber + 1 : 1;
+  const context = input.context ?? "main";
+  const MAX_ATTEMPTS = 5;
+  let lastError: Error | null = null;
 
-  const id = randomUUID();
-  const now = nowIso(ctx);
-  await client.query(`INSERT INTO ${S}.versions (id, shot_id, project_id, sequence_id, version_label, version_number, parent_version_id, status, media_type, created_by, created_at, notes) VALUES (${esc(id)}, ${esc(input.shotId)}, ${esc(input.projectId)}, ${esc(input.sequenceId)}, ${esc(input.versionLabel)}, ${escNum(versionNumber)}, ${esc(input.parentVersionId)}, ${esc(input.status)}, ${esc(input.mediaType)}, ${esc(input.createdBy)}, TIMESTAMP ${esc(now)}, ${esc(input.notes)})`);
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const maxExisting = await queryMaxVersionNumberForContext(client, input.shotId, context);
+    const versionNumber = maxExisting + 1;
 
-  // Insert companion rows if provided
-  const reviewStatus = input.reviewStatus ?? "wip";
-  await client.query(`INSERT INTO ${S}.version_review_status (version_id, review_status, updated_at) VALUES (${esc(id)}, ${esc(reviewStatus)}, TIMESTAMP ${esc(now)})`);
+    const id = randomUUID();
+    const now = nowIso(ctx);
 
-  if (input.headHandle != null || input.tailHandle != null) {
-    await client.query(`INSERT INTO ${S}.version_frame_handles (version_id, head_handle, tail_handle, updated_at) VALUES (${esc(id)}, ${escNum(input.headHandle ?? 0)}, ${escNum(input.tailHandle ?? 0)}, TIMESTAMP ${esc(now)})`);
+    try {
+      await client.query(
+        `INSERT INTO ${S}.versions (id, shot_id, project_id, sequence_id, version_label, version_number, parent_version_id, status, media_type, created_by, created_at, notes, context, is_sentinel) VALUES (${esc(id)}, ${esc(input.shotId)}, ${esc(input.projectId)}, ${esc(input.sequenceId)}, ${esc(input.versionLabel)}, ${escNum(versionNumber)}, ${esc(input.parentVersionId)}, ${esc(input.status)}, ${esc(input.mediaType)}, ${esc(input.createdBy)}, TIMESTAMP ${esc(now)}, ${esc(input.notes)}, ${esc(context)}, false)`,
+      );
+    } catch (e) {
+      // If migration 017 hasn't been applied yet on this cluster the
+      // INSERT will fail because the `context`/`is_sentinel` columns are
+      // missing. Fall back to the pre-migration insert shape so existing
+      // deployments keep working until they deploy the schema.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("context") || msg.includes("is_sentinel")) {
+        await client.query(
+          `INSERT INTO ${S}.versions (id, shot_id, project_id, sequence_id, version_label, version_number, parent_version_id, status, media_type, created_by, created_at, notes) VALUES (${esc(id)}, ${esc(input.shotId)}, ${esc(input.projectId)}, ${esc(input.sequenceId)}, ${esc(input.versionLabel)}, ${escNum(versionNumber)}, ${esc(input.parentVersionId)}, ${esc(input.status)}, ${esc(input.mediaType)}, ${esc(input.createdBy)}, TIMESTAMP ${esc(now)}, ${esc(input.notes)})`,
+        );
+      } else {
+        throw e;
+      }
+    }
+
+    // Verify no other row claimed this (shot, context, version_number) while
+    // we were inserting. Treats pre-migration NULL context as "main".
+    const ctxFilter =
+      context === "main"
+        ? `(context IS NULL OR context = ${esc(context)})`
+        : `context = ${esc(context)}`;
+    const verify = await client.query(
+      `SELECT id FROM ${S}.versions WHERE shot_id = ${esc(input.shotId)} AND ${ctxFilter} AND version_number = ${escNum(versionNumber)} ORDER BY created_at`,
+    );
+    const rows = verify.data;
+    if (rows.length <= 1 || (rows.length > 0 && rows[0][0] === id)) {
+      // We won the race — continue with companion rows
+      const reviewStatus = input.reviewStatus ?? "wip";
+      await client.query(
+        `INSERT INTO ${S}.version_review_status (version_id, review_status, updated_at) VALUES (${esc(id)}, ${esc(reviewStatus)}, TIMESTAMP ${esc(now)})`,
+      );
+      if (input.headHandle != null || input.tailHandle != null) {
+        await client.query(
+          `INSERT INTO ${S}.version_frame_handles (version_id, head_handle, tail_handle, updated_at) VALUES (${esc(id)}, ${escNum(input.headHandle ?? 0)}, ${escNum(input.tailHandle ?? 0)}, TIMESTAMP ${esc(now)})`,
+        );
+      }
+
+      return {
+        id, shotId: input.shotId, projectId: input.projectId,
+        sequenceId: input.sequenceId, versionLabel: input.versionLabel,
+        versionNumber, parentVersionId: input.parentVersionId ?? null,
+        status: input.status, mediaType: input.mediaType,
+        codec: null, resolutionW: null, resolutionH: null,
+        frameRate: null, frameRangeStart: null, frameRangeEnd: null,
+        headHandle: input.headHandle ?? null, tailHandle: input.tailHandle ?? null,
+        pixelAspectRatio: null, displayWindow: null, dataWindow: null,
+        compressionType: null, colorSpace: null, bitDepth: null,
+        channelCount: null, fileSizeBytes: null, md5Checksum: null,
+        vastElementHandle: null, vastPath: null, elementPath: null,
+        createdBy: input.createdBy, createdAt: now,
+        publishedAt: null, notes: input.notes ?? null,
+        taskId: input.taskId ?? null, reviewStatus,
+        context, isSentinel: false, sentinelName: null, manifestId: null,
+      };
+    }
+
+    // Lost the race — compensate and retry
+    lastError = new Error(
+      `version number ${versionNumber} for shot ${input.shotId} / context ${context} was taken concurrently (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+    );
+    await client.query(`DELETE FROM ${S}.versions WHERE id = ${esc(id)}`);
+    // Small jittered backoff so two racing callers diverge
+    await new Promise((resolve) => setTimeout(resolve, 10 + Math.floor(Math.random() * 40)));
   }
 
-  return {
-    id, shotId: input.shotId, projectId: input.projectId,
-    sequenceId: input.sequenceId, versionLabel: input.versionLabel,
-    versionNumber, parentVersionId: input.parentVersionId ?? null,
-    status: input.status, mediaType: input.mediaType,
-    codec: null, resolutionW: null, resolutionH: null,
-    frameRate: null, frameRangeStart: null, frameRangeEnd: null,
-    headHandle: input.headHandle ?? null, tailHandle: input.tailHandle ?? null,
-    pixelAspectRatio: null, displayWindow: null, dataWindow: null,
-    compressionType: null, colorSpace: null, bitDepth: null,
-    channelCount: null, fileSizeBytes: null, md5Checksum: null,
-    vastElementHandle: null, vastPath: null, elementPath: null,
-    createdBy: input.createdBy, createdAt: now,
-    publishedAt: null, notes: input.notes ?? null,
-    taskId: input.taskId ?? null, reviewStatus
-  };
+  throw lastError ?? new Error("insertVersion exhausted retries");
 }
 
 export async function updateShotStatusSql(client: TrinoClient, shotId: string, status: ShotStatus, ctx: WriteContext): Promise<Shot | null> {
