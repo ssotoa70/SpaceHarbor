@@ -170,6 +170,14 @@ function makeS3Client(ep: ResolvedS3Endpoint): S3Client {
       secretAccessKey: ep.secretAccessKey,
     },
     forcePathStyle: ep.pathStyle,
+    // AWS SDK v3 3.729+ defaults to "WHEN_SUPPORTED" which injects an
+    // `x-amz-checksum-crc32=AAAAAA==` placeholder into presigned UploadPart
+    // URLs. Third-party clients (curl, browser fetch, DCCs) can't recompute
+    // the real checksum before PUT, so S3 rejects the request. Set to
+    // "WHEN_REQUIRED" so the SDK only adds checksums when the API demands
+    // them (never for UploadPart), keeping presigned URLs vanilla.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
 }
 
