@@ -104,6 +104,26 @@ const StorageBrowserPage = React.lazy(() =>
   import("./pages/StorageBrowserPage").then((m) => ({ default: m.StorageBrowserPage }))
 );
 
+// Automation + admin pages (Phase 1-3 / P2.6 UIs)
+const CustomFieldsPage = React.lazy(() =>
+  import("./pages/admin/CustomFieldsPage").then((m) => ({ default: m.CustomFieldsPage }))
+);
+const TriggersPage = React.lazy(() =>
+  import("./pages/admin/TriggersPage").then((m) => ({ default: m.TriggersPage }))
+);
+const WebhooksPage = React.lazy(() =>
+  import("./pages/admin/WebhooksPage").then((m) => ({ default: m.WebhooksPage }))
+);
+const WorkflowsPage = React.lazy(() =>
+  import("./pages/admin/WorkflowsPage").then((m) => ({ default: m.WorkflowsPage }))
+);
+const DispatchesPage = React.lazy(() =>
+  import("./pages/admin/DispatchesPage").then((m) => ({ default: m.DispatchesPage }))
+);
+const BreakersPage = React.lazy(() =>
+  import("./pages/admin/BreakersPage").then((m) => ({ default: m.BreakersPage }))
+);
+
 /* ── Suspense wrapper ── */
 
 function Lazy({ children }: { children: React.ReactNode }) {
@@ -179,6 +199,13 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="pipeline/functions" element={<Lazy><DataEnginePage /></Lazy>} />
             <Route path="pipeline/conform" element={<Lazy><ConformancePage /></Lazy>} />
 
+            {/* ── AUTOMATION section ── */}
+            <Route path="automation/custom-fields" element={<Lazy><CustomFieldsPage /></Lazy>} />
+            <Route path="automation/triggers" element={<Lazy><TriggersPage /></Lazy>} />
+            <Route path="automation/webhooks" element={<Lazy><WebhooksPage /></Lazy>} />
+            <Route path="automation/workflows" element={<Lazy><WorkflowsPage /></Lazy>} />
+            <Route path="automation/dispatches" element={<Lazy><DispatchesPage /></Lazy>} />
+
             {/* ── ADMIN section ── */}
             <Route path="admin/analytics" element={<Lazy><AnalyticsDashboard /></Lazy>} />
             <Route path="admin/query" element={<Lazy><QueryConsolePage /></Lazy>} />
@@ -187,6 +214,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="admin/audit" element={<Lazy><AuditTrailPage /></Lazy>} />
             <Route path="admin/settings" element={<Lazy><SettingsPage /></Lazy>} />
             <Route path="admin/rbac" element={<Lazy><RbacMatrixPage /></Lazy>} />
+            <Route path="admin/breakers" element={<Lazy><BreakersPage /></Lazy>} />
 
             {/* ── Utility routes (not in nav) ── */}
             <Route path="api-keys" element={<Lazy><ApiKeysPage /></Lazy>} />

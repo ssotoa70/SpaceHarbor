@@ -3034,3 +3034,606 @@ export async function fetchProcessingStatus(sourceUris: string[]): Promise<Proce
     return [];
   }
 }
+
+// ============================================================================
+// Admin APIs — custom fields, triggers, webhooks, workflows, dispatches,
+// circuit breakers, atomic check-in.
+// Every one of these endpoints has a matching admin page under /admin/*.
+// ============================================================================
+
+function apiUrl(path: string): string {
+  return `${API_BASE_URL}/api/v1${path}`;
+}
+
+async function apiFetch<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(apiUrl(path), {
+    ...init,
+    headers: withAuth({
+      "content-type": "application/json",
+      ...(init.headers as Record<string, string> | undefined),
+    }),
+  });
+  if (!response.ok) {
+    let msg = `${response.status}`;
+    try {
+      const body = await response.json();
+      msg = (body as { message?: string }).message ?? msg;
+      throw new ApiRequestError(response.status, msg);
+    } catch (err) {
+      if (err instanceof ApiRequestError) throw err;
+      throw new ApiRequestError(response.status, msg);
+    }
+  }
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+/* ── Custom Fields ── */
+
+export type CustomFieldEntityType = "asset" | "version" | "shot" | "sequence" | "project" | "material";
+export type CustomFieldDataType = "string" | "number" | "boolean" | "date" | "enum" | "ref";
+
+export interface CustomFieldValidation {
+  allowed_values?: string[];
+  max_length?: number;
+  min?: number;
+  max?: number;
+  ref_entity_type?: CustomFieldEntityType;
+  pattern?: string;
+}
+
+export interface CustomFieldDefinition {
+  id: string;
+  entityType: CustomFieldEntityType;
+  name: string;
+  displayLabel: string;
+  dataType: CustomFieldDataType;
+  required: boolean;
+  validation: CustomFieldValidation | null;
+  displayConfig: Record<string, unknown> | null;
+  description: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface CreateCustomFieldInput {
+  entityType: CustomFieldEntityType;
+  name: string;
+  displayLabel: string;
+  dataType: CustomFieldDataType;
+  required?: boolean;
+  validation?: CustomFieldValidation | null;
+  displayConfig?: Record<string, unknown> | null;
+  description?: string | null;
+}
+
+export async function listCustomFieldDefinitions(filter?: {
+  entity?: CustomFieldEntityType;
+  includeDeleted?: boolean;
+}): Promise<CustomFieldDefinition[]> {
+  const params = new URLSearchParams();
+  if (filter?.entity) params.set("entity", filter.entity);
+  if (filter?.includeDeleted) params.set("include_deleted", "true");
+  const q = params.toString();
+  const data = await apiFetch<{ definitions: CustomFieldDefinition[] }>(
+    `/custom-fields/definitions${q ? `?${q}` : ""}`,
+  );
+  return data.definitions;
+}
+
+export async function createCustomFieldDefinition(
+  input: CreateCustomFieldInput,
+): Promise<CustomFieldDefinition> {
+  const data = await apiFetch<{ definition: CustomFieldDefinition }>(
+    `/custom-fields/definitions`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return data.definition;
+}
+
+export async function updateCustomFieldDefinition(
+  id: string,
+  input: Partial<Pick<CreateCustomFieldInput, "displayLabel" | "required" | "validation" | "displayConfig" | "description">>,
+): Promise<CustomFieldDefinition> {
+  const data = await apiFetch<{ definition: CustomFieldDefinition }>(
+    `/custom-fields/definitions/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+  return data.definition;
+}
+
+export async function deleteCustomFieldDefinition(id: string): Promise<void> {
+  await apiFetch<void>(`/custom-fields/definitions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function getCustomFieldValues(
+  entityType: CustomFieldEntityType,
+  entityId: string,
+): Promise<{ fields: Record<string, unknown> }> {
+  return apiFetch<{ fields: Record<string, unknown> }>(
+    `/custom-fields/values/${entityType}/${encodeURIComponent(entityId)}`,
+  );
+}
+
+export async function setCustomFieldValues(
+  entityType: CustomFieldEntityType,
+  entityId: string,
+  fields: Record<string, unknown>,
+): Promise<{ fields: Record<string, unknown> }> {
+  return apiFetch<{ fields: Record<string, unknown> }>(
+    `/custom-fields/values/${entityType}/${encodeURIComponent(entityId)}`,
+    { method: "PUT", body: JSON.stringify({ fields }) },
+  );
+}
+
+/* ── Triggers ── */
+
+export type TriggerActionKind = "http_call" | "enqueue_job" | "run_workflow" | "run_script" | "post_event";
+
+export interface Trigger {
+  id: string;
+  name: string;
+  description: string | null;
+  eventSelector: string;
+  conditionJson: string | null;
+  actionKind: TriggerActionKind;
+  actionConfigJson: string;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  lastFiredAt: string | null;
+  fireCount: number;
+}
+
+export interface CreateTriggerInput {
+  name: string;
+  description?: string;
+  eventSelector: string;
+  conditionJson?: string;
+  actionKind: TriggerActionKind;
+  actionConfig: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export async function listTriggers(filter?: {
+  enabled?: boolean;
+  cursor?: string;
+  limit?: number;
+}): Promise<{ triggers: Trigger[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (filter?.enabled !== undefined) params.set("enabled", String(filter.enabled));
+  if (filter?.cursor) params.set("cursor", filter.cursor);
+  if (filter?.limit !== undefined) params.set("limit", String(filter.limit));
+  const q = params.toString();
+  return apiFetch(`/triggers${q ? `?${q}` : ""}`);
+}
+
+export async function getTrigger(id: string): Promise<Trigger> {
+  const d = await apiFetch<{ trigger: Trigger }>(`/triggers/${encodeURIComponent(id)}`);
+  return d.trigger;
+}
+
+export async function createTrigger(input: CreateTriggerInput): Promise<Trigger> {
+  const d = await apiFetch<{ trigger: Trigger }>(`/triggers`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return d.trigger;
+}
+
+export async function updateTrigger(id: string, input: Partial<CreateTriggerInput>): Promise<Trigger> {
+  const d = await apiFetch<{ trigger: Trigger }>(`/triggers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  return d.trigger;
+}
+
+export async function deleteTrigger(id: string): Promise<void> {
+  await apiFetch<void>(`/triggers/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/* ── Webhooks ── */
+
+export type WebhookDirection = "inbound" | "outbound";
+export type WebhookDeliveryStatus = "pending" | "in_flight" | "succeeded" | "failed" | "abandoned";
+
+export interface WebhookEndpoint {
+  id: string;
+  name: string;
+  direction: WebhookDirection;
+  url: string | null;
+  secretPrefix: string;
+  signingAlgorithm: string;
+  allowedEventTypes: string[] | null;
+  description: string | null;
+  createdBy: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface WebhookSecret {
+  plaintext: string;
+  prefix: string;
+  warning: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  webhookId: string;
+  triggerId: string | null;
+  eventType: string;
+  eventPayload: string | null;
+  requestUrl: string | null;
+  responseStatus: number | null;
+  responseBody: string | null;
+  status: WebhookDeliveryStatus;
+  attemptNumber: number;
+  lastError: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface CreateWebhookEndpointInput {
+  name: string;
+  direction: WebhookDirection;
+  url?: string;
+  allowedEventTypes?: string[];
+  description?: string;
+}
+
+export async function listWebhookEndpoints(filter?: {
+  direction?: WebhookDirection;
+  includeRevoked?: boolean;
+}): Promise<WebhookEndpoint[]> {
+  const params = new URLSearchParams();
+  if (filter?.direction) params.set("direction", filter.direction);
+  if (filter?.includeRevoked) params.set("include_revoked", "true");
+  const q = params.toString();
+  const d = await apiFetch<{ endpoints: WebhookEndpoint[] }>(`/webhook-endpoints${q ? `?${q}` : ""}`);
+  return d.endpoints;
+}
+
+export async function createWebhookEndpoint(
+  input: CreateWebhookEndpointInput,
+): Promise<{ endpoint: WebhookEndpoint; secret: WebhookSecret }> {
+  return apiFetch<{ endpoint: WebhookEndpoint; secret: WebhookSecret }>(`/webhook-endpoints`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function revokeWebhookEndpoint(id: string): Promise<void> {
+  await apiFetch<void>(`/webhook-endpoints/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function listWebhookDeliveries(filter?: {
+  webhookId?: string;
+  status?: WebhookDeliveryStatus;
+  cursor?: string;
+  limit?: number;
+}): Promise<{ deliveries: WebhookDelivery[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (filter?.webhookId) params.set("webhookId", filter.webhookId);
+  if (filter?.status) params.set("status", filter.status);
+  if (filter?.cursor) params.set("cursor", filter.cursor);
+  if (filter?.limit !== undefined) params.set("limit", String(filter.limit));
+  const q = params.toString();
+  return apiFetch(`/webhook-deliveries${q ? `?${q}` : ""}`);
+}
+
+/* ── Workflows ── */
+
+export type WorkflowNodeKind = "start" | "end" | "approval" | "http" | "script" | "branch" | "wait_for_event" | "enqueue_job";
+export type WorkflowInstanceState = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+export interface WorkflowNode {
+  id: string;
+  kind: WorkflowNodeKind;
+  config?: Record<string, unknown>;
+}
+
+export interface WorkflowEdge {
+  from: string;
+  to: string;
+  when?: Record<string, unknown>;
+}
+
+export interface WorkflowDsl {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  name: string;
+  version: number;
+  description: string | null;
+  dslJson: string;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface WorkflowInstance {
+  id: string;
+  definitionId: string;
+  definitionVersion: number;
+  currentNodeId: string;
+  state: WorkflowInstanceState;
+  contextJson: string;
+  startedBy: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  lastError: string | null;
+  parentEntityType: string | null;
+  parentEntityId: string | null;
+}
+
+export interface WorkflowTransition {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  eventType: string | null;
+  actor: string | null;
+  at: string;
+}
+
+export async function listWorkflows(): Promise<WorkflowDefinition[]> {
+  const d = await apiFetch<{ definitions: WorkflowDefinition[] }>(`/workflows`);
+  return d.definitions;
+}
+
+export async function createWorkflow(input: {
+  name: string;
+  description?: string;
+  dsl: WorkflowDsl;
+  enabled?: boolean;
+}): Promise<WorkflowDefinition> {
+  const d = await apiFetch<{ definition: WorkflowDefinition }>(`/workflows`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return d.definition;
+}
+
+export async function updateWorkflow(id: string, input: { description?: string; dsl?: WorkflowDsl; enabled?: boolean }): Promise<WorkflowDefinition> {
+  const d = await apiFetch<{ definition: WorkflowDefinition }>(`/workflows/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  return d.definition;
+}
+
+export async function deleteWorkflow(id: string): Promise<void> {
+  await apiFetch<void>(`/workflows/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function startWorkflow(
+  name: string,
+  body: { context?: Record<string, unknown>; parentEntityType?: string; parentEntityId?: string } = {},
+): Promise<WorkflowInstance> {
+  const d = await apiFetch<{ instance: WorkflowInstance }>(`/workflows/${encodeURIComponent(name)}/start`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return d.instance;
+}
+
+export async function listWorkflowInstances(filter?: {
+  definitionId?: string;
+  state?: WorkflowInstanceState;
+  parentEntityType?: string;
+  parentEntityId?: string;
+  cursor?: string;
+  limit?: number;
+}): Promise<{ instances: WorkflowInstance[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (filter?.definitionId) params.set("definitionId", filter.definitionId);
+  if (filter?.state) params.set("state", filter.state);
+  if (filter?.parentEntityType) params.set("parentEntityType", filter.parentEntityType);
+  if (filter?.parentEntityId) params.set("parentEntityId", filter.parentEntityId);
+  if (filter?.cursor) params.set("cursor", filter.cursor);
+  if (filter?.limit !== undefined) params.set("limit", String(filter.limit));
+  const q = params.toString();
+  return apiFetch(`/workflow-instances${q ? `?${q}` : ""}`);
+}
+
+export async function getWorkflowInstance(id: string): Promise<{ instance: WorkflowInstance; transitions: WorkflowTransition[] }> {
+  return apiFetch(`/workflow-instances/${encodeURIComponent(id)}`);
+}
+
+export async function transitionWorkflowInstance(
+  id: string,
+  body: { nextNodeId?: string; eventType?: string; payload?: Record<string, unknown> } = {},
+): Promise<WorkflowInstance> {
+  const d = await apiFetch<{ instance: WorkflowInstance }>(`/workflow-instances/${encodeURIComponent(id)}/transition`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return d.instance;
+}
+
+export async function cancelWorkflowInstance(id: string): Promise<WorkflowInstance> {
+  const d = await apiFetch<{ instance: WorkflowInstance }>(`/workflow-instances/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+  });
+  return d.instance;
+}
+
+/* ── Dispatches (DataEngine auto-trigger observability) ── */
+
+export type DispatchStatus = "pending" | "completed" | "failed" | "abandoned";
+
+export interface DataEngineDispatch {
+  id: string;
+  checkinId: string | null;
+  versionId: string;
+  fileRole: string;
+  fileKind: string;
+  sourceS3Bucket: string;
+  sourceS3Key: string;
+  expectedFunction: string;
+  status: DispatchStatus;
+  proxyUrl: string | null;
+  thumbnailUrl: string | null;
+  metadataTargetSchema: string | null;
+  metadataTargetTable: string | null;
+  metadataRowId: string | null;
+  lastError: string | null;
+  deadlineAt: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  pollAttempts: number;
+  lastPolledAt: string | null;
+}
+
+export async function listDispatches(filter?: {
+  versionId?: string;
+  checkinId?: string;
+  status?: DispatchStatus;
+  cursor?: string;
+  limit?: number;
+}): Promise<{ dispatches: DataEngineDispatch[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (filter?.versionId) params.set("versionId", filter.versionId);
+  if (filter?.checkinId) params.set("checkinId", filter.checkinId);
+  if (filter?.status) params.set("status", filter.status);
+  if (filter?.cursor) params.set("cursor", filter.cursor);
+  if (filter?.limit !== undefined) params.set("limit", String(filter.limit));
+  const q = params.toString();
+  return apiFetch(`/dispatches${q ? `?${q}` : ""}`);
+}
+
+export async function listVersionDispatches(versionId: string): Promise<DataEngineDispatch[]> {
+  const d = await apiFetch<{ dispatches: DataEngineDispatch[] }>(
+    `/versions/${encodeURIComponent(versionId)}/dispatches`,
+  );
+  return d.dispatches;
+}
+
+export async function sweepDispatches(): Promise<{ polled: number; completed: number; abandoned: number }> {
+  return apiFetch(`/admin/dispatches/sweep`, { method: "POST" });
+}
+
+/* ── Circuit Breakers ── */
+
+export type CircuitState = "closed" | "open" | "half-open";
+
+export interface CircuitBreakerStats {
+  name: string;
+  state: CircuitState;
+  failureCount: number;
+  successCount: number;
+  lastFailureAt: string | null;
+  openedAt: string | null;
+  nextAttemptAt: string | null;
+}
+
+export async function listBreakers(): Promise<CircuitBreakerStats[]> {
+  const d = await apiFetch<{ breakers: CircuitBreakerStats[] }>(`/admin/breakers`);
+  return d.breakers;
+}
+
+export async function resetBreaker(name: string): Promise<void> {
+  await apiFetch(`/admin/breakers/${encodeURIComponent(name)}/reset`, { method: "POST" });
+}
+
+/* ── Atomic check-in ── */
+
+export type CheckinFileRole = "primary" | "sidecar" | "proxy" | "frame_range" | "audio" | "reference";
+
+export interface CheckinFileSpec {
+  filename: string;
+  role?: CheckinFileRole;
+  contentType?: string;
+  fileSizeBytes: number;
+  preferredPartSizeBytes?: number;
+  frameRangeStart?: number;
+  frameRangeEnd?: number;
+  framePadding?: number;
+}
+
+export interface CheckinReservation {
+  checkinId: string;
+  versionId: string;
+  versionNumber: number;
+  context: string;
+  deadline: string;
+  files: Array<{
+    role: CheckinFileRole;
+    filename: string;
+    s3: {
+      bucket: string;
+      key: string;
+      uploadId: string;
+      parts: Array<{ partNumber: number; presignedUrl: string; sizeBytes: number }>;
+    };
+  }>;
+}
+
+export interface CheckinCommitResult {
+  checkinId: string;
+  versionId: string;
+  committedAt: string;
+  sentinel: { name: string; versionId: string } | null;
+  files: Array<{ id: string; role: string; filename: string; s3Key: string }>;
+}
+
+export async function reserveCheckin(input: {
+  shotId: string;
+  projectId: string;
+  sequenceId: string;
+  versionLabel: string;
+  context?: string;
+  notes?: string;
+  endpointId?: string;
+  files: CheckinFileSpec[];
+}): Promise<CheckinReservation> {
+  return apiFetch<CheckinReservation>(`/assets/checkin`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function commitCheckin(
+  checkinId: string,
+  body: { files: Array<{ role: string; filename?: string; parts: Array<{ partNumber: number; eTag: string }> }> },
+): Promise<CheckinCommitResult> {
+  return apiFetch<CheckinCommitResult>(`/assets/checkin/${encodeURIComponent(checkinId)}/commit`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function abortCheckin(checkinId: string): Promise<void> {
+  await apiFetch<void>(`/assets/checkin/${encodeURIComponent(checkinId)}/abort`, { method: "POST" });
+}
+
+export interface CheckinState {
+  checkinId: string;
+  versionId: string;
+  state: "reserved" | "committed" | "compensating" | "aborted";
+  s3: { bucket: string; key: string };
+  files: Array<{ role: string; filename: string; s3Bucket: string; s3Key: string; partCount: number; fileSizeBytes: number }>;
+  deadline: string;
+  createdAt: string;
+  committedAt: string | null;
+  abortedAt: string | null;
+  lastError: string | null;
+}
+
+export async function getCheckinState(checkinId: string): Promise<CheckinState> {
+  return apiFetch<CheckinState>(`/assets/checkin/${encodeURIComponent(checkinId)}`);
+}

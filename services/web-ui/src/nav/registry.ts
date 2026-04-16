@@ -10,6 +10,7 @@ export const NAV_SECTIONS: readonly SectionDef[] = [
   { id: "REVIEW", label: "Review", permission: "approval:submit" },
   { id: "PRODUCTION", label: "Production", permission: "approval:approve" },
   { id: "PIPELINE", label: "Pipeline", permission: "pipeline:configure_stages" },
+  { id: "AUTOMATION", label: "Automation", permission: "admin:system_config", collapsedByDefault: true },
   { id: "ADMIN", label: "Admin", permission: "admin:system_config", collapsedByDefault: true },
 ];
 
@@ -182,6 +183,48 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
     icon: "M3 3h10v2H3zM3 7h7v2H3zM3 11h10v2H3zM12 7l2 2-2 2",
   },
 
+  // ── AUTOMATION ──
+  {
+    id: "custom-fields",
+    to: "/automation/custom-fields",
+    label: "Custom Fields",
+    section: "AUTOMATION",
+    permission: "admin:system_config",
+    icon: "M2 3h12v2H2zM2 7h8v2H2zM2 11h12v2H2z",
+  },
+  {
+    id: "triggers",
+    to: "/automation/triggers",
+    label: "Triggers",
+    section: "AUTOMATION",
+    permission: "admin:system_config",
+    icon: "M8 2l-1 5h3l-2 7 1-5H6l2-7z",
+  },
+  {
+    id: "webhooks",
+    to: "/automation/webhooks",
+    label: "Webhooks",
+    section: "AUTOMATION",
+    permission: "admin:system_config",
+    icon: "M5 10a3 3 0 01-2-5l3-1M11 6a3 3 0 012 5l-3 1M5 10l2 3 2-3M11 6L9 3 7 6",
+  },
+  {
+    id: "workflows",
+    to: "/automation/workflows",
+    label: "Workflows",
+    section: "AUTOMATION",
+    permission: "admin:system_config",
+    icon: "M3 3h3v3H3zM10 3h3v3h-3zM3 10h3v3H3zM10 10h3v3h-3zM6 4.5h4M4.5 6v4M11.5 6v4M6 11.5h4",
+  },
+  {
+    id: "dispatches",
+    to: "/automation/dispatches",
+    label: "Dispatches",
+    section: "AUTOMATION",
+    permission: "admin:system_config",
+    icon: "M2 8h3l2-4 2 8 2-4h3",
+  },
+
   // ── ADMIN ──
   {
     id: "analytics",
@@ -190,6 +233,14 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
     section: "ADMIN",
     permission: "admin:analytics",
     icon: "M2 14V8l2-1v7M6 14V5l2-1v10M10 14V3l2-1v12M14 14V6l2-1v9",
+  },
+  {
+    id: "breakers",
+    to: "/admin/breakers",
+    label: "Circuit Breakers",
+    section: "ADMIN",
+    permission: "admin:system_config",
+    icon: "M3 8h2l1-3 2 6 1-3h2M14 8a6 6 0 11-12 0 6 6 0 0112 0z",
   },
   {
     id: "sql-console",
