@@ -56,6 +56,7 @@ import { registerDataEnginePipelineRoutes } from "./routes/dataengine-pipelines.
 import { registerStorageProcessRoutes } from "./routes/storage-process.js";
 import { registerAssetActionRoutes } from "./routes/asset-actions.js";
 import { registerCustomFieldsRoute } from "./routes/custom-fields.js";
+import { registerCheckinRoute } from "./routes/checkin.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 import { TrinoClient } from "./db/trino-client.js";
@@ -360,6 +361,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerAssetsRoute(app, persistence, prefixes);
     void registerAssetActionRoutes(app, persistence, prefixes);
     void registerCustomFieldsRoute(app, persistence, prefixes);
+    void registerCheckinRoute(app, persistence, prefixes);
     void registerAuditRoute(app, persistence, prefixes);
     void registerIncidentRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);
