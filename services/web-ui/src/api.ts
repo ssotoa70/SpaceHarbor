@@ -3741,3 +3741,95 @@ export async function previewNamingTemplate(
     body: JSON.stringify({ template, context }),
   });
 }
+
+/* ── Plugins (Phase 5.3) ── */
+
+export type PluginResourceType =
+  | "namingTemplates"
+  | "customFields"
+  | "triggers"
+  | "workflows"
+  | "webhooks";
+
+export const PLUGIN_RESOURCE_TYPES: readonly PluginResourceType[] = [
+  "namingTemplates",
+  "customFields",
+  "triggers",
+  "workflows",
+  "webhooks",
+];
+
+export type PluginConflictStrategy = "skip" | "rename";
+
+export interface PluginBundle {
+  schemaVersion: 1;
+  name: string;
+  version: string;
+  description?: string | null;
+  author?: string | null;
+  exportedAt: string;
+  exportedFrom?: { system: string; version?: string };
+  resources: Partial<Record<PluginResourceType, unknown[]>>;
+}
+
+export type PluginImportOutcome = "created" | "skipped" | "renamed" | "failed";
+
+export interface PluginImportRecord {
+  resourceType: PluginResourceType;
+  key: string;
+  outcome: PluginImportOutcome;
+  finalName?: string;
+  originalName?: string;
+  message?: string;
+  generatedSecret?: { name: string; secret: string; prefix: string };
+}
+
+export interface PluginImportReport {
+  dryRun: boolean;
+  strategy: PluginConflictStrategy;
+  schemaVersion: number;
+  bundleName: string;
+  bundleVersion: string;
+  totals: { created: number; skipped: number; renamed: number; failed: number };
+  records: PluginImportRecord[];
+}
+
+export async function exportPlugin(opts: {
+  include?: PluginResourceType[];
+  name?: string;
+  version?: string;
+  description?: string;
+  author?: string;
+}): Promise<PluginBundle> {
+  const params = new URLSearchParams();
+  if (opts.include && opts.include.length > 0) params.set("include", opts.include.join(","));
+  if (opts.name) params.set("name", opts.name);
+  if (opts.version) params.set("version", opts.version);
+  if (opts.description) params.set("description", opts.description);
+  if (opts.author) params.set("author", opts.author);
+  const q = params.toString();
+  const data = await apiFetch<{ bundle: PluginBundle }>(`/plugins/export${q ? `?${q}` : ""}`);
+  return data.bundle;
+}
+
+export async function previewPluginImport(
+  bundle: PluginBundle,
+  strategy: PluginConflictStrategy = "skip",
+): Promise<PluginImportReport> {
+  const data = await apiFetch<{ report: PluginImportReport }>(`/plugins/preview`, {
+    method: "POST",
+    body: JSON.stringify({ bundle, strategy }),
+  });
+  return data.report;
+}
+
+export async function importPlugin(
+  bundle: PluginBundle,
+  strategy: PluginConflictStrategy = "skip",
+): Promise<PluginImportReport> {
+  const data = await apiFetch<{ report: PluginImportReport }>(`/plugins/import`, {
+    method: "POST",
+    body: JSON.stringify({ bundle, strategy }),
+  });
+  return data.report;
+}

@@ -232,6 +232,14 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
     icon: "M3 3h10v2H3zM3 7h7v2H3zM3 11h6v2H3zM12 9l2 2-3 3v-2h1z",
   },
   {
+    id: "plugins",
+    to: "/automation/plugins",
+    label: "Plugins",
+    section: "AUTOMATION",
+    permission: "admin:system_config",
+    icon: "M5 3h2v3H5zM9 3h2v3H9zM3 6h10v3H3zM6 9v4M10 9v4M5 13h6v1H5z",
+  },
+  {
     id: "dispatches",
     to: "/automation/dispatches",
     label: "Dispatches",
