@@ -806,6 +806,38 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
   // Asset Archive (soft-delete)
   archiveAsset(assetId: string, ctx: WriteContext): Promise<void>;
 
+  // ── Atomic check-in state ──
+  createCheckin(input: CheckinInput, ctx: WriteContext): Promise<CheckinRecord>;
+  getCheckin(id: string): Promise<CheckinRecord | null>;
+  updateCheckinState(
+    id: string,
+    updates: Partial<Pick<CheckinRecord, "state" | "committedAt" | "abortedAt" | "lastError">>,
+    ctx: WriteContext,
+  ): Promise<CheckinRecord | null>;
+
+  // ── S3 compensation log ──
+  createS3CompensationLog(input: S3CompensationInput, ctx: WriteContext): Promise<S3CompensationRecord>;
+  listS3CompensationByTxId(txId: string): Promise<S3CompensationRecord[]>;
+  markS3CompensationCommitted(txId: string, ctx: WriteContext): Promise<number>;
+  markS3CompensationCompensated(id: string, ctx: WriteContext): Promise<void>;
+  markS3CompensationFailed(id: string, error: string, ctx: WriteContext): Promise<void>;
+
+  // ── Version status update ──
+  updateVersionStatus(
+    versionId: string,
+    status: string,
+    ctx: WriteContext,
+  ): Promise<void>;
+
+  // ── Version sentinel upsert ──
+  upsertVersionSentinel(
+    shotId: string,
+    context: string,
+    sentinelName: string,
+    pointsToVersionId: string,
+    ctx: WriteContext,
+  ): Promise<void>;
+
   /**
    * Framework-enforced audit emission (append-only).
    *
@@ -840,6 +872,80 @@ export interface AssetNote {
   body: string;
   createdBy: string;
   createdAt: string;
+}
+
+export type CheckinState = "reserved" | "committed" | "compensating" | "aborted";
+
+export interface CheckinInput {
+  txId: string;
+  versionId: string;
+  shotId: string;
+  projectId: string;
+  sequenceId: string;
+  context: string;
+  s3Bucket: string;
+  s3Key: string;
+  s3UploadId: string;
+  partPlanJson: string;
+  correlationId: string;
+  actor: string;
+  deadlineAt: string;
+}
+
+export interface CheckinRecord {
+  id: string;
+  txId: string;
+  versionId: string;
+  shotId: string;
+  projectId: string;
+  sequenceId: string;
+  context: string;
+  state: CheckinState;
+  s3Bucket: string;
+  s3Key: string;
+  s3UploadId: string;
+  partPlanJson: string;
+  correlationId: string | null;
+  actor: string | null;
+  deadlineAt: string;
+  createdAt: string;
+  updatedAt: string;
+  committedAt: string | null;
+  abortedAt: string | null;
+  lastError: string | null;
+}
+
+export type S3CompensationStatus = "pending" | "committed" | "compensated" | "failed";
+export type S3CompensationOperation = "CreateMultipartUpload" | "UploadPart" | "CompleteMultipartUpload" | "CopyObject" | "PutObject" | "DeleteObject";
+export type S3CompensationInverse = "AbortMultipartUpload" | "DeleteObject" | "PutObject" | "noop";
+
+export interface S3CompensationInput {
+  txId: string;
+  correlationId?: string;
+  s3Bucket: string;
+  s3Key: string;
+  operation: S3CompensationOperation;
+  inverseOperation: S3CompensationInverse;
+  inversePayload?: Record<string, unknown>;
+  actor?: string;
+}
+
+export interface S3CompensationRecord {
+  id: string;
+  txId: string;
+  correlationId: string | null;
+  s3Bucket: string;
+  s3Key: string;
+  operation: S3CompensationOperation;
+  inverseOperation: S3CompensationInverse;
+  inversePayload: Record<string, unknown> | null;
+  status: S3CompensationStatus;
+  actor: string | null;
+  createdAt: string;
+  committedAt: string | null;
+  compensatedAt: string | null;
+  lastError: string | null;
+  attempts: number;
 }
 
 export interface CustomFieldDefinitionRecord {

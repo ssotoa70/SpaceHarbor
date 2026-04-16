@@ -1095,6 +1095,59 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     return this.localFallback.recordRequestAudit(event);
   }
 
+  // ── Atomic check-in state ──
+  // Delegated to local fallback for now. Trino-backed checkins table
+  // (migration 018) is wired when the VAST adapter split lands in Phase 3.
+  async createCheckin(input: Parameters<PersistenceAdapter["createCheckin"]>[0], ctx: WriteContext) {
+    return this.localFallback.createCheckin(input, ctx);
+  }
+  async getCheckin(id: string) {
+    return this.localFallback.getCheckin(id);
+  }
+  async updateCheckinState(
+    id: string,
+    updates: Parameters<PersistenceAdapter["updateCheckinState"]>[1],
+    ctx: WriteContext,
+  ) {
+    return this.localFallback.updateCheckinState(id, updates, ctx);
+  }
+
+  // ── S3 compensation log ──
+  async createS3CompensationLog(
+    input: Parameters<PersistenceAdapter["createS3CompensationLog"]>[0],
+    ctx: WriteContext,
+  ) {
+    return this.localFallback.createS3CompensationLog(input, ctx);
+  }
+  async listS3CompensationByTxId(txId: string) {
+    return this.localFallback.listS3CompensationByTxId(txId);
+  }
+  async markS3CompensationCommitted(txId: string, ctx: WriteContext) {
+    return this.localFallback.markS3CompensationCommitted(txId, ctx);
+  }
+  async markS3CompensationCompensated(id: string, ctx: WriteContext) {
+    return this.localFallback.markS3CompensationCompensated(id, ctx);
+  }
+  async markS3CompensationFailed(id: string, error: string, ctx: WriteContext) {
+    return this.localFallback.markS3CompensationFailed(id, error, ctx);
+  }
+
+  // ── Version status update ──
+  async updateVersionStatus(versionId: string, status: string, ctx: WriteContext) {
+    return this.localFallback.updateVersionStatus(versionId, status, ctx);
+  }
+
+  // ── Version sentinel upsert ──
+  async upsertVersionSentinel(
+    shotId: string,
+    context: string,
+    sentinelName: string,
+    pointsToVersionId: string,
+    ctx: WriteContext,
+  ) {
+    return this.localFallback.upsertVersionSentinel(shotId, context, sentinelName, pointsToVersionId, ctx);
+  }
+
   // ── Custom Fields ──
   // Currently delegated to the local fallback. Trino-backed persistence
   // lands alongside the broader VAST adapter split in Phase 3 of the

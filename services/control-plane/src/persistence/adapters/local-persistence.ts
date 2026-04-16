@@ -269,6 +269,49 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   // Archived asset IDs
   private readonly archivedAssets = new Set<string>();
 
+  // Atomic check-in state
+  private readonly checkins = new Map<string, {
+    id: string;
+    txId: string;
+    versionId: string;
+    shotId: string;
+    projectId: string;
+    sequenceId: string;
+    context: string;
+    state: "reserved" | "committed" | "compensating" | "aborted";
+    s3Bucket: string;
+    s3Key: string;
+    s3UploadId: string;
+    partPlanJson: string;
+    correlationId: string | null;
+    actor: string | null;
+    deadlineAt: string;
+    createdAt: string;
+    updatedAt: string;
+    committedAt: string | null;
+    abortedAt: string | null;
+    lastError: string | null;
+  }>();
+
+  // S3 compensation log
+  private readonly s3CompensationLog = new Map<string, {
+    id: string;
+    txId: string;
+    correlationId: string | null;
+    s3Bucket: string;
+    s3Key: string;
+    operation: "CreateMultipartUpload" | "UploadPart" | "CompleteMultipartUpload" | "CopyObject" | "PutObject" | "DeleteObject";
+    inverseOperation: "AbortMultipartUpload" | "DeleteObject" | "PutObject" | "noop";
+    inversePayload: Record<string, unknown> | null;
+    status: "pending" | "committed" | "compensated" | "failed";
+    actor: string | null;
+    createdAt: string;
+    committedAt: string | null;
+    compensatedAt: string | null;
+    lastError: string | null;
+    attempts: number;
+  }>();
+
   // Custom fields
   private readonly customFieldDefinitions = new Map<string, {
     id: string;
@@ -369,6 +412,9 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     // Custom fields
     this.customFieldDefinitions.clear();
     this.customFieldValues.clear();
+    // Atomic check-in
+    this.checkins.clear();
+    this.s3CompensationLog.clear();
   }
 
   async createIngestAsset(input: IngestInput, context: WriteContext): Promise<IngestResult> {
@@ -2659,6 +2705,180 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.archivedAssets.add(assetId);
     this.assets.delete(assetId);
     this.recordAudit(`Asset ${assetId} archived`, ctx.correlationId, new Date());
+  }
+
+  // ── Atomic check-in state ──
+
+  async createCheckin(
+    input: Parameters<PersistenceAdapter["createCheckin"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    const record = {
+      id: randomUUID(),
+      txId: input.txId,
+      versionId: input.versionId,
+      shotId: input.shotId,
+      projectId: input.projectId,
+      sequenceId: input.sequenceId,
+      context: input.context,
+      state: "reserved" as const,
+      s3Bucket: input.s3Bucket,
+      s3Key: input.s3Key,
+      s3UploadId: input.s3UploadId,
+      partPlanJson: input.partPlanJson,
+      correlationId: input.correlationId,
+      actor: input.actor,
+      deadlineAt: input.deadlineAt,
+      createdAt: now,
+      updatedAt: now,
+      committedAt: null,
+      abortedAt: null,
+      lastError: null,
+    };
+    this.checkins.set(record.id, record);
+    return record;
+  }
+
+  async getCheckin(id: string) {
+    return this.checkins.get(id) ?? null;
+  }
+
+  async updateCheckinState(
+    id: string,
+    updates: Parameters<PersistenceAdapter["updateCheckinState"]>[1],
+    ctx: WriteContext,
+  ) {
+    const existing = this.checkins.get(id);
+    if (!existing) return null;
+    const now = this.resolveNow(ctx).toISOString();
+    const updated = {
+      ...existing,
+      ...(updates.state !== undefined ? { state: updates.state } : {}),
+      ...(updates.committedAt !== undefined ? { committedAt: updates.committedAt } : {}),
+      ...(updates.abortedAt !== undefined ? { abortedAt: updates.abortedAt } : {}),
+      ...(updates.lastError !== undefined ? { lastError: updates.lastError } : {}),
+      updatedAt: now,
+    };
+    this.checkins.set(id, updated);
+    return updated;
+  }
+
+  // ── S3 compensation log ──
+
+  async createS3CompensationLog(
+    input: Parameters<PersistenceAdapter["createS3CompensationLog"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    const record = {
+      id: randomUUID(),
+      txId: input.txId,
+      correlationId: input.correlationId ?? null,
+      s3Bucket: input.s3Bucket,
+      s3Key: input.s3Key,
+      operation: input.operation,
+      inverseOperation: input.inverseOperation,
+      inversePayload: input.inversePayload ?? null,
+      status: "pending" as const,
+      actor: input.actor ?? null,
+      createdAt: now,
+      committedAt: null,
+      compensatedAt: null,
+      lastError: null,
+      attempts: 0,
+    };
+    this.s3CompensationLog.set(record.id, record);
+    return record;
+  }
+
+  async listS3CompensationByTxId(txId: string) {
+    return [...this.s3CompensationLog.values()].filter((r) => r.txId === txId);
+  }
+
+  async markS3CompensationCommitted(txId: string, ctx: WriteContext) {
+    const now = this.resolveNow(ctx).toISOString();
+    let count = 0;
+    for (const [id, rec] of this.s3CompensationLog.entries()) {
+      if (rec.txId === txId && rec.status === "pending") {
+        this.s3CompensationLog.set(id, { ...rec, status: "committed", committedAt: now });
+        count++;
+      }
+    }
+    return count;
+  }
+
+  async markS3CompensationCompensated(id: string, ctx: WriteContext) {
+    const existing = this.s3CompensationLog.get(id);
+    if (!existing) return;
+    const now = this.resolveNow(ctx).toISOString();
+    this.s3CompensationLog.set(id, { ...existing, status: "compensated", compensatedAt: now });
+  }
+
+  async markS3CompensationFailed(id: string, error: string, ctx: WriteContext) {
+    const existing = this.s3CompensationLog.get(id);
+    if (!existing) return;
+    void ctx;
+    this.s3CompensationLog.set(id, {
+      ...existing,
+      status: "failed",
+      lastError: error,
+      attempts: existing.attempts + 1,
+    });
+  }
+
+  // ── Version status update (for checkin published flip) ──
+
+  async updateVersionStatus(versionId: string, status: string, ctx: WriteContext) {
+    const existing = this.versions.get(versionId);
+    if (!existing) return;
+    const now = this.resolveNow(ctx).toISOString();
+    this.versions.set(versionId, {
+      ...existing,
+      status: status as typeof existing.status,
+      publishedAt: status === "published" ? now : existing.publishedAt,
+    });
+  }
+
+  // ── Version sentinel upsert ──
+
+  async upsertVersionSentinel(
+    shotId: string,
+    context: string,
+    sentinelName: string,
+    pointsToVersionId: string,
+    ctx: WriteContext,
+  ) {
+    // Find the target version to copy identity columns from
+    const target = this.versions.get(pointsToVersionId);
+    if (!target) return;
+    const now = this.resolveNow(ctx).toISOString();
+
+    // Remove any prior sentinel with the same (shotId, context, sentinelName)
+    for (const [id, v] of this.versions.entries()) {
+      if (
+        v.isSentinel &&
+        v.shotId === shotId &&
+        (v.context ?? "main") === context &&
+        v.sentinelName === sentinelName
+      ) {
+        this.versions.delete(id);
+      }
+    }
+
+    // Create a new sentinel row that "points" at target
+    const sentinelId = randomUUID();
+    this.versions.set(sentinelId, {
+      ...target,
+      id: sentinelId,
+      isSentinel: true,
+      sentinelName,
+      context,
+      // Sentinels don't get their own version number; mirror the target's
+      versionNumber: target.versionNumber,
+      createdAt: now,
+      publishedAt: now,
+    });
   }
 
   // ── Framework-enforced Audit (Fastify hooks) ──
