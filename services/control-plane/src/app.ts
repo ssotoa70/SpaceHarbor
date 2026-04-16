@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { resolveCorrelationId } from "./http/correlation.js";
-import { registerAuditHooks, registerLimitTripwire } from "./http/hooks.js";
+import { attachAuditHooks, attachLimitTripwire } from "./http/hooks.js";
 import { registerOpenApi } from "./http/openapi.js";
 import { createPersistenceAdapter } from "./persistence/factory.js";
 import type { PersistenceAdapter } from "./persistence/types.js";
@@ -115,11 +115,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   registerOpenApi(app);
 
-  // Framework-enforced request hooks:
-  //  - registerLimitTripwire caps pathological `?limit=...` values at
-  //    SPACEHARBOR_MAX_LIST_LIMIT (default 500) before route parsing sees them.
-  //  - registerAuditHooks is registered after persistence is resolved (see below).
-  void app.register(registerLimitTripwire);
+  // Framework-enforced request hooks (attached directly so they apply
+  // globally — Fastify plugin encapsulation would scope hooks only to
+  // routes registered inside the plugin).
+  //  - attachLimitTripwire caps pathological `?limit=...` values at
+  //    SPACEHARBOR_MAX_LIST_LIMIT (default 500) before route handlers see them.
+  //  - attachAuditHooks runs after persistence is resolved (see below).
+  attachLimitTripwire(app);
 
   // CORS support for cross-origin browser requests (web-ui on different port/host)
   const allowedOrigins = new Set([
@@ -348,9 +350,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     });
   });
 
-  // Framework-enforced audit trail. Must register before route handlers so
-  // the onResponse hook sees every mutation.
-  void app.register(registerAuditHooks, { persistence });
+  // Framework-enforced audit trail. Attaches the onResponse hook globally
+  // so every mutation emits an audit row.
+  attachAuditHooks(app, persistence);
 
   app.after(() => {
     void registerHealthRoute(app, persistence, { iamFlags });

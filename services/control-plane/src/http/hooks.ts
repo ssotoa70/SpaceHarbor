@@ -17,8 +17,12 @@
  * Plan reference: docs/plans/2026-04-16-mam-readiness-phase1.md
  */
 
-import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { PersistenceAdapter } from "../persistence/types.js";
+
+// NOTE: These hooks attach directly to the FastifyInstance so they fire for
+// EVERY route (Fastify plugin encapsulation would scope them only to routes
+// registered inside the plugin — we need global coverage).
 
 // ---------------------------------------------------------------------------
 // Limit tripwire
@@ -34,7 +38,7 @@ function parseMaxLimit(env: NodeJS.ProcessEnv = process.env): number {
   return parsed;
 }
 
-export const registerLimitTripwire: FastifyPluginAsync = async (app: FastifyInstance) => {
+export function attachLimitTripwire(app: FastifyInstance): void {
   const maxLimit = parseMaxLimit();
 
   app.addHook("preValidation", async (request: FastifyRequest) => {
@@ -57,15 +61,11 @@ export const registerLimitTripwire: FastifyPluginAsync = async (app: FastifyInst
       );
     }
   });
-};
+}
 
 // ---------------------------------------------------------------------------
 // Audit hooks (framework-enforced)
 // ---------------------------------------------------------------------------
-
-interface AuditHooksOptions {
-  persistence: PersistenceAdapter;
-}
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -93,12 +93,7 @@ function resolveActor(request: FastifyRequest): string | undefined {
   return undefined;
 }
 
-export const registerAuditHooks: FastifyPluginAsync<AuditHooksOptions> = async (
-  app: FastifyInstance,
-  opts,
-) => {
-  const { persistence } = opts;
-
+export function attachAuditHooks(app: FastifyInstance, persistence: PersistenceAdapter): void {
   app.addHook("onResponse", async (request: FastifyRequest, reply: FastifyReply) => {
     if (!MUTATING_METHODS.has(request.method)) return;
     if (shouldSkip(request.url)) return;
@@ -122,4 +117,4 @@ export const registerAuditHooks: FastifyPluginAsync<AuditHooksOptions> = async (
       request.log.warn({ err }, "[audit-hook] failed to persist audit row");
     }
   });
-};
+}
