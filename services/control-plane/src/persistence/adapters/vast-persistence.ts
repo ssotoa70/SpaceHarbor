@@ -1095,6 +1095,97 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
     return this.localFallback.recordRequestAudit(event);
   }
 
+  // ── Version files (migration 019) — delegated to local fallback for Phase 1 ──
+  async createVersionFiles(input: Parameters<PersistenceAdapter["createVersionFiles"]>[0], ctx: WriteContext) {
+    return this.localFallback.createVersionFiles(input, ctx);
+  }
+  async listVersionFiles(versionId: string) {
+    return this.localFallback.listVersionFiles(versionId);
+  }
+
+  // ── Triggers (migration 020) ──
+  async listTriggers(filter?: { enabled?: boolean }) {
+    return this.localFallback.listTriggers(filter);
+  }
+  async getTrigger(id: string) {
+    return this.localFallback.getTrigger(id);
+  }
+  async createTrigger(input: Parameters<PersistenceAdapter["createTrigger"]>[0], ctx: WriteContext) {
+    return this.localFallback.createTrigger(input, ctx);
+  }
+  async updateTrigger(id: string, updates: Parameters<PersistenceAdapter["updateTrigger"]>[1], ctx: WriteContext) {
+    return this.localFallback.updateTrigger(id, updates, ctx);
+  }
+  async deleteTrigger(id: string, ctx: WriteContext) {
+    return this.localFallback.deleteTrigger(id, ctx);
+  }
+  async recordTriggerFire(id: string, ctx: WriteContext) {
+    return this.localFallback.recordTriggerFire(id, ctx);
+  }
+
+  // ── Webhook endpoints ──
+  async listWebhookEndpoints(filter?: { direction?: "inbound" | "outbound"; includeRevoked?: boolean }) {
+    return this.localFallback.listWebhookEndpoints(filter);
+  }
+  async getWebhookEndpoint(id: string) {
+    return this.localFallback.getWebhookEndpoint(id);
+  }
+  async createWebhookEndpoint(input: Parameters<PersistenceAdapter["createWebhookEndpoint"]>[0], ctx: WriteContext) {
+    return this.localFallback.createWebhookEndpoint(input, ctx);
+  }
+  async revokeWebhookEndpoint(id: string, ctx: WriteContext) {
+    return this.localFallback.revokeWebhookEndpoint(id, ctx);
+  }
+  async recordWebhookUsed(id: string, ctx: WriteContext) {
+    return this.localFallback.recordWebhookUsed(id, ctx);
+  }
+
+  // ── Webhook delivery log ──
+  async createWebhookDelivery(input: Parameters<PersistenceAdapter["createWebhookDelivery"]>[0]) {
+    return this.localFallback.createWebhookDelivery(input);
+  }
+  async listWebhookDeliveries(filter?: { webhookId?: string; status?: string; limit?: number }) {
+    return this.localFallback.listWebhookDeliveries(filter);
+  }
+
+  // ── Workflow engine (migration 021) ──
+  async listWorkflowDefinitions(filter?: { enabled?: boolean; includeDeleted?: boolean }) {
+    return this.localFallback.listWorkflowDefinitions(filter);
+  }
+  async getWorkflowDefinition(id: string) {
+    return this.localFallback.getWorkflowDefinition(id);
+  }
+  async getWorkflowDefinitionByName(name: string) {
+    return this.localFallback.getWorkflowDefinitionByName(name);
+  }
+  async createWorkflowDefinition(input: Parameters<PersistenceAdapter["createWorkflowDefinition"]>[0], ctx: WriteContext) {
+    return this.localFallback.createWorkflowDefinition(input, ctx);
+  }
+  async updateWorkflowDefinition(id: string, updates: Parameters<PersistenceAdapter["updateWorkflowDefinition"]>[1], ctx: WriteContext) {
+    return this.localFallback.updateWorkflowDefinition(id, updates, ctx);
+  }
+  async deleteWorkflowDefinition(id: string, ctx: WriteContext) {
+    return this.localFallback.deleteWorkflowDefinition(id, ctx);
+  }
+  async createWorkflowInstance(input: Parameters<PersistenceAdapter["createWorkflowInstance"]>[0], ctx: WriteContext) {
+    return this.localFallback.createWorkflowInstance(input, ctx);
+  }
+  async getWorkflowInstance(id: string) {
+    return this.localFallback.getWorkflowInstance(id);
+  }
+  async listWorkflowInstances(filter?: Parameters<PersistenceAdapter["listWorkflowInstances"]>[0]) {
+    return this.localFallback.listWorkflowInstances(filter);
+  }
+  async updateWorkflowInstance(id: string, updates: Parameters<PersistenceAdapter["updateWorkflowInstance"]>[1], ctx: WriteContext) {
+    return this.localFallback.updateWorkflowInstance(id, updates, ctx);
+  }
+  async recordWorkflowTransition(input: Parameters<PersistenceAdapter["recordWorkflowTransition"]>[0], ctx: WriteContext) {
+    return this.localFallback.recordWorkflowTransition(input, ctx);
+  }
+  async listWorkflowTransitions(instanceId: string) {
+    return this.localFallback.listWorkflowTransitions(instanceId);
+  }
+
   // ── Atomic check-in state ──
   // Delegated to local fallback for now. Trino-backed checkins table
   // (migration 018) is wired when the VAST adapter split lands in Phase 3.

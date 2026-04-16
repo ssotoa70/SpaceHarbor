@@ -57,6 +57,10 @@ import { registerStorageProcessRoutes } from "./routes/storage-process.js";
 import { registerAssetActionRoutes } from "./routes/asset-actions.js";
 import { registerCustomFieldsRoute } from "./routes/custom-fields.js";
 import { registerCheckinRoute } from "./routes/checkin.js";
+import { registerTriggersRoute } from "./routes/triggers.js";
+import { registerWebhookRoutes } from "./routes/webhooks.js";
+import { registerWorkflowsRoute } from "./routes/workflows.js";
+import { TriggerConsumer } from "./automation/trigger-consumer.js";
 import { createConfluentKafkaClient } from "./events/confluent-kafka.js";
 import { VastEventSubscriber } from "./events/vast-event-subscriber.js";
 import { TrinoClient } from "./db/trino-client.js";
@@ -93,6 +97,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const persistence = options.persistenceAdapter ?? createPersistenceAdapter();
   persistence.reset();
   const auditRetention = createAuditRetentionRunner(persistence);
+  const triggerConsumer = new TriggerConsumer(persistence);
   const leaseReaping = createLeaseReapingRunner(persistence);
   const prefixes = ["", "/api/v1"];
 
@@ -362,6 +367,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerAssetActionRoutes(app, persistence, prefixes);
     void registerCustomFieldsRoute(app, persistence, prefixes);
     void registerCheckinRoute(app, persistence, prefixes);
+    void registerTriggersRoute(app, persistence, prefixes);
+    void registerWebhookRoutes(app, persistence, prefixes);
+    void registerWorkflowsRoute(app, persistence, prefixes);
     void registerAuditRoute(app, persistence, prefixes);
     void registerIncidentRoute(app, persistence, prefixes);
     void registerIngestRoute(app, persistence, prefixes);
@@ -853,6 +861,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     auditRetention.start();
     leaseReaping.start();
     rateLimiter.start();
+    triggerConsumer.start();
     if (subscriber) {
       await subscriber.start();
     }
@@ -862,6 +871,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     auditRetention.stop();
     leaseReaping.stop();
     rateLimiter.stop();
+    triggerConsumer.stop();
     if (subscriber) {
       await subscriber.stop();
     }

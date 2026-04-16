@@ -110,7 +110,12 @@ import type {
   IngestInput,
   PersistenceAdapter,
   WorkflowStats,
-  WriteContext
+  WriteContext,
+  VersionFileRole,
+  TriggerActionKind,
+  WebhookDirection,
+  WebhookDeliveryStatus,
+  WorkflowInstanceState,
 } from "../types.js";
 
 interface QueueEntry {
@@ -269,6 +274,112 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   // Archived asset IDs
   private readonly archivedAssets = new Set<string>();
 
+  // Multi-file version manifests (migration 019)
+  private readonly versionFiles = new Map<string, {
+    id: string;
+    versionId: string;
+    role: VersionFileRole;
+    filename: string;
+    s3Bucket: string;
+    s3Key: string;
+    contentType: string | null;
+    sizeBytes: number | null;
+    checksum: string | null;
+    checksumAlgorithm: string | null;
+    frameRangeStart: number | null;
+    frameRangeEnd: number | null;
+    framePadding: number | null;
+    checkinId: string | null;
+    createdAt: string;
+  }>();
+
+  // Triggers + Webhooks (migration 020)
+  private readonly triggers = new Map<string, {
+    id: string;
+    name: string;
+    description: string | null;
+    eventSelector: string;
+    conditionJson: string | null;
+    actionKind: TriggerActionKind;
+    actionConfigJson: string;
+    enabled: boolean;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+    lastFiredAt: string | null;
+    fireCount: number;
+  }>();
+  private readonly webhookEndpoints = new Map<string, {
+    id: string;
+    name: string;
+    direction: WebhookDirection;
+    url: string | null;
+    secretHash: string;
+    secretPrefix: string;
+    signingAlgorithm: string;
+    allowedEventTypes: string[] | null;
+    description: string | null;
+    createdBy: string;
+    createdAt: string;
+    lastUsedAt: string | null;
+    revokedAt: string | null;
+  }>();
+  private readonly webhookDeliveryLog: Array<{
+    id: string;
+    webhookId: string;
+    triggerId: string | null;
+    eventType: string;
+    eventPayload: string | null;
+    requestUrl: string | null;
+    requestHeaders: string | null;
+    responseStatus: number | null;
+    responseBody: string | null;
+    status: WebhookDeliveryStatus;
+    attemptNumber: number;
+    lastError: string | null;
+    startedAt: string;
+    completedAt: string | null;
+  }> = [];
+
+  // Workflow engine (migration 021)
+  private readonly workflowDefinitions = new Map<string, {
+    id: string;
+    name: string;
+    version: number;
+    description: string | null;
+    dslJson: string;
+    enabled: boolean;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+    deletedAt: string | null;
+  }>();
+  private readonly workflowInstances = new Map<string, {
+    id: string;
+    definitionId: string;
+    definitionVersion: number;
+    currentNodeId: string;
+    state: WorkflowInstanceState;
+    contextJson: string;
+    startedBy: string;
+    startedAt: string;
+    updatedAt: string;
+    completedAt: string | null;
+    lastError: string | null;
+    parentEntityType: string | null;
+    parentEntityId: string | null;
+  }>();
+  private readonly workflowTransitions: Array<{
+    id: string;
+    instanceId: string;
+    fromNodeId: string;
+    toNodeId: string;
+    eventType: string | null;
+    actor: string | null;
+    payloadJson: string | null;
+    at: string;
+  }> = [];
+
   // Atomic check-in state
   private readonly checkins = new Map<string, {
     id: string;
@@ -415,6 +526,14 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     // Atomic check-in
     this.checkins.clear();
     this.s3CompensationLog.clear();
+    // Version files + Triggers + Webhooks + Workflows
+    this.versionFiles.clear();
+    this.triggers.clear();
+    this.webhookEndpoints.clear();
+    this.webhookDeliveryLog.length = 0;
+    this.workflowDefinitions.clear();
+    this.workflowInstances.clear();
+    this.workflowTransitions.length = 0;
   }
 
   async createIngestAsset(input: IngestInput, context: WriteContext): Promise<IngestResult> {
@@ -2879,6 +2998,365 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       createdAt: now,
       publishedAt: now,
     });
+  }
+
+  // ── Version files (migration 019) ──
+
+  async createVersionFiles(
+    input: Parameters<PersistenceAdapter["createVersionFiles"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    const created: Array<ReturnType<typeof this.buildVersionFile>> = [];
+    for (const f of input) {
+      const record = this.buildVersionFile(f, now);
+      this.versionFiles.set(record.id, record);
+      created.push(record);
+    }
+    return created;
+  }
+
+  private buildVersionFile(
+    f: { versionId: string; role: VersionFileRole; filename: string; s3Bucket: string; s3Key: string; contentType?: string; sizeBytes?: number; checksum?: string; checksumAlgorithm?: string; frameRangeStart?: number; frameRangeEnd?: number; framePadding?: number; checkinId?: string },
+    now: string,
+  ) {
+    return {
+      id: randomUUID(),
+      versionId: f.versionId,
+      role: f.role,
+      filename: f.filename,
+      s3Bucket: f.s3Bucket,
+      s3Key: f.s3Key,
+      contentType: f.contentType ?? null,
+      sizeBytes: f.sizeBytes ?? null,
+      checksum: f.checksum ?? null,
+      checksumAlgorithm: f.checksumAlgorithm ?? null,
+      frameRangeStart: f.frameRangeStart ?? null,
+      frameRangeEnd: f.frameRangeEnd ?? null,
+      framePadding: f.framePadding ?? null,
+      checkinId: f.checkinId ?? null,
+      createdAt: now,
+    };
+  }
+
+  async listVersionFiles(versionId: string) {
+    return [...this.versionFiles.values()].filter((f) => f.versionId === versionId);
+  }
+
+  // ── Triggers (migration 020) ──
+
+  async listTriggers(filter?: { enabled?: boolean }) {
+    return [...this.triggers.values()].filter((t) =>
+      filter?.enabled === undefined ? true : t.enabled === filter.enabled,
+    );
+  }
+
+  async getTrigger(id: string) {
+    return this.triggers.get(id) ?? null;
+  }
+
+  async createTrigger(
+    input: Parameters<PersistenceAdapter["createTrigger"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    const record = {
+      id: randomUUID(),
+      name: input.name,
+      description: input.description ?? null,
+      eventSelector: input.eventSelector,
+      conditionJson: input.conditionJson ?? null,
+      actionKind: input.actionKind,
+      actionConfigJson: input.actionConfigJson,
+      enabled: input.enabled ?? true,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now,
+      lastFiredAt: null,
+      fireCount: 0,
+    };
+    this.triggers.set(record.id, record);
+    return record;
+  }
+
+  async updateTrigger(
+    id: string,
+    updates: Parameters<PersistenceAdapter["updateTrigger"]>[1],
+    ctx: WriteContext,
+  ) {
+    const existing = this.triggers.get(id);
+    if (!existing) return null;
+    const now = this.resolveNow(ctx).toISOString();
+    const updated = {
+      ...existing,
+      name: updates.name ?? existing.name,
+      description: updates.description !== undefined ? (updates.description ?? null) : existing.description,
+      eventSelector: updates.eventSelector ?? existing.eventSelector,
+      conditionJson: updates.conditionJson !== undefined ? (updates.conditionJson ?? null) : existing.conditionJson,
+      actionKind: updates.actionKind ?? existing.actionKind,
+      actionConfigJson: updates.actionConfigJson ?? existing.actionConfigJson,
+      enabled: updates.enabled !== undefined ? updates.enabled : existing.enabled,
+      updatedAt: now,
+    };
+    this.triggers.set(id, updated);
+    return updated;
+  }
+
+  async deleteTrigger(id: string, ctx: WriteContext) {
+    void ctx;
+    return this.triggers.delete(id);
+  }
+
+  async recordTriggerFire(id: string, ctx: WriteContext) {
+    const existing = this.triggers.get(id);
+    if (!existing) return;
+    const now = this.resolveNow(ctx).toISOString();
+    this.triggers.set(id, {
+      ...existing,
+      lastFiredAt: now,
+      fireCount: existing.fireCount + 1,
+    });
+  }
+
+  // ── Webhook endpoints (migration 020) ──
+
+  async listWebhookEndpoints(filter?: { direction?: "inbound" | "outbound"; includeRevoked?: boolean }) {
+    return [...this.webhookEndpoints.values()].filter((w) => {
+      if (filter?.direction && w.direction !== filter.direction) return false;
+      if (!filter?.includeRevoked && w.revokedAt !== null) return false;
+      return true;
+    });
+  }
+
+  async getWebhookEndpoint(id: string) {
+    return this.webhookEndpoints.get(id) ?? null;
+  }
+
+  async createWebhookEndpoint(
+    input: Parameters<PersistenceAdapter["createWebhookEndpoint"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    const record = {
+      id: randomUUID(),
+      name: input.name,
+      direction: input.direction,
+      url: input.url ?? null,
+      secretHash: input.secretHash,
+      secretPrefix: input.secretPrefix,
+      signingAlgorithm: input.signingAlgorithm,
+      allowedEventTypes: input.allowedEventTypes ?? null,
+      description: input.description ?? null,
+      createdBy: input.createdBy,
+      createdAt: now,
+      lastUsedAt: null,
+      revokedAt: null,
+    };
+    this.webhookEndpoints.set(record.id, record);
+    return record;
+  }
+
+  async revokeWebhookEndpoint(id: string, ctx: WriteContext) {
+    const existing = this.webhookEndpoints.get(id);
+    if (!existing || existing.revokedAt !== null) return false;
+    const now = this.resolveNow(ctx).toISOString();
+    this.webhookEndpoints.set(id, { ...existing, revokedAt: now });
+    return true;
+  }
+
+  async recordWebhookUsed(id: string, ctx: WriteContext) {
+    const existing = this.webhookEndpoints.get(id);
+    if (!existing) return;
+    const now = this.resolveNow(ctx).toISOString();
+    this.webhookEndpoints.set(id, { ...existing, lastUsedAt: now });
+  }
+
+  // ── Webhook delivery log (migration 020) ──
+
+  async createWebhookDelivery(input: Parameters<PersistenceAdapter["createWebhookDelivery"]>[0]) {
+    const record = {
+      id: randomUUID(),
+      webhookId: input.webhookId,
+      triggerId: input.triggerId ?? null,
+      eventType: input.eventType,
+      eventPayload: input.eventPayload ?? null,
+      requestUrl: input.requestUrl ?? null,
+      requestHeaders: input.requestHeaders ?? null,
+      responseStatus: input.responseStatus ?? null,
+      responseBody: input.responseBody ?? null,
+      status: input.status,
+      attemptNumber: input.attemptNumber,
+      lastError: input.lastError ?? null,
+      startedAt: input.startedAt,
+      completedAt: input.completedAt ?? null,
+    };
+    this.webhookDeliveryLog.unshift(record);
+    return record;
+  }
+
+  async listWebhookDeliveries(filter?: { webhookId?: string; status?: string; limit?: number }) {
+    let rows = this.webhookDeliveryLog;
+    if (filter?.webhookId) rows = rows.filter((r) => r.webhookId === filter.webhookId);
+    if (filter?.status) rows = rows.filter((r) => r.status === filter.status);
+    const limit = filter?.limit ?? 100;
+    return rows.slice(0, limit);
+  }
+
+  // ── Workflow engine (migration 021) ──
+
+  async listWorkflowDefinitions(filter?: { enabled?: boolean; includeDeleted?: boolean }) {
+    return [...this.workflowDefinitions.values()].filter((d) => {
+      if (!filter?.includeDeleted && d.deletedAt !== null) return false;
+      if (filter?.enabled !== undefined && d.enabled !== filter.enabled) return false;
+      return true;
+    });
+  }
+
+  async getWorkflowDefinition(id: string) {
+    return this.workflowDefinitions.get(id) ?? null;
+  }
+
+  async getWorkflowDefinitionByName(name: string) {
+    // Returns the highest-version non-deleted definition for this name
+    const candidates = [...this.workflowDefinitions.values()]
+      .filter((d) => d.name === name && d.deletedAt === null)
+      .sort((a, b) => b.version - a.version);
+    return candidates[0] ?? null;
+  }
+
+  async createWorkflowDefinition(
+    input: Parameters<PersistenceAdapter["createWorkflowDefinition"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    // Auto-increment version per name
+    const existing = [...this.workflowDefinitions.values()].filter(
+      (d) => d.name === input.name && d.deletedAt === null,
+    );
+    const version = input.version ?? (existing.length > 0 ? Math.max(...existing.map((d) => d.version)) + 1 : 1);
+    const record = {
+      id: randomUUID(),
+      name: input.name,
+      version,
+      description: input.description ?? null,
+      dslJson: input.dslJson,
+      enabled: input.enabled ?? true,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+    this.workflowDefinitions.set(record.id, record);
+    return record;
+  }
+
+  async updateWorkflowDefinition(
+    id: string,
+    updates: Parameters<PersistenceAdapter["updateWorkflowDefinition"]>[1],
+    ctx: WriteContext,
+  ) {
+    const existing = this.workflowDefinitions.get(id);
+    if (!existing || existing.deletedAt !== null) return null;
+    const now = this.resolveNow(ctx).toISOString();
+    const updated = {
+      ...existing,
+      description: updates.description !== undefined ? (updates.description ?? null) : existing.description,
+      dslJson: updates.dslJson ?? existing.dslJson,
+      enabled: updates.enabled !== undefined ? updates.enabled : existing.enabled,
+      updatedAt: now,
+    };
+    this.workflowDefinitions.set(id, updated);
+    return updated;
+  }
+
+  async deleteWorkflowDefinition(id: string, ctx: WriteContext) {
+    const existing = this.workflowDefinitions.get(id);
+    if (!existing || existing.deletedAt !== null) return false;
+    const now = this.resolveNow(ctx).toISOString();
+    this.workflowDefinitions.set(id, { ...existing, deletedAt: now });
+    return true;
+  }
+
+  async createWorkflowInstance(
+    input: Parameters<PersistenceAdapter["createWorkflowInstance"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    const record = {
+      id: randomUUID(),
+      definitionId: input.definitionId,
+      definitionVersion: input.definitionVersion,
+      currentNodeId: input.currentNodeId,
+      state: "pending" as const,
+      contextJson: input.contextJson,
+      startedBy: input.startedBy,
+      startedAt: now,
+      updatedAt: now,
+      completedAt: null,
+      lastError: null,
+      parentEntityType: input.parentEntityType ?? null,
+      parentEntityId: input.parentEntityId ?? null,
+    };
+    this.workflowInstances.set(record.id, record);
+    return record;
+  }
+
+  async getWorkflowInstance(id: string) {
+    return this.workflowInstances.get(id) ?? null;
+  }
+
+  async listWorkflowInstances(filter?: { definitionId?: string; state?: string; parentEntityType?: string; parentEntityId?: string; limit?: number }) {
+    let rows = [...this.workflowInstances.values()];
+    if (filter?.definitionId) rows = rows.filter((i) => i.definitionId === filter.definitionId);
+    if (filter?.state) rows = rows.filter((i) => i.state === filter.state);
+    if (filter?.parentEntityType) rows = rows.filter((i) => i.parentEntityType === filter.parentEntityType);
+    if (filter?.parentEntityId) rows = rows.filter((i) => i.parentEntityId === filter.parentEntityId);
+    rows.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    return rows.slice(0, filter?.limit ?? 100);
+  }
+
+  async updateWorkflowInstance(
+    id: string,
+    updates: Parameters<PersistenceAdapter["updateWorkflowInstance"]>[1],
+    ctx: WriteContext,
+  ) {
+    const existing = this.workflowInstances.get(id);
+    if (!existing) return null;
+    const now = this.resolveNow(ctx).toISOString();
+    const updated = {
+      ...existing,
+      currentNodeId: updates.currentNodeId ?? existing.currentNodeId,
+      state: updates.state ?? existing.state,
+      contextJson: updates.contextJson ?? existing.contextJson,
+      completedAt: updates.completedAt !== undefined ? updates.completedAt : existing.completedAt,
+      lastError: updates.lastError !== undefined ? updates.lastError : existing.lastError,
+      updatedAt: now,
+    };
+    this.workflowInstances.set(id, updated);
+    return updated;
+  }
+
+  async recordWorkflowTransition(
+    input: Parameters<PersistenceAdapter["recordWorkflowTransition"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    this.workflowTransitions.push({
+      id: randomUUID(),
+      instanceId: input.instanceId,
+      fromNodeId: input.fromNodeId,
+      toNodeId: input.toNodeId,
+      eventType: input.eventType ?? null,
+      actor: input.actor ?? null,
+      payloadJson: input.payloadJson ?? null,
+      at: now,
+    });
+  }
+
+  async listWorkflowTransitions(instanceId: string) {
+    return this.workflowTransitions
+      .filter((t) => t.instanceId === instanceId)
+      .sort((a, b) => a.at.localeCompare(b.at));
   }
 
   // ── Framework-enforced Audit (Fastify hooks) ──

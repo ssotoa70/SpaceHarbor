@@ -806,6 +806,44 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
   // Asset Archive (soft-delete)
   archiveAsset(assetId: string, ctx: WriteContext): Promise<void>;
 
+  // ── Version files (multi-file manifest) ──
+  createVersionFiles(input: VersionFileInput[], ctx: WriteContext): Promise<VersionFileRecord[]>;
+  listVersionFiles(versionId: string): Promise<VersionFileRecord[]>;
+
+  // ── Triggers ──
+  listTriggers(filter?: { enabled?: boolean }): Promise<TriggerRecord[]>;
+  getTrigger(id: string): Promise<TriggerRecord | null>;
+  createTrigger(input: TriggerInput, ctx: WriteContext): Promise<TriggerRecord>;
+  updateTrigger(id: string, updates: Partial<TriggerInput>, ctx: WriteContext): Promise<TriggerRecord | null>;
+  deleteTrigger(id: string, ctx: WriteContext): Promise<boolean>;
+  recordTriggerFire(id: string, ctx: WriteContext): Promise<void>;
+
+  // ── Webhook endpoints ──
+  listWebhookEndpoints(filter?: { direction?: "inbound" | "outbound"; includeRevoked?: boolean }): Promise<WebhookEndpointRecord[]>;
+  getWebhookEndpoint(id: string): Promise<WebhookEndpointRecord | null>;
+  createWebhookEndpoint(input: WebhookEndpointInput, ctx: WriteContext): Promise<WebhookEndpointRecord>;
+  revokeWebhookEndpoint(id: string, ctx: WriteContext): Promise<boolean>;
+  recordWebhookUsed(id: string, ctx: WriteContext): Promise<void>;
+
+  // ── Webhook delivery log ──
+  createWebhookDelivery(input: WebhookDeliveryInput): Promise<WebhookDeliveryRecord>;
+  listWebhookDeliveries(filter?: { webhookId?: string; status?: string; limit?: number }): Promise<WebhookDeliveryRecord[]>;
+
+  // ── Workflow definitions + instances ──
+  listWorkflowDefinitions(filter?: { enabled?: boolean; includeDeleted?: boolean }): Promise<WorkflowDefinitionRecord[]>;
+  getWorkflowDefinition(id: string): Promise<WorkflowDefinitionRecord | null>;
+  getWorkflowDefinitionByName(name: string): Promise<WorkflowDefinitionRecord | null>;
+  createWorkflowDefinition(input: WorkflowDefinitionInput, ctx: WriteContext): Promise<WorkflowDefinitionRecord>;
+  updateWorkflowDefinition(id: string, updates: Partial<WorkflowDefinitionInput>, ctx: WriteContext): Promise<WorkflowDefinitionRecord | null>;
+  deleteWorkflowDefinition(id: string, ctx: WriteContext): Promise<boolean>;
+
+  createWorkflowInstance(input: WorkflowInstanceInput, ctx: WriteContext): Promise<WorkflowInstanceRecord>;
+  getWorkflowInstance(id: string): Promise<WorkflowInstanceRecord | null>;
+  listWorkflowInstances(filter?: { definitionId?: string; state?: string; parentEntityType?: string; parentEntityId?: string; limit?: number }): Promise<WorkflowInstanceRecord[]>;
+  updateWorkflowInstance(id: string, updates: Partial<WorkflowInstanceUpdate>, ctx: WriteContext): Promise<WorkflowInstanceRecord | null>;
+  recordWorkflowTransition(input: WorkflowTransitionInput, ctx: WriteContext): Promise<void>;
+  listWorkflowTransitions(instanceId: string): Promise<WorkflowTransitionRecord[]>;
+
   // ── Atomic check-in state ──
   createCheckin(input: CheckinInput, ctx: WriteContext): Promise<CheckinRecord>;
   getCheckin(id: string): Promise<CheckinRecord | null>;
@@ -872,6 +910,212 @@ export interface AssetNote {
   body: string;
   createdBy: string;
   createdAt: string;
+}
+
+export type VersionFileRole = "primary" | "sidecar" | "proxy" | "frame_range" | "audio" | "reference";
+
+export interface VersionFileInput {
+  versionId: string;
+  role: VersionFileRole;
+  filename: string;
+  s3Bucket: string;
+  s3Key: string;
+  contentType?: string;
+  sizeBytes?: number;
+  checksum?: string;
+  checksumAlgorithm?: string;
+  frameRangeStart?: number;
+  frameRangeEnd?: number;
+  framePadding?: number;
+  checkinId?: string;
+}
+
+export interface VersionFileRecord extends Required<Omit<VersionFileInput, "contentType" | "sizeBytes" | "checksum" | "checksumAlgorithm" | "frameRangeStart" | "frameRangeEnd" | "framePadding" | "checkinId">> {
+  id: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  checksum: string | null;
+  checksumAlgorithm: string | null;
+  frameRangeStart: number | null;
+  frameRangeEnd: number | null;
+  framePadding: number | null;
+  checkinId: string | null;
+  createdAt: string;
+}
+
+// ── Triggers ──
+
+export type TriggerActionKind = "http_call" | "enqueue_job" | "run_workflow" | "run_script" | "post_event";
+
+export interface TriggerInput {
+  name: string;
+  description?: string;
+  eventSelector: string;
+  conditionJson?: string;
+  actionKind: TriggerActionKind;
+  actionConfigJson: string;
+  enabled?: boolean;
+  createdBy: string;
+}
+
+export interface TriggerRecord {
+  id: string;
+  name: string;
+  description: string | null;
+  eventSelector: string;
+  conditionJson: string | null;
+  actionKind: TriggerActionKind;
+  actionConfigJson: string;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  lastFiredAt: string | null;
+  fireCount: number;
+}
+
+// ── Webhook endpoints ──
+
+export type WebhookDirection = "inbound" | "outbound";
+
+export interface WebhookEndpointInput {
+  name: string;
+  direction: WebhookDirection;
+  url?: string;
+  secretHash: string;
+  secretPrefix: string;
+  signingAlgorithm: "hmac-sha256";
+  allowedEventTypes?: string[];
+  description?: string;
+  createdBy: string;
+}
+
+export interface WebhookEndpointRecord {
+  id: string;
+  name: string;
+  direction: WebhookDirection;
+  url: string | null;
+  secretHash: string;
+  secretPrefix: string;
+  signingAlgorithm: string;
+  allowedEventTypes: string[] | null;
+  description: string | null;
+  createdBy: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+// ── Webhook delivery log ──
+
+export type WebhookDeliveryStatus = "pending" | "in_flight" | "succeeded" | "failed" | "abandoned";
+
+export interface WebhookDeliveryInput {
+  webhookId: string;
+  triggerId?: string | null;
+  eventType: string;
+  eventPayload?: string;
+  requestUrl?: string;
+  requestHeaders?: string;
+  responseStatus?: number;
+  responseBody?: string;
+  status: WebhookDeliveryStatus;
+  attemptNumber: number;
+  lastError?: string;
+  startedAt: string;
+  completedAt?: string;
+}
+
+export interface WebhookDeliveryRecord extends Required<Omit<WebhookDeliveryInput, "triggerId" | "eventPayload" | "requestUrl" | "requestHeaders" | "responseStatus" | "responseBody" | "lastError" | "completedAt">> {
+  id: string;
+  triggerId: string | null;
+  eventPayload: string | null;
+  requestUrl: string | null;
+  requestHeaders: string | null;
+  responseStatus: number | null;
+  responseBody: string | null;
+  lastError: string | null;
+  completedAt: string | null;
+}
+
+// ── Workflow engine ──
+
+export type WorkflowInstanceState = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+export interface WorkflowDefinitionInput {
+  name: string;
+  version?: number;
+  description?: string;
+  dslJson: string;
+  enabled?: boolean;
+  createdBy: string;
+}
+
+export interface WorkflowDefinitionRecord {
+  id: string;
+  name: string;
+  version: number;
+  description: string | null;
+  dslJson: string;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface WorkflowInstanceInput {
+  definitionId: string;
+  definitionVersion: number;
+  currentNodeId: string;
+  contextJson: string;
+  startedBy: string;
+  parentEntityType?: string;
+  parentEntityId?: string;
+}
+
+export interface WorkflowInstanceRecord {
+  id: string;
+  definitionId: string;
+  definitionVersion: number;
+  currentNodeId: string;
+  state: WorkflowInstanceState;
+  contextJson: string;
+  startedBy: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  lastError: string | null;
+  parentEntityType: string | null;
+  parentEntityId: string | null;
+}
+
+export interface WorkflowInstanceUpdate {
+  currentNodeId: string;
+  state: WorkflowInstanceState;
+  contextJson: string;
+  completedAt: string | null;
+  lastError: string | null;
+}
+
+export interface WorkflowTransitionInput {
+  instanceId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  eventType?: string;
+  actor?: string;
+  payloadJson?: string;
+}
+
+export interface WorkflowTransitionRecord {
+  id: string;
+  instanceId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  eventType: string | null;
+  actor: string | null;
+  payloadJson: string | null;
+  at: string;
 }
 
 export type CheckinState = "reserved" | "committed" | "compensating" | "aborted";
