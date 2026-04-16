@@ -1090,4 +1090,48 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   async archiveAsset(assetId: string, ctx: WriteContext) {
     return this.localFallback.archiveAsset(assetId, ctx);
   }
+
+  // ── Custom Fields ──
+  // Currently delegated to the local fallback. Trino-backed persistence
+  // lands alongside the broader VAST adapter split in Phase 3 of the
+  // MAM readiness roadmap (see docs/plans/2026-04-16-mam-readiness-phase1.md).
+  async listCustomFieldDefinitions(entityType?: string, includeDeleted = false) {
+    return this.localFallback.listCustomFieldDefinitions(entityType, includeDeleted);
+  }
+  async getCustomFieldDefinition(id: string) {
+    return this.localFallback.getCustomFieldDefinition(id);
+  }
+  async createCustomFieldDefinition(
+    input: Parameters<PersistenceAdapter["createCustomFieldDefinition"]>[0],
+    ctx: WriteContext,
+  ) {
+    return this.localFallback.createCustomFieldDefinition(input, ctx);
+  }
+  async updateCustomFieldDefinition(
+    id: string,
+    input: Parameters<PersistenceAdapter["updateCustomFieldDefinition"]>[1],
+    ctx: WriteContext,
+  ) {
+    return this.localFallback.updateCustomFieldDefinition(id, input, ctx);
+  }
+  async softDeleteCustomFieldDefinition(id: string, ctx: WriteContext) {
+    return this.localFallback.softDeleteCustomFieldDefinition(id, ctx);
+  }
+  async getCustomFieldValues(entityType: string, entityId: string) {
+    return this.localFallback.getCustomFieldValues(entityType, entityId);
+  }
+  async setCustomFieldValue(
+    input: Parameters<PersistenceAdapter["setCustomFieldValue"]>[0],
+    ctx: WriteContext,
+  ) {
+    return this.localFallback.setCustomFieldValue(input, ctx);
+  }
+  async deleteCustomFieldValue(
+    definitionId: string,
+    entityType: string,
+    entityId: string,
+    ctx: WriteContext,
+  ) {
+    return this.localFallback.deleteCustomFieldValue(definitionId, entityType, entityId, ctx);
+  }
 }

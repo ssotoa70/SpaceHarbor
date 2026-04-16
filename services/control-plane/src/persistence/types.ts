@@ -796,6 +796,16 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
 
   // Asset Archive (soft-delete)
   archiveAsset(assetId: string, ctx: WriteContext): Promise<void>;
+
+  // Custom Fields (runtime-extensible entity metadata)
+  listCustomFieldDefinitions(entityType?: string, includeDeleted?: boolean): Promise<CustomFieldDefinitionRecord[]>;
+  getCustomFieldDefinition(id: string): Promise<CustomFieldDefinitionRecord | null>;
+  createCustomFieldDefinition(input: CustomFieldDefinitionInput, ctx: WriteContext): Promise<CustomFieldDefinitionRecord>;
+  updateCustomFieldDefinition(id: string, input: Partial<CustomFieldDefinitionInput>, ctx: WriteContext): Promise<CustomFieldDefinitionRecord | null>;
+  softDeleteCustomFieldDefinition(id: string, ctx: WriteContext): Promise<boolean>;
+  getCustomFieldValues(entityType: string, entityId: string): Promise<CustomFieldValueRecord[]>;
+  setCustomFieldValue(input: CustomFieldValueInput, ctx: WriteContext): Promise<CustomFieldValueRecord>;
+  deleteCustomFieldValue(definitionId: string, entityType: string, entityId: string, ctx: WriteContext): Promise<boolean>;
 }
 
 export interface AssetNote {
@@ -804,4 +814,57 @@ export interface AssetNote {
   body: string;
   createdBy: string;
   createdAt: string;
+}
+
+export interface CustomFieldDefinitionRecord {
+  id: string;
+  entityType: string;
+  name: string;
+  displayLabel: string;
+  dataType: string;
+  required: boolean;
+  validationJson: string | null;
+  displayConfigJson: string | null;
+  description: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface CustomFieldDefinitionInput {
+  entityType: string;
+  name: string;
+  displayLabel: string;
+  dataType: string;
+  required?: boolean;
+  validationJson?: string | null;
+  displayConfigJson?: string | null;
+  description?: string | null;
+  createdBy: string;
+}
+
+export interface CustomFieldValueRecord {
+  id: string;
+  definitionId: string;
+  entityType: string;
+  entityId: string;
+  valueText: string | null;
+  valueNumber: number | null;
+  valueBool: boolean | null;
+  valueDate: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomFieldValueInput {
+  definitionId: string;
+  entityType: string;
+  entityId: string;
+  valueText?: string | null;
+  valueNumber?: number | null;
+  valueBool?: boolean | null;
+  valueDate?: string | null;
+  createdBy: string;
 }

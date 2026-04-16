@@ -269,6 +269,36 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
   // Archived asset IDs
   private readonly archivedAssets = new Set<string>();
 
+  // Custom fields
+  private readonly customFieldDefinitions = new Map<string, {
+    id: string;
+    entityType: string;
+    name: string;
+    displayLabel: string;
+    dataType: string;
+    required: boolean;
+    validationJson: string | null;
+    displayConfigJson: string | null;
+    description: string | null;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+    deletedAt: string | null;
+  }>();
+  private readonly customFieldValues = new Map<string, {
+    id: string;
+    definitionId: string;
+    entityType: string;
+    entityId: string;
+    valueText: string | null;
+    valueNumber: number | null;
+    valueBool: boolean | null;
+    valueDate: string | null;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+  }>();
+
   private readonly outboundCounters = {
     attempts: 0,
     success: 0,
@@ -336,6 +366,9 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     // Asset notes + archive
     this.assetNotes.clear();
     this.archivedAssets.clear();
+    // Custom fields
+    this.customFieldDefinitions.clear();
+    this.customFieldValues.clear();
   }
 
   async createIngestAsset(input: IngestInput, context: WriteContext): Promise<IngestResult> {
@@ -2619,5 +2652,151 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
     this.archivedAssets.add(assetId);
     this.assets.delete(assetId);
     this.recordAudit(`Asset ${assetId} archived`, ctx.correlationId, new Date());
+  }
+
+  // ── Custom Fields — Definitions ──
+
+  async listCustomFieldDefinitions(entityType?: string, includeDeleted = false) {
+    return [...this.customFieldDefinitions.values()].filter((d) => {
+      if (entityType && d.entityType !== entityType) return false;
+      if (!includeDeleted && d.deletedAt !== null) return false;
+      return true;
+    });
+  }
+
+  async getCustomFieldDefinition(id: string) {
+    return this.customFieldDefinitions.get(id) ?? null;
+  }
+
+  async createCustomFieldDefinition(
+    input: Parameters<PersistenceAdapter["createCustomFieldDefinition"]>[0],
+    ctx: WriteContext,
+  ) {
+    // Enforce uniqueness on (entity_type, name) for non-deleted rows
+    for (const existing of this.customFieldDefinitions.values()) {
+      if (existing.entityType === input.entityType && existing.name === input.name && existing.deletedAt === null) {
+        throw new Error(`Custom field "${input.name}" already exists on ${input.entityType}`);
+      }
+    }
+    const now = this.resolveNow(ctx).toISOString();
+    const record = {
+      id: randomUUID(),
+      entityType: input.entityType,
+      name: input.name,
+      displayLabel: input.displayLabel,
+      dataType: input.dataType,
+      required: input.required ?? false,
+      validationJson: input.validationJson ?? null,
+      displayConfigJson: input.displayConfigJson ?? null,
+      description: input.description ?? null,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+    this.customFieldDefinitions.set(record.id, record);
+    this.recordAudit(`custom field defined: ${input.entityType}.${input.name}`, ctx.correlationId, new Date());
+    return record;
+  }
+
+  async updateCustomFieldDefinition(
+    id: string,
+    input: Partial<Parameters<PersistenceAdapter["createCustomFieldDefinition"]>[0]>,
+    ctx: WriteContext,
+  ) {
+    const existing = this.customFieldDefinitions.get(id);
+    if (!existing || existing.deletedAt !== null) return null;
+    const now = this.resolveNow(ctx).toISOString();
+    // `name`, `entityType`, and `dataType` are immutable once created — changing
+    // them would invalidate stored values. Only display/validation/desc/required mutable.
+    const updated = {
+      ...existing,
+      displayLabel: input.displayLabel ?? existing.displayLabel,
+      required: input.required ?? existing.required,
+      validationJson: input.validationJson !== undefined ? input.validationJson : existing.validationJson,
+      displayConfigJson: input.displayConfigJson !== undefined ? input.displayConfigJson : existing.displayConfigJson,
+      description: input.description !== undefined ? input.description : existing.description,
+      updatedAt: now,
+    };
+    this.customFieldDefinitions.set(id, updated);
+    this.recordAudit(`custom field updated: ${existing.entityType}.${existing.name}`, ctx.correlationId, new Date());
+    return updated;
+  }
+
+  async softDeleteCustomFieldDefinition(id: string, ctx: WriteContext) {
+    const existing = this.customFieldDefinitions.get(id);
+    if (!existing || existing.deletedAt !== null) return false;
+    const now = this.resolveNow(ctx).toISOString();
+    this.customFieldDefinitions.set(id, { ...existing, deletedAt: now, updatedAt: now });
+    this.recordAudit(`custom field soft-deleted: ${existing.entityType}.${existing.name}`, ctx.correlationId, new Date());
+    return true;
+  }
+
+  // ── Custom Fields — Values ──
+
+  async getCustomFieldValues(entityType: string, entityId: string) {
+    return [...this.customFieldValues.values()].filter(
+      (v) => v.entityType === entityType && v.entityId === entityId,
+    );
+  }
+
+  async setCustomFieldValue(
+    input: Parameters<PersistenceAdapter["setCustomFieldValue"]>[0],
+    ctx: WriteContext,
+  ) {
+    const now = this.resolveNow(ctx).toISOString();
+    // Upsert by (definitionId, entityType, entityId)
+    const existingKey = [...this.customFieldValues.entries()].find(
+      ([, v]) =>
+        v.definitionId === input.definitionId &&
+        v.entityType === input.entityType &&
+        v.entityId === input.entityId,
+    );
+    if (existingKey) {
+      const [id, existing] = existingKey;
+      const updated = {
+        ...existing,
+        valueText: input.valueText ?? null,
+        valueNumber: input.valueNumber ?? null,
+        valueBool: input.valueBool ?? null,
+        valueDate: input.valueDate ?? null,
+        updatedAt: now,
+      };
+      this.customFieldValues.set(id, updated);
+      return updated;
+    }
+    const record = {
+      id: randomUUID(),
+      definitionId: input.definitionId,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      valueText: input.valueText ?? null,
+      valueNumber: input.valueNumber ?? null,
+      valueBool: input.valueBool ?? null,
+      valueDate: input.valueDate ?? null,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.customFieldValues.set(record.id, record);
+    return record;
+  }
+
+  async deleteCustomFieldValue(
+    definitionId: string,
+    entityType: string,
+    entityId: string,
+    ctx: WriteContext,
+  ) {
+    const existingKey = [...this.customFieldValues.entries()].find(
+      ([, v]) =>
+        v.definitionId === definitionId &&
+        v.entityType === entityType &&
+        v.entityId === entityId,
+    );
+    if (!existingKey) return false;
+    this.customFieldValues.delete(existingKey[0]);
+    this.recordAudit(`custom field value deleted: ${entityType}/${entityId}`, ctx.correlationId, new Date());
+    return true;
   }
 }
