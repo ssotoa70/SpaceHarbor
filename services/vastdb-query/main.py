@@ -56,6 +56,34 @@ DEFAULT_SCHEMA = os.environ.get("VASTDB_SCHEMA", "exr_metadata_2")
 DEFAULT_VIDEO_SCHEMA = os.environ.get("VASTDB_VIDEO_SCHEMA", "video_metadata")
 DEFAULT_VIDEO_TABLE = os.environ.get("VASTDB_VIDEO_TABLE", "files")
 
+# ---------------------------------------------------------------------------
+# Schema-agnostic metadata lookup — Phase 5.4 (asset metadata DB reader)
+# ---------------------------------------------------------------------------
+
+# Priority order for the column the caller's `path` is matched against.
+# First column present in the target table (case-insensitive) wins.
+MATCH_COLUMN_PRIORITY: tuple[str, ...] = (
+    "source_uri",
+    "s3_key",
+    "path",
+    "file_path",
+    "uri",
+)
+
+
+def resolve_match_column(column_names: list[str]) -> Optional[str]:
+    """Return the first column from MATCH_COLUMN_PRIORITY that is present in
+    ``column_names`` (case-insensitive), preserving the column's original
+    casing. Returns None when none match — the caller should surface that
+    as a 400 with the list of available columns so misconfiguration is
+    visible, not silent."""
+    lower_map = {c.lower(): c for c in column_names}
+    for wanted in MATCH_COLUMN_PRIORITY:
+        if wanted in lower_map:
+            return lower_map[wanted]
+    return None
+
+
 app = FastAPI(
     title="SpaceHarbor VAST DB Query",
     description="Query VAST Database tables created by DataEngine functions",
