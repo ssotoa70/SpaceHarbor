@@ -55,6 +55,7 @@ import { registerAssetMetadataRoute } from "./routes/asset-metadata.js";
 import { registerVideoMetadataRoutes } from "./routes/video-metadata.js";
 import { registerDataEnginePipelineRoutes } from "./routes/dataengine-pipelines.js";
 import { registerDataEnginePipelineDefaultsRoute } from "./routes/dataengine-pipelines-defaults.js";
+import { registerMetadataLookupProxyRoute } from "./routes/metadata-lookup-proxy.js";
 import { registerStorageProcessRoutes } from "./routes/storage-process.js";
 import { registerAssetActionRoutes } from "./routes/asset-actions.js";
 import { registerCustomFieldsRoute } from "./routes/custom-fields.js";
@@ -468,6 +469,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     // DataEngine pipelines — live merge of Settings + VAST function records
     void registerDataEnginePipelineRoutes(app, prefixes);
     void registerDataEnginePipelineDefaultsRoute(app, prefixes);
+    void registerMetadataLookupProxyRoute(app, prefixes);
 
     // Storage processing trigger — S3 copy-in-place to fire element triggers
     void registerStorageProcessRoutes(app, prefixes);
