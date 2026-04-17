@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import { Skeleton } from "../design-system";
+import { Badge, Skeleton } from "../design-system";
 import {
   fetchVersionDetail,
   fetchExrMetadataLookup,
@@ -18,6 +18,7 @@ import {
   useDataEnginePipelines,
   findPipelineForFilename,
 } from "../hooks/useDataEnginePipelines";
+import { useAssetMetadata } from "../hooks/useAssetMetadata";
 import { VideoMetadataRenderer, detectSchema } from "./metadata";
 
 // ---------------------------------------------------------------------------
@@ -345,83 +346,133 @@ function TabBar({ activeTab, onTabChange, tabs }: { activeTab: TabId; onTabChang
 }
 
 // ---------------------------------------------------------------------------
-// MetadataTab — primary rich view powered by the new /storage/metadata route.
-//
-// Reads the `_metadata.json` sidecar via the `useStorageSidecar` hook and
-// renders it with the schema-dispatched dynamic renderer. Falls back to a
-// clear empty state when the sidecar hasn't been written yet (e.g. images
-// where frame-metadata-extractor has not yet run on legacy uploads, or
-// freshly-ingested video before the pipeline finishes). Never touches the
-// asset record's metadata bag — that lives in InfoTab for back-compat.
+// MetadataTab helpers
+// ---------------------------------------------------------------------------
+
+type FieldFamily = "Dimensions" | "Codec & color" | "Timing" | "File" | "Other";
+
+const FAMILY_PATTERNS: [FieldFamily, RegExp][] = [
+  ["Dimensions",    /^(width|height|channels|bit_depth|pixel_aspect|display_window|data_window)$/i],
+  ["Codec & color", /^(codec|pix_fmt|color_space|transfer|primaries|chroma|profile|level|bit_rate)$/i],
+  ["Timing",        /^(duration|frame_count|frame_rate|fps|timecode|start_frame|end_frame)$/i],
+  ["File",          /^(path|filename|size|sha256|md5|etag|mtime|created_at|modified_at|source_uri|s3_key|file_path|uri)$/i],
+];
+
+export function groupColumns(row: Record<string, unknown>): Record<FieldFamily, [string, unknown][]> {
+  const groups: Record<FieldFamily, [string, unknown][]> = {
+    "Dimensions": [], "Codec & color": [], "Timing": [], "File": [], "Other": [],
+  };
+  for (const [key, value] of Object.entries(row)) {
+    const family = FAMILY_PATTERNS.find(([, re]) => re.test(key))?.[0] ?? "Other";
+    groups[family].push([key, value]);
+  }
+  groups["Other"].sort(([a], [b]) => a.localeCompare(b));
+  return groups;
+}
+
+function formatCell(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  try { return JSON.stringify(value); } catch { return "<unserializable>"; }
+}
+
+function DbRowCard({ row, index }: { row: Record<string, unknown>; index: number }) {
+  const groups = groupColumns(row);
+  return (
+    <div className="p-2 rounded border border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg-raised)] mb-2">
+      <div className="text-[10px] uppercase tracking-wider text-[var(--color-ah-text-subtle)] mb-1">Row {index}</div>
+      {(Object.entries(groups) as [FieldFamily, [string, unknown][]][]).map(([family, rows]) =>
+        rows.length === 0 ? null : (
+          <div key={family} className="mb-2 last:mb-0">
+            <div className="text-[10px] text-[var(--color-ah-text-muted)] mb-1">{family}</div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+              {rows.map(([key, value]) => (
+                <React.Fragment key={key}>
+                  <dt className="font-[var(--font-ah-mono)] text-[var(--color-ah-text-muted)]">{key}</dt>
+                  <dd className="font-[var(--font-ah-mono)] break-all">{formatCell(value)}</dd>
+                </React.Fragment>
+              ))}
+            </dl>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MetadataTab — reads from /assets/:id/metadata (DB + sidecar unified endpoint)
 // ---------------------------------------------------------------------------
 
 export function MetadataTab({ asset }: { asset: AssetRow }) {
-  const { sidecar, loading, error } = useStorageSidecar(asset.sourceUri);
-  // Live discovered pipelines replace the old hardcoded DataEngine function
-  // table. Falls back to "no pipeline configured" when the hook is still
-  // loading or when the admin hasn't configured this file kind in Settings.
+  const metadata = useAssetMetadata(asset.id);
   const { pipelines } = useDataEnginePipelines();
   const matchedPipeline = findPipelineForFilename(pipelines, asset.title);
 
-  if (loading) {
+  if (metadata.status === "loading") {
+    return <div className="p-3 text-sm text-[var(--color-ah-text-muted)]">Loading…</div>;
+  }
+  if (metadata.status === "error") {
     return (
-      <div className="flex items-center justify-center h-40 text-[11px] text-[var(--color-ah-text-subtle)]" data-testid="metadata-tab-loading">
-        Loading metadata...
+      <div className="p-3 text-sm text-red-400">
+        Failed to load metadata: {metadata.error ?? "unknown error"}
       </div>
     );
   }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center h-40 px-4 text-center" data-testid="metadata-tab-error">
-        <p className="text-[12px] font-semibold text-[var(--color-ah-danger)] mb-1">
-          Failed to load metadata ({error.status || "network"})
-        </p>
-        <p className="text-[11px] text-[var(--color-ah-text-subtle)]">
-          The /storage/metadata endpoint returned an error. Check the control-plane logs.
-        </p>
-      </div>
-    );
+  if (metadata.status !== "ready" || !metadata.data) {
+    // idle (no asset id) — matches parent behavior; shouldn't normally appear here.
+    return null;
   }
+  const data = metadata.data;
 
-  if (!sidecar) {
-    return (
-      <div className="flex flex-col items-center justify-center h-40 px-4 text-center" data-testid="metadata-tab-empty">
-        <p className="text-[12px] font-semibold text-[var(--color-ah-text)] mb-1">
-          No metadata yet
-        </p>
-        <p className="text-[11px] text-[var(--color-ah-text-subtle)] max-w-xs">
-          {matchedPipeline
-            ? <>The <span className="font-[var(--font-ah-mono)]">{matchedPipeline.config.functionName}</span> function has not yet written a sidecar for this file. It will appear here automatically once the pipeline runs.</>
-            : <>This file kind is not processed by any configured DataEngine pipeline.</>}
-        </p>
-      </div>
-    );
-  }
+  const badgeVariant = (s: string) =>
+    s === "ok" ? "success" : s === "empty" ? "default" : s === "missing" ? "default"
+      : s === "disabled" ? "default" : "warning";
 
-  // Schema-dispatched rendering. `video@1` renders directly; `frame@1` and
-  // `image-proxy@legacy` fall through to a pretty-printed raw view until
-  // their dedicated renderers land (FrameMetadataRenderer is a follow-up).
-  const schema = detectSchema(sidecar.data);
   return (
-    <div className="overflow-auto px-4 py-3" style={{ maxHeight: "calc(100vh - 200px)" }} data-testid="metadata-tab">
-      <div className="text-[10px] font-[var(--font-ah-mono)] text-[var(--color-ah-text-subtle)] mb-2 flex items-center gap-2">
-        <span>schema:</span>
-        <span className="text-[var(--color-ah-text-muted)]">{schema}</span>
-        <span className="opacity-50">·</span>
-        <span>{sidecar.bytes} bytes</span>
+    <div className="flex flex-col gap-3 p-3">
+      <div className="flex items-center gap-2 text-xs">
+        <Badge variant={badgeVariant(data.sources.db)}>DB · {data.sources.db}</Badge>
+        <Badge variant={badgeVariant(data.sources.sidecar)}>Sidecar · {data.sources.sidecar}</Badge>
+        {data.pipeline && (
+          <span className="text-[var(--color-ah-text-muted)] font-[var(--font-ah-mono)]">
+            {data.pipeline.functionName}
+          </span>
+        )}
       </div>
-      {schema === "video@1" ? (
-        <VideoMetadataRenderer payload={sidecar.data} />
-      ) : (
-        <details open>
-          <summary className="cursor-pointer text-[11px] text-[var(--color-ah-text-muted)] mb-2">
-            Raw sidecar (dynamic renderer not yet available for {schema})
-          </summary>
-          <pre className="text-[10px] font-[var(--font-ah-mono)] text-[var(--color-ah-text-muted)] whitespace-pre-wrap break-words bg-[var(--color-ah-bg)] p-2 rounded border border-[var(--color-ah-border-muted)]">
-            {JSON.stringify(sidecar.data, null, 2)}
+
+      {data.dbError && (
+        <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-xs text-amber-400">
+          DB unreachable: {data.dbError}
+        </div>
+      )}
+
+      {data.dbRows.length > 0 && (
+        <section aria-label="Database fields">
+          <h4 className="text-xs font-medium text-[var(--color-ah-text-muted)] uppercase tracking-wider mb-1">
+            Database ({data.dbRows.length} row{data.dbRows.length === 1 ? "" : "s"})
+          </h4>
+          {data.dbRows.map((row, i) => (
+            <DbRowCard key={i} row={row} index={i + 1} />
+          ))}
+        </section>
+      )}
+
+      {data.sidecar && (
+        <section aria-label="Sidecar fields">
+          <h4 className="text-xs font-medium text-[var(--color-ah-text-muted)] uppercase tracking-wider mb-1">Sidecar</h4>
+          <pre className="p-2 rounded bg-[var(--color-ah-bg)] border border-[var(--color-ah-border)] font-[var(--font-ah-mono)] text-xs overflow-auto max-h-80">
+            {JSON.stringify(data.sidecar, null, 2)}
           </pre>
-        </details>
+        </section>
+      )}
+
+      {data.sources.db !== "ok" && !data.sidecar && (
+        <p className="text-xs text-[var(--color-ah-text-muted)]">
+          {matchedPipeline
+            ? `No metadata yet — ${matchedPipeline.config.functionName} has not produced output for this asset.`
+            : "No metadata pipeline is configured for this file kind."}
+        </p>
       )}
     </div>
   );

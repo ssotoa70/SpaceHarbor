@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../api";
-import { __resetSidecarCacheForTests } from "../hooks/useStorageSidecar";
+import { __resetAssetMetadataCacheForTests } from "../hooks/useAssetMetadata";
 import { __resetPipelineCacheForTests } from "../hooks/useDataEnginePipelines";
 import { MetadataTab } from "./AssetDetailPanel";
 import type { AssetRow } from "../types";
@@ -36,20 +36,6 @@ const videoDiscovered: api.DiscoveredPipeline = {
   status: "vast-unreachable",
 };
 
-function stubPipelinesApi() {
-  vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
-    pipelines: [frameDiscovered, videoDiscovered],
-  });
-}
-
-const videoAsset: AssetRow = {
-  id: "asset-video",
-  jobId: null,
-  title: "lola-vfx-480.mov",
-  sourceUri: "s3://sergio-spaceharbor/uploads/lola-vfx-480.mov",
-  status: "pending",
-};
-
 const imageAsset: AssetRow = {
   id: "asset-exr",
   jobId: null,
@@ -58,115 +44,76 @@ const imageAsset: AssetRow = {
   status: "pending",
 };
 
-const audioAsset: AssetRow = {
-  id: "asset-audio",
-  jobId: null,
-  title: "narration.wav",
-  sourceUri: "s3://sergio-spaceharbor/audio/narration.wav",
-  status: "pending",
-};
+function stubPipelinesApi() {
+  vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+    pipelines: [frameDiscovered, videoDiscovered],
+  });
+}
 
-function videoSidecarResponse(): api.StorageMetadataResponse {
-  return {
-    schema_version: "1.0.0",
-    file_kind: "video",
-    source_uri: videoAsset.sourceUri,
-    sidecar_key: "uploads/.proxies/lola-vfx-480_metadata.json",
-    bucket: "sergio-spaceharbor",
-    bytes: 2216,
-    data: {
-      $schema: "https://vastdata.com/schemas/video-metadata-sidecar/v1.json",
-      schema_version: "1.0.0",
-      metadata: {
-        container_format: "MPEG-4",
-        file_size_bytes: 27426798,
-        video_codec: "h264",
-        video_codec_profile: "Main@L3",
-        width: 640,
-        height: 360,
-        fps_num: 24000,
-        fps_den: 1001,
-        fps: 23.976,
-        duration_seconds: 94.719,
-        audio_codec: "aac",
-        audio_channels: 2,
-        audio_sample_rate_hz: 48000,
-      },
-    },
-  };
+function stubAssetMetadataApi(resp: Partial<api.AssetMetadataResponse> = {}) {
+  vi.spyOn(api, "fetchAssetMetadata").mockResolvedValue({
+    assetId: imageAsset.id,
+    sourceUri: imageAsset.sourceUri,
+    fileKind: "image",
+    pipeline: { functionName: "frame-metadata-extractor",
+                targetSchema: "frame_metadata", targetTable: "files", sidecarSchemaId: "frame@1" },
+    sources: { db: "empty", sidecar: "missing" },
+    dbRows: [], sidecar: null,
+    ...resp,
+  });
 }
 
 describe("MetadataTab", () => {
   beforeEach(() => {
-    __resetSidecarCacheForTests();
+    __resetAssetMetadataCacheForTests();
     __resetPipelineCacheForTests();
     stubPipelinesApi();
   });
-
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
   });
 
-  it("renders the dynamic VideoMetadataRenderer when a video sidecar is available", async () => {
-    vi.spyOn(api, "fetchStorageMetadata").mockResolvedValue(videoSidecarResponse());
-    render(<MetadataTab asset={videoAsset} />);
-    await waitFor(() => expect(screen.getByTestId("metadata-tab")).toBeInTheDocument());
-    // Video@1 detected → groups rendered
-    expect(screen.getByTestId("meta-group-container")).toBeInTheDocument();
-    expect(screen.getByTestId("meta-group-video")).toBeInTheDocument();
-    // Specific formatted values
-    expect(screen.getAllByText(/Main@L3/).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("640 × 360").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("23.976 fps").length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("shows the empty state naming the correct function when the sidecar is missing", async () => {
-    vi.spyOn(api, "fetchStorageMetadata").mockResolvedValue(null);
-    render(<MetadataTab asset={imageAsset} />);
-    await waitFor(() => expect(screen.getByTestId("metadata-tab-empty")).toBeInTheDocument());
-    expect(screen.getByText(/frame-metadata-extractor/)).toBeInTheDocument();
-  });
-
-  it("names video-metadata-extractor in the empty state for unprocessed videos", async () => {
-    vi.spyOn(api, "fetchStorageMetadata").mockResolvedValue(null);
-    render(<MetadataTab asset={videoAsset} />);
-    await waitFor(() => expect(screen.getByTestId("metadata-tab-empty")).toBeInTheDocument());
-    expect(screen.getByText(/video-metadata-extractor/)).toBeInTheDocument();
-  });
-
-  it("shows 'not processed by any configured pipeline' for audio files", async () => {
-    const spy = vi.spyOn(api, "fetchStorageMetadata").mockResolvedValue(null);
-    render(<MetadataTab asset={audioAsset} />);
-    // audio is ineligible — sidecar hook shouldn't fetch
-    expect(spy).not.toHaveBeenCalled();
-    // Wait for the pipelines fetch to resolve so the empty state reflects
-    // the "no matching pipeline" path (not the initial loading path)
-    await waitFor(() =>
-      expect(screen.getByText(/not processed by any configured DataEngine pipeline/i)).toBeInTheDocument(),
-    );
-  });
-
-  it("renders an error state when the API throws", async () => {
-    vi.spyOn(api, "fetchStorageMetadata").mockRejectedValue(new api.ApiRequestError(503));
-    render(<MetadataTab asset={videoAsset} />);
-    await waitFor(() => expect(screen.getByTestId("metadata-tab-error")).toBeInTheDocument());
-    expect(screen.getByText(/503/)).toBeInTheDocument();
-  });
-
-  it("falls through to a raw JSON view for unknown sidecar schemas", async () => {
-    vi.spyOn(api, "fetchStorageMetadata").mockResolvedValue({
-      schema_version: null,
-      file_kind: "video",
-      source_uri: videoAsset.sourceUri,
-      sidecar_key: "k",
-      bucket: "b",
-      bytes: 10,
-      data: { totally_unknown_field: "foo" },
+  it("renders source badges + db rows on happy path", async () => {
+    stubAssetMetadataApi({
+      sources: { db: "ok", sidecar: "missing" },
+      dbRows: [{ source_uri: "uploads/shot_010.0042.exr", width: 2048, height: 858, codec: "exr" }],
     });
-    render(<MetadataTab asset={videoAsset} />);
-    await waitFor(() => expect(screen.getByTestId("metadata-tab")).toBeInTheDocument());
-    expect(screen.getByText(/Raw sidecar/)).toBeInTheDocument();
-    expect(screen.getByText(/totally_unknown_field/)).toBeInTheDocument();
+    render(<MetadataTab asset={imageAsset} />);
+    await waitFor(() => expect(screen.getByText(/DB · ok/)).toBeInTheDocument());
+    expect(screen.getByText(/Sidecar · missing/)).toBeInTheDocument();
+    expect(screen.getByText(/width/)).toBeInTheDocument();
+    expect(screen.getByText(/2048/)).toBeInTheDocument();
+  });
+
+  it("surfaces db unreachable message", async () => {
+    stubAssetMetadataApi({
+      sources: { db: "unreachable", sidecar: "missing" },
+      dbError: "circuit 'vast-trino' is OPEN",
+      dbRows: [],
+    });
+    render(<MetadataTab asset={imageAsset} />);
+    await waitFor(() => expect(screen.getByText(/DB · unreachable/)).toBeInTheDocument());
+    expect(screen.getByText(/circuit 'vast-trino' is OPEN/)).toBeInTheDocument();
+  });
+
+  it("names the responsible pipeline function in the empty state when both sources are empty", async () => {
+    stubAssetMetadataApi({ sources: { db: "empty", sidecar: "missing" }, dbRows: [], sidecar: null });
+    render(<MetadataTab asset={imageAsset} />);
+    // The function name appears in both the badge area span and the empty-state paragraph
+    await waitFor(() => expect(screen.getAllByText(/frame-metadata-extractor/).length).toBeGreaterThanOrEqual(1));
+    // Verify the empty-state paragraph specifically mentions it
+    expect(screen.getByText(/No metadata yet — frame-metadata-extractor/)).toBeInTheDocument();
+  });
+
+  it("shows sidecar JSON when only sidecar is present", async () => {
+    stubAssetMetadataApi({
+      sources: { db: "empty", sidecar: "ok" },
+      dbRows: [],
+      sidecar: { width: 2048, height: 858, codec: "exr" },
+    });
+    render(<MetadataTab asset={imageAsset} />);
+    await waitFor(() => expect(screen.getByText(/Sidecar · ok/)).toBeInTheDocument());
+    expect(screen.getByText(/"width": 2048/)).toBeInTheDocument();
   });
 });
