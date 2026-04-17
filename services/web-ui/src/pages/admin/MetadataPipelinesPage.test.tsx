@@ -393,6 +393,8 @@ describe("MetadataPipelinesPage", () => {
     const callArgs = lookupSpy.mock.calls[0][0];
     expect(callArgs.schema).toBe("unsaved_schema");
     expect(callArgs.table).toBe("saved_table");
+    expect(callArgs.path).toBe("s3://bucket/test.exr");
+    await waitFor(() => expect(screen.getByText(/1 row/)).toBeInTheDocument());
   });
 
   it("lookup error renders inline but save button stays enabled", async () => {
