@@ -70,6 +70,25 @@ export function MetadataPipelinesPage() {
 
   useEffect(() => { void load(false); }, [load]);
 
+  const handleToggle = useCallback(async (target: DiscoveredPipeline) => {
+    if (!rows) return;
+    const nextEnabled = !(target.config.enabled !== false);
+    // Optimistic update
+    const optimisticRows = rows.map((r) =>
+      r.config.fileKind === target.config.fileKind
+        ? { ...r, config: { ...r.config, enabled: nextEnabled } }
+        : r,
+    );
+    setRows(optimisticRows);
+    try {
+      await saveMetadataPipelines(optimisticRows.map((r) => r.config));
+      await load(true);
+    } catch (e) {
+      setRows(rows); // rollback
+      setError(e instanceof Error ? e.message : "Save failed");
+    }
+  }, [rows, load]);
+
   const isEmpty = rows !== null && rows.length === 0;
 
   return (
@@ -144,9 +163,24 @@ export function MetadataPipelinesPage() {
                     <StatusPill status={row.status} detail={row.statusDetail} />
                   </td>
                   <td className="px-3 py-2">
-                    {row.config.enabled !== false
-                      ? <Badge variant="success">on</Badge>
-                      : <Badge variant="warning">off</Badge>}
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={row.config.enabled !== false}
+                      aria-label={`Toggle ${row.config.fileKind}`}
+                      onClick={() => void handleToggle(row)}
+                      className={`inline-flex items-center h-5 w-9 rounded-full px-0.5 transition-colors ${
+                        row.config.enabled !== false
+                          ? "bg-green-500/60"
+                          : "bg-[var(--color-ah-border-muted)]"
+                      }`}
+                    >
+                      <span
+                        className={`h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                          row.config.enabled !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
                   </td>
                   <td className="px-3 py-2 text-right">
                     <Button variant="ghost" disabled>Edit</Button>

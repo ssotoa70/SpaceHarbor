@@ -97,4 +97,62 @@ describe("MetadataPipelinesPage", () => {
     expect(notFoundPill.closest("[title]")?.getAttribute("title"))
       .toMatch(/no VAST function named/);
   });
+
+  it("inline toggle saves the full mutated array", async () => {
+    const initial: api.DiscoveredPipeline[] = [
+      {
+        config: {
+          fileKind: "image", functionName: "fn-img", extensions: [".exr"],
+          targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+          enabled: true,
+        },
+        live: null, status: "ok",
+      },
+      {
+        config: {
+          fileKind: "video", functionName: "fn-vid", extensions: [".mov"],
+          targetSchema: "s2", targetTable: "t2", sidecarSchemaId: "video@1",
+          enabled: true,
+        },
+        live: null, status: "ok",
+      },
+    ];
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: initial });
+    const saveSpy = vi.spyOn(api, "saveMetadataPipelines").mockResolvedValue();
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByText("fn-img")).toBeInTheDocument());
+
+    const imgToggle = screen.getByRole("switch", { name: /toggle image/i });
+    fireEvent.click(imgToggle);
+
+    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+    const arg = saveSpy.mock.calls[0][0];
+    expect(arg).toHaveLength(2);
+    expect(arg.find((p) => p.fileKind === "image")?.enabled).toBe(false);
+    expect(arg.find((p) => p.fileKind === "video")?.enabled).toBe(true);
+  });
+
+  it("rolls back the toggle when save fails", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      }],
+    });
+    vi.spyOn(api, "saveMetadataPipelines").mockRejectedValue(new Error("PUT failed"));
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("switch", { name: /toggle image/i })).toBeInTheDocument());
+
+    const toggle = screen.getByRole("switch", { name: /toggle image/i });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+
+    // After rollback, toggle returns to true and error banner appears
+    await waitFor(() => expect(screen.getByText(/PUT failed/)).toBeInTheDocument());
+    expect(screen.getByRole("switch", { name: /toggle image/i }).getAttribute("aria-checked")).toBe("true");
+  });
 });
