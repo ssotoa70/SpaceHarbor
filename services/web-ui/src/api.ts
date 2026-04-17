@@ -3833,3 +3833,32 @@ export async function importPlugin(
   });
   return data.report;
 }
+
+/* ── Asset metadata (Phase 5.4 — unified DB + sidecar reader) ── */
+
+export interface AssetMetadataPipeline {
+  functionName: string;
+  targetSchema: string;
+  targetTable: string;
+  sidecarSchemaId: string | null;
+}
+
+export interface AssetMetadataSources {
+  db: "ok" | "empty" | "unreachable" | "disabled";
+  sidecar: "ok" | "missing";
+}
+
+export interface AssetMetadataResponse {
+  assetId: string;
+  sourceUri: string;
+  fileKind: string;
+  pipeline: AssetMetadataPipeline | null;
+  sources: AssetMetadataSources;
+  dbRows: Record<string, unknown>[];
+  sidecar: Record<string, unknown> | null;
+  dbError?: string;
+}
+
+export async function fetchAssetMetadata(assetId: string): Promise<AssetMetadataResponse> {
+  return apiFetch<AssetMetadataResponse>(`/assets/${encodeURIComponent(assetId)}/metadata`);
+}
