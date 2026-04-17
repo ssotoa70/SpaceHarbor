@@ -585,8 +585,13 @@ def video_lookup(
 # ---------------------------------------------------------------------------
 # Takes schema + table + path per request — no env-bound schema coupling,
 # so pipeline platform settings become the single source of truth.
-
-import ibis  # type: ignore  # already installed as vastdb SDK dep
+#
+# SDK access pattern: `vast_transaction(bucket)` returns a Bucket object
+# directly (see existing /exr-metadata/lookup + /video-metadata/lookup).
+# SDK predicate pushdown isn't supported for this schema shape in the
+# current vastdb release — commit 5786cab switched the other endpoints
+# to Python-side filtering via `table_to_records(...)`. We follow the
+# same pattern here for consistency and correctness.
 
 
 def _strip_s3_prefix(path: str) -> str:
@@ -617,8 +622,12 @@ def metadata_lookup(
     key = _strip_s3_prefix(path)
     target_bucket = bucket or DEFAULT_BUCKET
     try:
-        with vast_transaction(bucket=target_bucket) as tx:
-            table_obj = tx.bucket(target_bucket).schema(schema).table(table)
+        with vast_transaction(bucket=target_bucket) as bkt:
+            # vast_transaction returns a Bucket; its `.schema(name)` yields
+            # a Schema, and `.table(name)` yields a Table. Matches the
+            # pattern used by /exr-metadata/lookup and /video-metadata/lookup.
+            schema_obj = bkt.schema(schema)
+            table_obj = schema_obj.table(table)
             column_names = [c.name for c in table_obj.columns]
             match_col = resolve_match_column(column_names)
             if match_col is None:
@@ -630,8 +639,11 @@ def metadata_lookup(
                         f"{list(MATCH_COLUMN_PRIORITY)}; got {column_names}."
                     ),
                 )
-            predicate = ibis._[match_col] == key
-            rows = table_obj.select(predicate).read_all().to_pylist()
+            # Python-side filtering — SDK predicate pushdown not supported
+            # here (see module header note). Tables are typically O(100s) of
+            # rows for per-asset metadata; full scan is acceptable.
+            all_rows = table_to_records(table_obj, limit=10000)
+            rows = [r for r in all_rows if r.get(match_col) == key]
             return {
                 "rows": rows,
                 "bucket": target_bucket,

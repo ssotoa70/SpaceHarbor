@@ -44,70 +44,79 @@ from main import app
 client = TestClient(app)
 
 
-def _stub_session(rows: list[dict], columns: list[str]):
-    """Return a MagicMock that mimics the minimal vastdb session surface
-    the endpoint uses: bucket(...).schema(...).table(...).select(...)."""
+def _stub_bucket(columns: list[str]):
+    """Return (bkt_mock, table_mock) where `vast_transaction(bucket=...)`
+    yields `bkt_mock` (a Bucket), and `bkt_mock.schema(name).table(name)`
+    returns `table_mock`. Mirrors the real SDK surface used by
+    /exr-metadata/lookup (see commit 5786cab — Python-side filtering,
+    not SDK predicates). Row content is stubbed separately via
+    monkeypatch on `table_to_records`."""
     table = MagicMock()
-    table.columns = [MagicMock(name=c) for c in columns]
-    for col, mock in zip(columns, table.columns):
-        mock.name = col
-    table.select.return_value.read_all.return_value.to_pylist.return_value = rows
+    table.columns = [MagicMock() for _ in columns]
+    for col_name, mock in zip(columns, table.columns):
+        mock.name = col_name
     schema_obj = MagicMock()
     schema_obj.table.return_value = table
-    bucket_obj = MagicMock()
-    bucket_obj.schema.return_value = schema_obj
-    tx = MagicMock()
-    tx.bucket.return_value = bucket_obj
-    return tx, table
+    bkt = MagicMock()
+    bkt.schema.return_value = schema_obj
+    return bkt, table
 
 
 @contextmanager
-def _ctx(tx):
+def _ctx(bkt):
     """Helper context-manager wrapper for the mocked vast_transaction."""
-    yield tx
+    yield bkt
 
 
 class TestMetadataLookupEndpoint:
     def test_returns_matched_rows(self, monkeypatch):
-        tx, table = _stub_session(
-            rows=[{"source_uri": "uploads/pixar_5603.exr", "width": 2048, "height": 858}],
-            columns=["source_uri", "width", "height"],
-        )
+        bkt, _table = _stub_bucket(columns=["source_uri", "width", "height"])
+        all_rows = [
+            {"source_uri": "uploads/pixar_5603.exr", "width": 2048, "height": 858},
+            {"source_uri": "uploads/other.exr", "width": 1920, "height": 1080},
+        ]
         monkeypatch.setattr(app_module, "vast_transaction",
-                            lambda bucket=None: _ctx(tx))
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: all_rows)
         r = client.get(
             "/api/v1/metadata/lookup",
             params={"path": "uploads/pixar_5603.exr",
                     "schema": "frame_metadata", "table": "files"},
         )
-        assert r.status_code == 200
+        assert r.status_code == 200, r.text
         body = r.json()
-        assert body["count"] == 1
+        assert body["count"] == 1  # Python-side filter selected 1 of 2
         assert body["schema"] == "frame_metadata"
         assert body["table"] == "files"
         assert body["matched_by"] == "source_uri"
         assert body["rows"][0]["width"] == 2048
+        assert body["rows"][0]["source_uri"] == "uploads/pixar_5603.exr"
 
     def test_strips_s3_scheme_and_bucket_prefix(self, monkeypatch):
-        tx, table = _stub_session(rows=[], columns=["source_uri"])
+        # Same dataset, but the caller passes the full `s3://bucket/key`
+        # URI. If _strip_s3_prefix works, the Python-side filter should
+        # still match the row keyed by bare key "uploads/pixar_5603.exr".
+        bkt, _table = _stub_bucket(columns=["source_uri"])
+        all_rows = [{"source_uri": "uploads/pixar_5603.exr"}]
         monkeypatch.setattr(app_module, "vast_transaction",
-                            lambda bucket=None: _ctx(tx))
-        client.get(
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: all_rows)
+        r = client.get(
             "/api/v1/metadata/lookup",
             params={"path": "s3://sergio-spaceharbor/uploads/pixar_5603.exr",
                     "schema": "frame_metadata", "table": "files"},
         )
-        # Assert the select predicate received just the key, not the full URI.
-        call = table.select.call_args
-        # The predicate is the first positional arg; its string form includes
-        # the key but not the s3:// prefix.
-        assert "uploads/pixar_5603.exr" in str(call)
-        assert "s3://" not in str(call)
+        assert r.status_code == 200
+        assert r.json()["count"] == 1  # prefix was stripped for the match
 
     def test_400_when_no_priority_column_in_target_table(self, monkeypatch):
-        tx, table = _stub_session(rows=[], columns=["width", "height"])
+        bkt, _table = _stub_bucket(columns=["width", "height"])
         monkeypatch.setattr(app_module, "vast_transaction",
-                            lambda bucket=None: _ctx(tx))
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: [])
         r = client.get(
             "/api/v1/metadata/lookup",
             params={"path": "k", "schema": "x", "table": "y"},
@@ -137,3 +146,19 @@ class TestMetadataLookupEndpoint:
         assert r.status_code == 422  # fastapi validation — missing path
         r = client.get("/api/v1/metadata/lookup", params={"path": "k", "table": "y"})
         assert r.status_code == 422  # missing schema
+
+    def test_empty_table_returns_zero_count(self, monkeypatch):
+        # Covers the case where the table exists, has the match column,
+        # but contains no rows — the response should be 200 with count=0.
+        bkt, _table = _stub_bucket(columns=["source_uri"])
+        monkeypatch.setattr(app_module, "vast_transaction",
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: [])
+        r = client.get(
+            "/api/v1/metadata/lookup",
+            params={"path": "uploads/nothing.exr", "schema": "x", "table": "y"},
+        )
+        assert r.status_code == 200
+        assert r.json()["count"] == 0
+        assert r.json()["rows"] == []
