@@ -36,4 +36,65 @@ describe("MetadataPipelinesPage", () => {
     render(<MetadataPipelinesPage />);
     await waitFor(() => expect(screen.getByText(/boom/)).toBeInTheDocument());
   });
+
+  it("renders a row per configured pipeline with status pills", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [
+        {
+          config: {
+            fileKind: "image",
+            functionName: "frame-metadata-extractor",
+            extensions: [".exr", ".dpx"],
+            targetSchema: "frame_metadata",
+            targetTable: "files",
+            sidecarSchemaId: "frame@1",
+            enabled: true,
+          },
+          live: null,
+          status: "ok" as api.DiscoveredPipelineStatus,
+        },
+        {
+          config: {
+            fileKind: "video",
+            functionName: "video-metadata-extractor",
+            extensions: [".mov"],
+            targetSchema: "video_metadata",
+            targetTable: "files",
+            sidecarSchemaId: "video@1",
+            enabled: false,
+          },
+          live: null,
+          status: "function-not-found" as api.DiscoveredPipelineStatus,
+          statusDetail: "no VAST function named 'video-metadata-extractor'",
+        },
+        {
+          config: {
+            fileKind: "raw_camera",
+            functionName: "video-metadata-extractor",
+            extensions: [".r3d"],
+            targetSchema: "video_metadata",
+            targetTable: "files",
+            sidecarSchemaId: "video@1",
+            enabled: true,
+          },
+          live: null,
+          status: "vast-unreachable" as api.DiscoveredPipelineStatus,
+          statusDetail: "VMS unreachable",
+        },
+      ],
+    });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    expect(screen.getByText("frame-metadata-extractor")).toBeInTheDocument();
+    expect(screen.getByText(/frame_metadata\.files/)).toBeInTheDocument();
+    expect(screen.getByText(/OK/i)).toBeInTheDocument();
+    expect(screen.getByText(/not found/i)).toBeInTheDocument();
+    expect(screen.getByText(/unreachable/i)).toBeInTheDocument();
+
+    // statusDetail surfaces as a tooltip (title attribute)
+    const notFoundPill = screen.getByText(/not found/i);
+    expect(notFoundPill.closest("[title]")?.getAttribute("title"))
+      .toMatch(/no VAST function named/);
+  });
 });
