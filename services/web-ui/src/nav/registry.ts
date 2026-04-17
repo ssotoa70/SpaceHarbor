@@ -224,6 +224,14 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
     icon: "M3 3h3v3H3zM10 3h3v3h-3zM3 10h3v3H3zM10 10h3v3h-3zM6 4.5h4M4.5 6v4M11.5 6v4M6 11.5h4",
   },
   {
+    id: "metadata-pipelines",
+    to: "/automation/pipelines",
+    label: "Metadata Pipelines",
+    section: "AUTOMATION",
+    permission: "admin:system_config",
+    icon: "M2 4h4v2H2zM10 4h4v2h-4zM6 5h4M2 9h4v2H2zM10 9h4v2h-4zM6 10h4M2 14h4v-2H2zM10 14h4v-2h-4zM6 13h4",
+  },
+  {
     id: "naming-templates",
     to: "/automation/naming-templates",
     label: "Naming Templates",
