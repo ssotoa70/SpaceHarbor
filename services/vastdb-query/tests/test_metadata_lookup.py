@@ -89,12 +89,12 @@ class TestMetadataLookupEndpoint:
         assert body["rows"][0]["width"] == 2048
         assert body["rows"][0]["source_uri"] == "uploads/pixar_5603.exr"
 
-    def test_strips_s3_scheme_and_bucket_prefix(self, monkeypatch):
-        # Same dataset, but the caller passes the full `s3://bucket/key`
-        # URI. If _strip_s3_prefix works, the Python-side filter should
-        # still match the row keyed by bare key "uploads/pixar_5603.exr".
+    def test_strips_only_s3_scheme_preserves_bucket(self, monkeypatch):
+        # Live frame_metadata.files stores file_path as `bucket/key` (no
+        # scheme), verified on 10.143.2.102. The endpoint strips ONLY the
+        # `s3://` scheme so `s3://bucket/key` matches rows keyed `bucket/key`.
         bkt, _table = _stub_bucket()
-        all_rows = [{"source_uri": "uploads/pixar_5603.exr"}]
+        all_rows = [{"file_path": "sergio-spaceharbor/uploads/pixar_5603.exr"}]
         monkeypatch.setattr(app_module, "vast_transaction",
                             lambda bucket=None: _ctx(bkt))
         monkeypatch.setattr(app_module, "table_to_records",
@@ -105,7 +105,26 @@ class TestMetadataLookupEndpoint:
                     "schema": "frame_metadata", "table": "files"},
         )
         assert r.status_code == 200
-        assert r.json()["count"] == 1  # prefix was stripped for the match
+        assert r.json()["count"] == 1
+        assert r.json()["matched_by"] == "file_path"
+
+    def test_bare_bucket_key_path_also_matches(self, monkeypatch):
+        # Callers can pass the bare `bucket/key` form too — the endpoint
+        # does not add or remove the bucket. Bare keys without a bucket
+        # prefix will only match if the extractor stored them that way.
+        bkt, _table = _stub_bucket()
+        all_rows = [{"file_path": "sergio-spaceharbor/uploads/pixar_5603.exr"}]
+        monkeypatch.setattr(app_module, "vast_transaction",
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: all_rows)
+        r = client.get(
+            "/api/v1/metadata/lookup",
+            params={"path": "sergio-spaceharbor/uploads/pixar_5603.exr",
+                    "schema": "frame_metadata", "table": "files"},
+        )
+        assert r.status_code == 200
+        assert r.json()["count"] == 1
 
     def test_400_when_no_priority_column_in_target_table(self, monkeypatch):
         # Column names are now derived from the first row's dict keys, so

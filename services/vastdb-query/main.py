@@ -595,13 +595,15 @@ def video_lookup(
 
 
 def _strip_s3_prefix(path: str) -> str:
-    """Accept either `s3://<bucket>/<key>` or a bare `<key>`; return `<key>`.
-    Extractors typically store just the key, so callers can pass the full
-    source URI without thinking about it."""
+    """Strip only the `s3://` scheme, preserving the bucket in the path.
+
+    Live verification against frame_metadata.files on sergio-db showed
+    the extractor stores `bucket/key` (e.g. `sergio-spaceharbor/uploads/pixar_5603.exr`),
+    NOT just the key. So the canonical form this endpoint expects is
+    `{bucket}/{key}`; stripping only the scheme preserves callers'
+    ability to pass the full `s3://bucket/key` URI."""
     if path.startswith("s3://"):
-        without_scheme = path[len("s3://"):]
-        first_slash = without_scheme.find("/")
-        return without_scheme[first_slash + 1:] if first_slash > 0 else without_scheme
+        return path[len("s3://"):]
     return path
 
 

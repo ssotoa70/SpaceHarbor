@@ -148,9 +148,13 @@ export async function registerAssetMetadataRoute(
 
         // DB + sidecar fetches run in parallel. Both promise branches handle
         // their own errors internally so Promise.all never rejects.
+        // Pass the full `s3://bucket/key` URI. Extractors store rows keyed
+        // by bucket-prefixed paths (verified live on 10.143.2.102), and
+        // vastdb-query's /metadata/lookup strips only the `s3://` scheme
+        // so `s3://bucket/key` canonically matches `bucket/key` rows.
         const dbPromise: Promise<DbResult> = (pipeline && s3)
           ? deps.queryFetcher({
-              path: s3.key,
+              path: sourceUri,
               schema: pipeline.targetSchema,
               table: pipeline.targetTable,
             })
