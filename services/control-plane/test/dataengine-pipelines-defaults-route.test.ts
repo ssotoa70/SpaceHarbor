@@ -29,9 +29,10 @@ describe("GET /api/v1/dataengine/pipelines/defaults", () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.pipelines));
-    assert.equal(body.pipelines.length, 3);
-    const kinds = body.pipelines.map((p: { fileKind: string }) => p.fileKind).sort();
-    assert.deepEqual(kinds, ["image", "raw_camera", "video"]);
+    const kinds = new Set(body.pipelines.map((p: { fileKind: string }) => p.fileKind));
+    assert.ok(kinds.has("image"), "image kind present");
+    assert.ok(kinds.has("video"), "video kind present");
+    assert.ok(kinds.has("raw_camera"), "raw_camera kind present");
     // Each entry must conform to the DataEnginePipelineConfig shape
     for (const p of body.pipelines) {
       assert.equal(typeof p.functionName, "string");

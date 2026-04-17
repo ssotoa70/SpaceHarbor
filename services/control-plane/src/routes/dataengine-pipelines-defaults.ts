@@ -13,27 +13,22 @@ import type { FastifyInstance } from "fastify";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
-import { FileSeedLoader } from "../data-engine/pipeline-seed.js";
+import { FileSeedLoader, type SeedLoader } from "../data-engine/pipeline-seed.js";
 import {
   validatePipelineConfigList,
   type DataEnginePipelineConfig,
 } from "../data-engine/pipeline-config.js";
 
-/** Injectable loader — tests override to avoid reading real files. */
-export interface PipelineDefaultsLoader {
-  load(): unknown;
-}
-
-let loaderOverride: PipelineDefaultsLoader | null = null;
+let loaderOverride: SeedLoader | null = null;
 
 /** Test helper: inject a fake loader. Pass `null` to restore the default. */
 export function __setPipelineDefaultsLoaderForTests(
-  loader: PipelineDefaultsLoader | null,
+  loader: SeedLoader | null,
 ): void {
   loaderOverride = loader;
 }
 
-function getLoader(): PipelineDefaultsLoader {
+function getLoader(): SeedLoader {
   return loaderOverride ?? new FileSeedLoader();
 }
 
