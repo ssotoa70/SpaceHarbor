@@ -64,12 +64,20 @@ one asset, and non-sentinel supported extensions are ingested per-file.
 
 ## Function Environment Variables
 
-| Variable | Description |
-|---|---|
-| `VAST_TRINO_ENDPOINT` | (Deprecated) Use `VAST_DATABASE_URL` instead. Trino REST API endpoint |
-| `VAST_DATABASE_URL` | VAST Database SQL endpoint (e.g. `http://vast-db.svc:8080`) |
-| `SPACEHARBOR_CONTROL_PLANE_URL` | Control-plane base URL (e.g. `http://control-plane:3000`) |
-| `SPACEHARBOR_API_KEY` | Optional API key for authenticated ingest endpoint |
+The function is a **thin forwarder** as of Phase 6 — it no longer talks to
+VAST DB, parses paths, or knows the asset model. All it does is HMAC-sign
+the S3 event and POST it to the control-plane. The control-plane handles
+parsing, hierarchy resolution, and ingest in TypeScript.
+
+| Variable | Required | Description |
+|---|---|---|
+| `SPACEHARBOR_CONTROL_PLANE_URL` | yes | Control-plane base URL, e.g. `http://control-plane.spaceharbor.svc:8080`. The forwarder POSTs to `{base}/api/v1/scanner/ingest`. |
+| `SPACEHARBOR_SCANNER_SECRET`    | yes | Shared HMAC secret. Must match the same env var on the control-plane. Generate with `openssl rand -hex 32`. |
+| `SCANNER_HTTP_TIMEOUT_S`        | no  | Request timeout in seconds (default `10`). |
+
+The legacy `VAST_DATABASE_URL`, `VAST_TRINO_ENDPOINT`, and
+`SPACEHARBOR_API_KEY` env vars are no longer read — the control-plane
+holds all DB credentials, and the HMAC signature is the only auth.
 
 ## SCANNER_MODE Fallback (NFS environments)
 

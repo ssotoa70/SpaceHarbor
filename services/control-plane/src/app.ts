@@ -62,6 +62,7 @@ import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerWorkflowsRoute } from "./routes/workflows.js";
 import { registerNamingTemplatesRoute } from "./routes/naming-templates.js";
 import { registerPluginsRoute } from "./routes/plugins.js";
+import { registerScannerIngestRoute } from "./routes/scanner-ingest.js";
 import { registerBreakersRoute } from "./routes/breakers.js";
 import { registerDispatchesRoute } from "./routes/dispatches.js";
 import { registerPromMetricsRoute } from "./routes/prom-metrics.js";
@@ -263,7 +264,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
           // Inbound webhook handler (/webhooks/:id + /api/v1/webhooks/:id).
           // Auth is the HMAC signature — a missing/bad signature returns 401
           // from the route handler, not from this hook.
-          /^(\/api\/v1)?\/webhooks\/[^/]+$/.test(urlPath)
+          /^(\/api\/v1)?\/webhooks\/[^/]+$/.test(urlPath) ||
+          // Scanner ingest forwarder — same HMAC-only model as inbound
+          // webhooks. Secret is SPACEHARBOR_SCANNER_SECRET; the Python
+          // forwarder in services/scanner-function/ POSTs here.
+          /^(\/api\/v1)?\/scanner\/ingest$/.test(urlPath)
         ) {
           return;
         }
@@ -415,6 +420,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerWorkflowsRoute(app, persistence, prefixes);
     void registerNamingTemplatesRoute(app, persistence, prefixes);
     void registerPluginsRoute(app, persistence, prefixes);
+    void registerScannerIngestRoute(app, persistence, prefixes);
     void registerBreakersRoute(app, prefixes);
     void registerDispatchesRoute(app, persistence, dispatchPoller, prefixes);
     void registerPromMetricsRoute(app, persistence);

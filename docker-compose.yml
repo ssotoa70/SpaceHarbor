@@ -46,6 +46,10 @@ services:
       SPACEHARBOR_VAST_STRICT: ${SPACEHARBOR_VAST_STRICT:-false}
       SPACEHARBOR_API_KEY: ${SPACEHARBOR_API_KEY:-}
       SPACEHARBOR_API_KEYS: ${SPACEHARBOR_API_KEY_CONTROL_PLANE:-},${SPACEHARBOR_API_KEY_MEDIA_WORKER:-},${SPACEHARBOR_API_KEY_SCANNER:-},${SPACEHARBOR_API_KEY_OPENASSETIO:-}
+      # Scanner-function thin forwarder HMAC secret (Phase 6).
+      # Required if you deploy the scanner-function image to VAST DataEngine.
+      # The function signs each forwarded event with this same value.
+      SPACEHARBOR_SCANNER_SECRET: ${SPACEHARBOR_SCANNER_SECRET:-}
       # VAST Database (Trino)
       VAST_DATABASE_URL: ${VAST_DATABASE_URL:-http://trino:8080}
       <<: *vast-credentials

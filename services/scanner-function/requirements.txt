@@ -1,4 +1,1 @@
-trino==0.330.0
 requests==2.33.0
-pytest==9.0.3
-pytest-mock==3.12.0
