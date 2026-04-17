@@ -170,6 +170,7 @@ export const platformSettingsResponseSchema = {
           targetTable: { type: "string" },
           sidecarSchemaId: { type: "string" },
           displayLabel: { type: "string" },
+          enabled: { type: "boolean" },
         },
       },
     },
@@ -187,10 +188,11 @@ const dataEnginePipelineConfigSchema = {
       minItems: 1,
       items: { type: "string", pattern: "^\\.[a-zA-Z0-9]{1,16}$" },
     },
-    targetSchema: { type: "string", minLength: 1 },
-    targetTable: { type: "string", minLength: 1 },
+    targetSchema: { type: "string", minLength: 1, pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$" },
+    targetTable: { type: "string", minLength: 1, pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$" },
     sidecarSchemaId: { type: "string", minLength: 1 },
     displayLabel: { type: "string" },
+    enabled: { type: "boolean" },
   },
 } as const;
 

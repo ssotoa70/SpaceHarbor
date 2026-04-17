@@ -47,6 +47,9 @@ const VALID_FILE_KINDS: ReadonlySet<string> = new Set(["image", "video", "raw_ca
 /** Valid JSON sidecar schema id format: `{name}@{version}`, e.g. `frame@1`. */
 const SIDECAR_SCHEMA_ID_RE = /^[a-z][a-z0-9_-]*@[a-zA-Z0-9.\-_]+$/;
 
+/** Standard SQL-style identifier: leading letter or underscore, then alphanumerics or underscores. */
+const IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
 /** Extensions must be lowercase, start with a dot, and have at least one trailing char. */
 const EXTENSION_RE = /^\.[a-z0-9]{1,16}$/;
 
@@ -104,10 +107,20 @@ export function validatePipelineConfig(input: unknown): DataEnginePipelineConfig
   if (typeof targetSchema !== "string" || targetSchema.trim().length === 0) {
     throw new InvalidPipelineConfigError("targetSchema must be a non-empty string");
   }
+  if (!IDENTIFIER_RE.test(targetSchema.trim())) {
+    throw new InvalidPipelineConfigError(
+      `targetSchema must be a valid identifier (letters, digits, underscores only, no leading digit); got ${JSON.stringify(targetSchema)}`,
+    );
+  }
 
   const targetTable = src["targetTable"];
   if (typeof targetTable !== "string" || targetTable.trim().length === 0) {
     throw new InvalidPipelineConfigError("targetTable must be a non-empty string");
+  }
+  if (!IDENTIFIER_RE.test(targetTable.trim())) {
+    throw new InvalidPipelineConfigError(
+      `targetTable must be a valid identifier (letters, digits, underscores only, no leading digit); got ${JSON.stringify(targetTable)}`,
+    );
   }
 
   const sidecarSchemaId = src["sidecarSchemaId"];
@@ -145,8 +158,8 @@ export function validatePipelineConfig(input: unknown): DataEnginePipelineConfig
     targetSchema: targetSchema.trim(),
     targetTable: targetTable.trim(),
     sidecarSchemaId: sidecarSchemaId.trim(),
-    displayLabel,
-    enabled,
+    ...(displayLabel !== undefined ? { displayLabel } : {}),
+    ...(enabled !== undefined ? { enabled } : {}),
   };
 }
 

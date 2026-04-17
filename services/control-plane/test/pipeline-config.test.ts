@@ -146,6 +146,20 @@ describe("validatePipelineConfig — rejection cases", () => {
       assert.doesNotThrow(() => validatePipelineConfig({ ...validFrame, sidecarSchemaId: id }));
     }
   });
+
+  it("rejects targetSchema with whitespace", () => {
+    assert.throws(
+      () => validatePipelineConfig({ ...validFrame, targetSchema: "bogus with spaces" }),
+      /targetSchema must be a valid identifier/,
+    );
+  });
+
+  it("rejects targetTable starting with a digit", () => {
+    assert.throws(
+      () => validatePipelineConfig({ ...validFrame, targetTable: "1badtable" }),
+      /targetTable must be a valid identifier/,
+    );
+  });
 });
 
 describe("validatePipelineConfigList", () => {

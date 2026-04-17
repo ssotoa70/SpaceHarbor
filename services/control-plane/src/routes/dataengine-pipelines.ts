@@ -107,6 +107,7 @@ const pipelinesActiveResponseSchema = {
               targetTable: { type: "string" },
               sidecarSchemaId: { type: "string" },
               displayLabel: { type: "string" },
+              enabled: { type: "boolean" },
             },
           },
           live: {
