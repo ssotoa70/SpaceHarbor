@@ -109,7 +109,7 @@ test("GET /api/v1/assets/:id/metadata — 404 when asset missing", async () => {
   });
 });
 
-test("GET /api/v1/assets/:id/metadata — happy path returns db rows + pipeline null when no pipeline configured", async () => {
+test("GET /api/v1/assets/:id/metadata — happy path returns db rows + pipeline", async () => {
   await withApp(async (app) => {
     const assetId = await seedAsset(app, "s3://sergio-spaceharbor/uploads/pixar_5603.exr", "pixar_5603.exr");
 
@@ -133,17 +133,11 @@ test("GET /api/v1/assets/:id/metadata — happy path returns db rows + pipeline 
     const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
     assert.equal(r.statusCode, 200, r.body);
     const body = r.json();
-    // No pipeline configured in test env → db=disabled (not ok); sidecar missing.
+    assert.equal(body.sources.db, "ok");
     assert.equal(body.sources.sidecar, "missing");
+    assert.equal(body.pipeline?.targetSchema, "frame_metadata");
+    assert.equal(body.dbRows.length, 1);
     assert.equal(body.sidecar, null);
-    // All 7 required fields present
-    assert.ok("assetId" in body, "assetId missing");
-    assert.ok("sourceUri" in body, "sourceUri missing");
-    assert.ok("fileKind" in body, "fileKind missing");
-    assert.ok("pipeline" in body, "pipeline missing");
-    assert.ok("sources" in body, "sources missing");
-    assert.ok("dbRows" in body, "dbRows missing");
-    assert.ok("sidecar" in body, "sidecar missing");
   });
 });
 
@@ -170,11 +164,11 @@ test("GET /api/v1/assets/:id/metadata — db unreachable falls through to sideca
     const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
     assert.equal(r.statusCode, 200, r.body);
     const body = r.json();
-    // Pipeline is not configured in tests → db is disabled (not unreachable from query error).
-    // Sidecar fetcher is called regardless of pipeline state.
+    assert.equal(body.sources.db, "unreachable");
     assert.equal(body.sources.sidecar, "ok");
-    assert.ok(body.sidecar);
+    assert.match(body.dbError, /circuit open/);
     assert.equal(body.dbRows.length, 0);
+    assert.ok(body.sidecar);
   });
 });
 
