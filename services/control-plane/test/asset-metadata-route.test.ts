@@ -10,6 +10,9 @@ process.env.NODE_ENV ??= "development";
 process.env.SPACEHARBOR_JWT_SECRET ??= "test-jwt-secret-for-asset-metadata-route-tests-32+";
 process.env.SPACEHARBOR_IAM_ENABLED ??= "false";
 process.env.SPACEHARBOR_ALLOW_INSECURE_MODE ??= "true";
+// Isolate this test file's settings from the shared /tmp/spaceharbor-settings.json
+// to prevent state pollution between test runs (see: disabled-pipeline test below).
+process.env.SPACEHARBOR_SETTINGS_PATH ??= `/tmp/spaceharbor-test-asset-metadata-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
 
 import { describe, it, test } from "node:test";
 import assert from "node:assert/strict";
@@ -195,24 +198,36 @@ test("GET /api/v1/assets/:id/metadata — disabled pipeline → sources.db=disab
     // override with enabled: false to verify the handler respects the flag.
     const current = await app.inject({ method: "GET", url: "/api/v1/platform/settings" });
     const settings = current.json();
-    const pipelines = (settings.dataEnginePipelines ?? []).map((p: Record<string, unknown>) =>
+    const originalPipelines = settings.dataEnginePipelines ?? [];
+    const disabledPipelines = originalPipelines.map((p: Record<string, unknown>) =>
       p.fileKind === "image" ? { ...p, enabled: false } : p
     );
     const update = await app.inject({
       method: "PUT",
       url: "/api/v1/platform/settings",
       headers: { "content-type": "application/json" },
-      payload: JSON.stringify({ dataEnginePipelines: pipelines }),
+      payload: JSON.stringify({ dataEnginePipelines: disabledPipelines }),
     });
     assert.ok(update.statusCode < 400, `platform-settings update failed: ${update.body}`);
 
-    const assetId = await seedAsset(app, "s3://sergio-spaceharbor/uploads/disabled.exr", "disabled.exr");
-    setDeps(app, {
-      queryFetcher: async () => { throw new Error("queryFetcher should not be called when pipeline is disabled"); },
-      sidecarFetcher: async (): Promise<SidecarFetchResult> => ({ ok: false, code: "SIDECAR_NOT_FOUND", message: "no sidecar" }),
-    });
-    const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
-    assert.equal(r.statusCode, 200);
-    assert.equal(r.json().sources.db, "disabled");
+    try {
+      const assetId = await seedAsset(app, "s3://sergio-spaceharbor/uploads/disabled.exr", "disabled.exr");
+      setDeps(app, {
+        queryFetcher: async () => { throw new Error("queryFetcher should not be called when pipeline is disabled"); },
+        sidecarFetcher: async (): Promise<SidecarFetchResult> => ({ ok: false, code: "SIDECAR_NOT_FOUND", message: "no sidecar" }),
+      });
+      const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
+      assert.equal(r.statusCode, 200);
+      assert.equal(r.json().sources.db, "disabled");
+    } finally {
+      // Restore the original pipeline state so later tests in the same file
+      // (if test order changes) see enabled=true instead of disabled.
+      await app.inject({
+        method: "PUT",
+        url: "/api/v1/platform/settings",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({ dataEnginePipelines: originalPipelines }),
+      });
+    }
   });
 });
