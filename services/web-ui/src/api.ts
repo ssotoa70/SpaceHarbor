@@ -2873,6 +2873,86 @@ export async function fetchActiveDataEnginePipelines(
   return (await response.json()) as DataEnginePipelinesResponse;
 }
 
+export interface DataEnginePipelineDefaultsResponse {
+  pipelines: DataEnginePipelineConfig[];
+}
+
+export async function fetchMetadataPipelineDefaults(
+  options: { signal?: AbortSignal } = {},
+): Promise<DataEnginePipelineConfig[]> {
+  const url = `${API_BASE_URL}/api/v1/dataengine/pipelines/defaults`;
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: withAuth(), signal: options.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiRequestError(0, `network error: ${String(err)}`);
+  }
+  if (!response.ok) {
+    let msg = `${response.status}`;
+    try {
+      const body = await response.json();
+      msg = (body as { message?: string }).message ?? msg;
+    } catch { /* fallthrough — keep status as the message */ }
+    throw new ApiRequestError(response.status, msg);
+  }
+  const data = (await response.json()) as DataEnginePipelineDefaultsResponse;
+  return data.pipelines;
+}
+
+export async function saveMetadataPipelines(
+  pipelines: DataEnginePipelineConfig[],
+): Promise<void> {
+  const url = `${API_BASE_URL}/api/v1/platform/settings`;
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: withAuth({ "content-type": "application/json" }),
+    body: JSON.stringify({ dataEnginePipelines: pipelines }),
+  });
+  if (!response.ok) {
+    let msg = `${response.status}`;
+    try {
+      const body = await response.json();
+      msg = (body as { message?: string }).message ?? msg;
+    } catch { /* keep status */ }
+    throw new ApiRequestError(response.status, msg);
+  }
+}
+
+export interface MetadataLookupResult {
+  rows: Record<string, unknown>[];
+  count: number;
+  matched_by?: string;
+}
+
+export async function testMetadataLookup(args: {
+  path: string;
+  schema: string;
+  table: string;
+  signal?: AbortSignal;
+}): Promise<MetadataLookupResult> {
+  const q = new URLSearchParams({ path: args.path, schema: args.schema, table: args.table }).toString();
+  const url = `${API_BASE_URL}/api/v1/metadata/lookup?${q}`;
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: withAuth(), signal: args.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiRequestError(0, `network error: ${String(err)}`);
+  }
+  if (!response.ok) {
+    let msg = `${response.status}`;
+    try {
+      const body = await response.json();
+      msg = (body as { message?: string; detail?: string }).message
+         ?? (body as { detail?: string }).detail
+         ?? msg;
+    } catch { /* keep status */ }
+    throw new ApiRequestError(response.status, msg);
+  }
+  return (await response.json()) as MetadataLookupResult;
+}
+
 export async function fetchExrMetadataStats(): Promise<ExrMetadataStats | null> {
   try {
     const response = await fetch(
