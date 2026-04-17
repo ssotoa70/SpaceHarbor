@@ -38,9 +38,11 @@ export interface LiveFunctionRecord {
 }
 
 export type PipelineStatus =
-  | "ok"                 // config matches a live VAST function
+  | "ok"                 // config matches a live VAST function AND the target schema/table exists
   | "function-not-found" // config points to a name that VAST doesn't know
-  | "vast-unreachable";  // VAST lookup failed (network, auth, etc.)
+  | "vast-unreachable"   // VAST lookup failed (network, auth, etc.)
+  | "target-not-found"   // function resolves but the targetSchema.targetTable doesn't exist in VastDB
+  | "target-unreachable"; // function resolves but vastdb-query itself is down/unreachable
 
 export interface DiscoveredPipeline {
   config: DataEnginePipelineConfig;
@@ -65,6 +67,23 @@ export interface FunctionFetcher {
   fetchByName(name: string): Promise<LiveFunctionRecord | null>;
 }
 
+export type TargetProbeStatus = "ok" | "target-not-found" | "target-unreachable";
+
+export interface TargetProbeResult {
+  status: TargetProbeStatus;
+  /** Human-readable detail when status !== "ok". */
+  detail?: string;
+}
+
+/**
+ * Interface for probing whether a VastDB schema.table exists and is
+ * reachable. Injected into the discovery service; omitting it skips
+ * probing (backward-compatible default).
+ */
+export interface TargetProbe {
+  check(schema: string, table: string): Promise<TargetProbeResult>;
+}
+
 export interface DiscoveryOptions {
   /** Skip the cache and force a fresh fetch. Defaults to false. */
   force?: boolean;
@@ -82,6 +101,7 @@ export class PipelineDiscoveryService {
   constructor(
     private readonly configProvider: () => readonly DataEnginePipelineConfig[],
     private readonly fetcher: FunctionFetcher,
+    private readonly targetProbe?: TargetProbe,
     private readonly ttlMs: number = 60_000,
     private readonly now: () => number = () => Date.now(),
   ) {}
@@ -118,7 +138,9 @@ export class PipelineDiscoveryService {
       configs.map(async (config): Promise<DiscoveredPipeline> => {
         try {
           const live = await this.fetcher.fetchByName(config.functionName);
+
           if (!live) {
+            // Short-circuit: don't probe VastDB when the function itself isn't found.
             return {
               config,
               live: null,
@@ -126,6 +148,20 @@ export class PipelineDiscoveryService {
               statusDetail: `No VAST DataEngine function named "${config.functionName}"`,
             };
           }
+
+          // Function resolved — run the target probe (if any).
+          if (this.targetProbe) {
+            const probeResult = await this.targetProbe.check(config.targetSchema, config.targetTable);
+            if (probeResult.status !== "ok") {
+              return {
+                config,
+                live,
+                status: probeResult.status,
+                statusDetail: probeResult.detail,
+              };
+            }
+          }
+
           return { config, live, status: "ok" };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);

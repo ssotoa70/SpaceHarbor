@@ -2842,7 +2842,12 @@ export interface LiveFunctionRecord {
   lastRevisionNumber: number | null;
 }
 
-export type DiscoveredPipelineStatus = "ok" | "function-not-found" | "vast-unreachable";
+export type DiscoveredPipelineStatus =
+  | "ok"
+  | "function-not-found"
+  | "vast-unreachable"
+  | "target-not-found"
+  | "target-unreachable";
 
 export interface DiscoveredPipeline {
   config: DataEnginePipelineConfig;

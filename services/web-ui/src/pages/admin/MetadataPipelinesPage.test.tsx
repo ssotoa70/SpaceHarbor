@@ -70,16 +70,16 @@ describe("MetadataPipelinesPage", () => {
         {
           config: {
             fileKind: "raw_camera",
-            functionName: "video-metadata-extractor",
+            functionName: "raw-metadata-extractor",
             extensions: [".r3d"],
-            targetSchema: "video_metadata",
+            targetSchema: "bad_schema",
             targetTable: "files",
-            sidecarSchemaId: "video@1",
+            sidecarSchemaId: "raw@1",
             enabled: true,
           },
           live: null,
-          status: "vast-unreachable" as api.DiscoveredPipelineStatus,
-          statusDetail: "VMS unreachable",
+          status: "target-not-found" as api.DiscoveredPipelineStatus,
+          statusDetail: "Schema/table not found: {'bucket': 'sergio-db', 'schema': 'bad_schema'}",
         },
       ],
     });
@@ -90,12 +90,17 @@ describe("MetadataPipelinesPage", () => {
     expect(screen.getByText(/frame_metadata\.files/)).toBeInTheDocument();
     expect(screen.getByText(/OK/i)).toBeInTheDocument();
     expect(screen.getByText(/not found/i)).toBeInTheDocument();
-    expect(screen.getByText(/unreachable/i)).toBeInTheDocument();
+    expect(screen.getByText(/target missing/i)).toBeInTheDocument();
 
     // statusDetail surfaces as a tooltip (title attribute)
     const notFoundPill = screen.getByText(/not found/i);
     expect(notFoundPill.closest("[title]")?.getAttribute("title"))
       .toMatch(/no VAST function named/);
+
+    // target-not-found pill shows warning badge with "Target missing" label and correct tooltip
+    const targetMissingPill = screen.getByText(/target missing/i);
+    expect(targetMissingPill.closest("[title]")?.getAttribute("title"))
+      .toMatch(/bad_schema/);
   });
 
   it("inline toggle saves the full mutated array", async () => {

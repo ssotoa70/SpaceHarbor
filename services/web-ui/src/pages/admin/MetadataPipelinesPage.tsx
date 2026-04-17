@@ -41,8 +41,22 @@ interface StatusPillProps {
 }
 
 function StatusPill({ status, detail }: StatusPillProps) {
-  const variant = status === "ok" ? "success" : status === "function-not-found" ? "warning" : "danger";
-  const label = status === "ok" ? "OK" : status === "function-not-found" ? "Not found" : "Unreachable";
+  let variant: "success" | "warning" | "danger";
+  let label: string;
+  if (status === "ok") {
+    variant = "success";
+    label = "OK";
+  } else if (status === "function-not-found") {
+    variant = "warning";
+    label = "Not found";
+  } else if (status === "target-not-found") {
+    variant = "warning";
+    label = "Target missing";
+  } else {
+    // "vast-unreachable" | "target-unreachable"
+    variant = "danger";
+    label = "Unreachable";
+  }
   return (
     <span title={detail ?? undefined}>
       <Badge variant={variant}>{label}</Badge>

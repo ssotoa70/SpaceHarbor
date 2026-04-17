@@ -23,6 +23,7 @@ import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
 import { PipelineDiscoveryService, type DiscoveredPipeline } from "../data-engine/discovery.js";
 import { createVastFunctionFetcher, type VastFetcherContext } from "../data-engine/vast-function-fetcher.js";
+import { createProductionVastdbTargetProbe } from "../data-engine/vastdb-target-probe.js";
 import { VmsTokenManager } from "../vast/vms-token-manager.js";
 
 import {
@@ -45,7 +46,7 @@ let discoveryService: PipelineDiscoveryService | null = null;
 let tokenManager: VmsTokenManager | null = null;
 let tokenManagerKey: string | null = null;
 
-function buildOrGetDiscoveryService(): PipelineDiscoveryService {
+async function buildOrGetDiscoveryService(): Promise<PipelineDiscoveryService> {
   if (discoveryService) return discoveryService;
 
   const contextProvider = (): VastFetcherContext | null => {
@@ -70,9 +71,11 @@ function buildOrGetDiscoveryService(): PipelineDiscoveryService {
   };
 
   const fetcher = createVastFunctionFetcher(contextProvider);
+  const targetProbe = await createProductionVastdbTargetProbe();
   discoveryService = new PipelineDiscoveryService(
     () => getDataEnginePipelines(),
     fetcher,
+    targetProbe,
   );
   return discoveryService;
 }
@@ -133,7 +136,7 @@ const pipelinesActiveResponseSchema = {
               },
             ],
           },
-          status: { type: "string", enum: ["ok", "function-not-found", "vast-unreachable"] },
+          status: { type: "string", enum: ["ok", "function-not-found", "vast-unreachable", "target-not-found", "target-unreachable"] },
           statusDetail: { type: "string" },
         },
       },
@@ -170,7 +173,7 @@ export async function registerDataEnginePipelineRoutes(
       async (request, reply) => {
         const force = request.query.force === "true";
         try {
-          const svc = buildOrGetDiscoveryService();
+          const svc = await buildOrGetDiscoveryService();
           const results = await svc.discover({ force });
           return reply.send({ pipelines: serializeResults(results) });
         } catch (err) {
