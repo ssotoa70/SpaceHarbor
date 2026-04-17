@@ -628,7 +628,25 @@ def metadata_lookup(
             # pattern used by /exr-metadata/lookup and /video-metadata/lookup.
             schema_obj = bkt.schema(schema)
             table_obj = schema_obj.table(table)
-            column_names = [c.name for c in table_obj.columns]
+            # Read everything and filter in Python. SDK predicate pushdown
+            # isn't supported here; table.columns is a method not an
+            # iterable, so we derive column names from the first row's
+            # dict keys. Tables are typically O(100s) of rows for per-asset
+            # metadata — a full scan is acceptable.
+            all_rows = table_to_records(table_obj, limit=10000)
+            if not all_rows:
+                # Empty table — nothing to match against. Return a clean
+                # zero-count response; downstream consumers treat this as
+                # "extractor hasn't produced output yet".
+                return {
+                    "rows": [],
+                    "bucket": target_bucket,
+                    "schema": schema,
+                    "table": table,
+                    "matched_by": None,
+                    "count": 0,
+                }
+            column_names = list(all_rows[0].keys())
             match_col = resolve_match_column(column_names)
             if match_col is None:
                 raise HTTPException(
@@ -639,10 +657,6 @@ def metadata_lookup(
                         f"{list(MATCH_COLUMN_PRIORITY)}; got {column_names}."
                     ),
                 )
-            # Python-side filtering — SDK predicate pushdown not supported
-            # here (see module header note). Tables are typically O(100s) of
-            # rows for per-asset metadata; full scan is acceptable.
-            all_rows = table_to_records(table_obj, limit=10000)
             rows = [r for r in all_rows if r.get(match_col) == key]
             return {
                 "rows": rows,

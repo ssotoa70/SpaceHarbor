@@ -44,17 +44,13 @@ from main import app
 client = TestClient(app)
 
 
-def _stub_bucket(columns: list[str]):
-    """Return (bkt_mock, table_mock) where `vast_transaction(bucket=...)`
-    yields `bkt_mock` (a Bucket), and `bkt_mock.schema(name).table(name)`
-    returns `table_mock`. Mirrors the real SDK surface used by
-    /exr-metadata/lookup (see commit 5786cab — Python-side filtering,
-    not SDK predicates). Row content is stubbed separately via
-    monkeypatch on `table_to_records`."""
+def _stub_bucket():
+    """Return a Bucket mock where `bkt.schema(name).table(name)` returns
+    a Table mock. The endpoint no longer introspects columns from the
+    Table (vastdb SDK's Table.columns is a method, not iterable), so
+    this helper only cares about the chain shape, not column names —
+    columns are derived from the first row's keys at the caller."""
     table = MagicMock()
-    table.columns = [MagicMock() for _ in columns]
-    for col_name, mock in zip(columns, table.columns):
-        mock.name = col_name
     schema_obj = MagicMock()
     schema_obj.table.return_value = table
     bkt = MagicMock()
@@ -70,7 +66,7 @@ def _ctx(bkt):
 
 class TestMetadataLookupEndpoint:
     def test_returns_matched_rows(self, monkeypatch):
-        bkt, _table = _stub_bucket(columns=["source_uri", "width", "height"])
+        bkt, _table = _stub_bucket()
         all_rows = [
             {"source_uri": "uploads/pixar_5603.exr", "width": 2048, "height": 858},
             {"source_uri": "uploads/other.exr", "width": 1920, "height": 1080},
@@ -97,7 +93,7 @@ class TestMetadataLookupEndpoint:
         # Same dataset, but the caller passes the full `s3://bucket/key`
         # URI. If _strip_s3_prefix works, the Python-side filter should
         # still match the row keyed by bare key "uploads/pixar_5603.exr".
-        bkt, _table = _stub_bucket(columns=["source_uri"])
+        bkt, _table = _stub_bucket()
         all_rows = [{"source_uri": "uploads/pixar_5603.exr"}]
         monkeypatch.setattr(app_module, "vast_transaction",
                             lambda bucket=None: _ctx(bkt))
@@ -112,11 +108,16 @@ class TestMetadataLookupEndpoint:
         assert r.json()["count"] == 1  # prefix was stripped for the match
 
     def test_400_when_no_priority_column_in_target_table(self, monkeypatch):
-        bkt, _table = _stub_bucket(columns=["width", "height"])
+        # Column names are now derived from the first row's dict keys, so
+        # to trigger the 400 the table must return at least one row whose
+        # keys are ALL non-priority names.
+        bkt, _table = _stub_bucket()
         monkeypatch.setattr(app_module, "vast_transaction",
                             lambda bucket=None: _ctx(bkt))
         monkeypatch.setattr(app_module, "table_to_records",
-                            lambda table_obj, limit=10000, columns=None: [])
+                            lambda table_obj, limit=10000, columns=None: [
+                                {"width": 100, "height": 200},
+                            ])
         r = client.get(
             "/api/v1/metadata/lookup",
             params={"path": "k", "schema": "x", "table": "y"},
@@ -150,7 +151,7 @@ class TestMetadataLookupEndpoint:
     def test_empty_table_returns_zero_count(self, monkeypatch):
         # Covers the case where the table exists, has the match column,
         # but contains no rows — the response should be 200 with count=0.
-        bkt, _table = _stub_bucket(columns=["source_uri"])
+        bkt, _table = _stub_bucket()
         monkeypatch.setattr(app_module, "vast_transaction",
                             lambda bucket=None: _ctx(bkt))
         monkeypatch.setattr(app_module, "table_to_records",
