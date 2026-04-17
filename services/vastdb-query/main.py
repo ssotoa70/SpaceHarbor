@@ -580,6 +580,72 @@ def video_lookup(
         return {"found": False, "error": str(e)}
 
 
+# ---------------------------------------------------------------------------
+# Schema-agnostic per-asset metadata lookup (Phase 5.4)
+# ---------------------------------------------------------------------------
+# Takes schema + table + path per request — no env-bound schema coupling,
+# so pipeline platform settings become the single source of truth.
+
+import ibis  # type: ignore  # already installed as vastdb SDK dep
+
+
+def _strip_s3_prefix(path: str) -> str:
+    """Accept either `s3://<bucket>/<key>` or a bare `<key>`; return `<key>`.
+    Extractors typically store just the key, so callers can pass the full
+    source URI without thinking about it."""
+    if path.startswith("s3://"):
+        without_scheme = path[len("s3://"):]
+        first_slash = without_scheme.find("/")
+        return without_scheme[first_slash + 1:] if first_slash > 0 else without_scheme
+    return path
+
+
+@app.get("/api/v1/metadata/lookup")
+def metadata_lookup(
+    path: str = Query(..., description="S3 key or full s3:// URI"),
+    schema: str = Query(..., description="Target VAST schema name (from pipeline config)"),
+    table: str = Query("files", description="Target table name (default: files)"),
+    bucket: Optional[str] = Query(None, description="VAST DB bucket (defaults to VASTDB_BUCKET env)"),
+):
+    """Schema-agnostic lookup of extractor output rows keyed by file path.
+
+    Unlike /exr-metadata/lookup and /video-metadata/lookup (both hardcoded
+    to env-bound schemas), this endpoint takes schema + table per request.
+    Intended caller: control-plane /assets/:id/metadata, which passes the
+    asset's pipeline config's targetSchema/targetTable.
+    """
+    key = _strip_s3_prefix(path)
+    target_bucket = bucket or DEFAULT_BUCKET
+    try:
+        with vast_transaction(bucket=target_bucket) as tx:
+            table_obj = tx.bucket(target_bucket).schema(schema).table(table)
+            column_names = [c.name for c in table_obj.columns]
+            match_col = resolve_match_column(column_names)
+            if match_col is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Target table {schema}.{table} has no recognized "
+                        f"path-match column. Expected one of "
+                        f"{list(MATCH_COLUMN_PRIORITY)}; got {column_names}."
+                    ),
+                )
+            predicate = ibis._[match_col] == key
+            rows = table_obj.select(predicate).read_all().to_pylist()
+            return {
+                "rows": rows,
+                "bucket": target_bucket,
+                "schema": schema,
+                "table": table,
+                "matched_by": match_col,
+                "count": len(rows),
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
 
