@@ -317,4 +317,49 @@ describe("MetadataPipelinesPage", () => {
     // Dialog remains open
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
+
+  it("renders live VAST record details when live !== null", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: {
+          guid: "abc-123",
+          name: "fn",
+          description: "Extract frame metadata",
+          owner: null,
+          createdAt: "2026-03-01T00:00:00Z",
+          updatedAt: "2026-04-10T00:00:00Z",
+          vrn: "vrn:vast:fn:abc",
+          lastRevisionNumber: 5,
+        },
+        status: "ok",
+      }],
+    });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByText(/abc-123/)).toBeInTheDocument();
+    expect(screen.getByText(/Extract frame metadata/)).toBeInTheDocument();
+    expect(screen.getByText(/#5/)).toBeInTheDocument();
+    expect(screen.getByText(/vrn:vast:fn:abc/)).toBeInTheDocument();
+  });
+
+  it("renders 'Not currently resolved' when live is null", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "function-not-found",
+      }],
+    });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByText(/not currently resolved/i)).toBeInTheDocument();
+  });
 });

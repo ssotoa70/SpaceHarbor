@@ -371,6 +371,30 @@ function EditPipelineDialog({ target, allRows, onCancel, onSaved }: EditPipeline
           </FormRow>
         </div>
 
+        <div className="mt-4 rounded border border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg-overlay)] p-3">
+          <p className="text-xs font-medium text-[var(--color-ah-text-muted)] mb-2">Live VAST record</p>
+          {target.live ? (
+            <dl className="grid grid-cols-[140px_1fr] gap-y-1 text-xs font-[var(--font-ah-mono)]">
+              <dt className="text-[var(--color-ah-text-subtle)]">GUID</dt>
+              <dd>{target.live.guid}</dd>
+              <dt className="text-[var(--color-ah-text-subtle)]">Description</dt>
+              <dd className="break-words">{target.live.description || "—"}</dd>
+              <dt className="text-[var(--color-ah-text-subtle)]">Revision</dt>
+              <dd>{target.live.lastRevisionNumber != null ? `#${target.live.lastRevisionNumber}` : "—"}</dd>
+              <dt className="text-[var(--color-ah-text-subtle)]">Created</dt>
+              <dd>{target.live.createdAt ?? "—"}</dd>
+              <dt className="text-[var(--color-ah-text-subtle)]">Updated</dt>
+              <dd>{target.live.updatedAt ?? "—"}</dd>
+              <dt className="text-[var(--color-ah-text-subtle)]">VRN</dt>
+              <dd className="break-all">{target.live.vrn ?? "—"}</dd>
+            </dl>
+          ) : (
+            <p className="text-xs text-[var(--color-ah-text-subtle)] italic">
+              — Not currently resolved —
+            </p>
+          )}
+        </div>
+
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
           <Button variant="primary" onClick={() => void handleSave()}
