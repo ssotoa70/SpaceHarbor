@@ -31,6 +31,8 @@ export interface DataEnginePipelineConfig {
   targetTable: string;
   sidecarSchemaId: string;
   displayLabel?: string;
+  /** When false, the handler skips the DB query for this pipeline's file kind. Defaults to true. */
+  enabled?: boolean;
 }
 
 export class InvalidPipelineConfigError extends Error {
@@ -127,6 +129,15 @@ export function validatePipelineConfig(input: unknown): DataEnginePipelineConfig
     }
   }
 
+  const enabledRaw = src["enabled"];
+  let enabled: boolean | undefined;
+  if (enabledRaw !== undefined) {
+    if (typeof enabledRaw !== "boolean") {
+      throw new InvalidPipelineConfigError("enabled must be a boolean when present");
+    }
+    enabled = enabledRaw;
+  }
+
   return {
     fileKind: fileKind as PipelineFileKind,
     functionName: functionName.trim(),
@@ -135,6 +146,7 @@ export function validatePipelineConfig(input: unknown): DataEnginePipelineConfig
     targetTable: targetTable.trim(),
     sidecarSchemaId: sidecarSchemaId.trim(),
     displayLabel,
+    enabled,
   };
 }
 

@@ -187,3 +187,32 @@ test("GET /api/v1/assets/:id/metadata — non-s3 sourceUri → db=disabled, quer
     assert.equal(r.json().sources.db, "disabled");
   });
 });
+
+test("GET /api/v1/assets/:id/metadata — disabled pipeline → sources.db=disabled", async () => {
+  await withApp(async (app) => {
+    // Disable the image pipeline via platform settings before making the request.
+    // The seeded default includes `{ fileKind: "image", enabled: true }`; we
+    // override with enabled: false to verify the handler respects the flag.
+    const current = await app.inject({ method: "GET", url: "/api/v1/platform/settings" });
+    const settings = current.json();
+    const pipelines = (settings.dataEnginePipelines ?? []).map((p: Record<string, unknown>) =>
+      p.fileKind === "image" ? { ...p, enabled: false } : p
+    );
+    const update = await app.inject({
+      method: "PUT",
+      url: "/api/v1/platform/settings",
+      headers: { "content-type": "application/json" },
+      payload: JSON.stringify({ dataEnginePipelines: pipelines }),
+    });
+    assert.ok(update.statusCode < 400, `platform-settings update failed: ${update.body}`);
+
+    const assetId = await seedAsset(app, "s3://sergio-spaceharbor/uploads/disabled.exr", "disabled.exr");
+    setDeps(app, {
+      queryFetcher: async () => { throw new Error("queryFetcher should not be called when pipeline is disabled"); },
+      sidecarFetcher: async (): Promise<SidecarFetchResult> => ({ ok: false, code: "SIDECAR_NOT_FOUND", message: "no sidecar" }),
+    });
+    const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
+    assert.equal(r.statusCode, 200);
+    assert.equal(r.json().sources.db, "disabled");
+  });
+});

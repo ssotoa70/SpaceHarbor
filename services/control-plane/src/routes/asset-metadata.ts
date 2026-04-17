@@ -17,6 +17,10 @@ import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
 import type { PersistenceAdapter } from "../persistence/types.js";
 import { inferFileKind } from "../storage/file-kinds.js";
+import {
+  parseSourceUri,
+  InvalidSourceUriError,
+} from "../storage/sidecar-resolver.js";
 import { proxyToVastdbQuery } from "./exr-metadata.js";
 import { getDataEnginePipelines } from "./platform-settings.js";
 import {
@@ -85,12 +89,15 @@ const DEFAULT_DEPS: AssetMetadataDeps = {
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────
 
-function parseS3Uri(uri: string): { bucket: string; key: string } | null {
-  if (!uri.startsWith("s3://")) return null;
-  const rest = uri.slice(5);
-  const slash = rest.indexOf("/");
-  if (slash < 1) return null;
-  return { bucket: rest.slice(0, slash), key: rest.slice(slash + 1) };
+function tryParseS3Uri(uri: string): { bucket: string; key: string } | null {
+  try {
+    const parsed = parseSourceUri(uri);
+    if (parsed.bucket === null) return null; // bare-key form — not an s3:// URI
+    return { bucket: parsed.bucket, key: parsed.key };
+  } catch (e) {
+    if (e instanceof InvalidSourceUriError) return null;
+    throw e;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -132,44 +139,46 @@ export async function registerAssetMetadataRoute(
 
         const sourceUri = asset.sourceUri ?? "";
         const fileKind = inferFileKind(sourceUri);
-        const s3 = parseS3Uri(sourceUri);
+        const s3 = tryParseS3Uri(sourceUri);
 
         const pipelines = getDataEnginePipelines();
         const pipeline = pipelines.find(
-          (p) => p.fileKind === fileKind && (p as { enabled?: boolean }).enabled !== false,
+          (p) => p.fileKind === fileKind && p.enabled !== false,
         ) ?? null;
 
-        // DB branch — disabled if no pipeline or non-s3 URI.
-        let dbResult: DbResult;
-        if (!pipeline || !s3) {
-          dbResult = {
-            kind: "disabled",
-            reason: !pipeline ? `no pipeline for file kind '${fileKind}'` : "non-s3 sourceUri",
-          };
-        } else {
-          try {
-            const q = await deps.queryFetcher({
+        // DB + sidecar fetches run in parallel. Both promise branches handle
+        // their own errors internally so Promise.all never rejects.
+        const dbPromise: Promise<DbResult> = (pipeline && s3)
+          ? deps.queryFetcher({
               path: s3.key,
               schema: pipeline.targetSchema,
               table: pipeline.targetTable,
+            })
+              .then((q): DbResult => {
+                if (q.ok) {
+                  const rows = (q.data as { rows?: Record<string, unknown>[] }).rows ?? [];
+                  return { kind: "rows", rows };
+                }
+                const msg = (q.data as { detail?: string })?.detail ?? `HTTP ${q.status}`;
+                return { kind: "error", message: msg };
+              })
+              .catch((e): DbResult => ({
+                kind: "error",
+                message: e instanceof Error ? e.message : String(e),
+              }))
+          : Promise.resolve<DbResult>({
+              kind: "disabled",
+              reason: !pipeline ? `no pipeline for file kind '${fileKind}'` : "non-s3 sourceUri",
             });
-            if (q.ok) {
-              const rows = (q.data as { rows?: Record<string, unknown>[] }).rows ?? [];
-              dbResult = { kind: "rows", rows };
-            } else {
-              const msg = (q.data as { detail?: string })?.detail ?? `HTTP ${q.status}`;
-              dbResult = { kind: "error", message: msg };
-            }
-          } catch (e) {
-            dbResult = { kind: "error", message: e instanceof Error ? e.message : String(e) };
-          }
-        }
 
-        // Sidecar branch — always attempted (may return SIDECAR_NOT_FOUND).
-        const sc = await deps.sidecarFetcher(sourceUri);
-        const sidecarResult: SidecarResult = sc.ok
-          ? { kind: "sidecar", data: sc.data as unknown as Record<string, unknown> }
-          : { kind: "missing" };
+        const sidecarPromise: Promise<SidecarResult> = deps.sidecarFetcher(sourceUri)
+          .then((sc): SidecarResult =>
+            sc.ok
+              ? { kind: "sidecar", data: sc.data as unknown as Record<string, unknown> }
+              : { kind: "missing" },
+          );
+
+        const [dbResult, sidecarResult] = await Promise.all([dbPromise, sidecarPromise]);
 
         const sources = resolveSourcesStatus(dbResult, sidecarResult);
 
@@ -187,7 +196,7 @@ export async function registerAssetMetadataRoute(
             : null,
           sources,
           dbRows: dbResult.kind === "rows" ? dbResult.rows : [],
-          sidecar: sc.ok ? sc.data : null,
+          sidecar: sidecarResult.kind === "sidecar" ? sidecarResult.data : null,
           ...(sources.dbError ? { dbError: sources.dbError } : {}),
         });
       },
