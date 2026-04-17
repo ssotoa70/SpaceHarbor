@@ -155,4 +155,84 @@ describe("MetadataPipelinesPage", () => {
     await waitFor(() => expect(screen.getByText(/PUT failed/)).toBeInTheDocument());
     expect(screen.getByRole("switch", { name: /toggle image/i }).getAttribute("aria-checked")).toBe("true");
   });
+
+  it("refresh button re-fetches with force=true", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: [] });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(fetchSpy.mock.calls[1][0]).toEqual({ force: true });
+  });
+
+  it("seed-defaults fetches defaults, PUTs, then force-reloads", async () => {
+    const seedList: api.DataEnginePipelineConfig[] = [
+      { fileKind: "image", functionName: "fn", extensions: [".exr"],
+        targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1" },
+      { fileKind: "video", functionName: "fn2", extensions: [".mov"],
+        targetSchema: "s2", targetTable: "t2", sidecarSchemaId: "video@1" },
+    ];
+    const fetchSpy = vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: [] });
+    vi.spyOn(api, "fetchMetadataPipelineDefaults").mockResolvedValue(seedList);
+    const saveSpy = vi.spyOn(api, "saveMetadataPipelines").mockResolvedValue();
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /seed defaults/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /seed defaults/i }));
+
+    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+    expect(saveSpy.mock.calls[0][0]).toEqual(seedList);
+    // After seed, a force-reload happens
+    await waitFor(() => expect(fetchSpy.mock.calls.some((c) => c[0]?.force === true)).toBe(true));
+  });
+
+  it("seed-defaults disabled + banner after loader failure", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: [] });
+    vi.spyOn(api, "fetchMetadataPipelineDefaults").mockRejectedValue(new Error("seed boom"));
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /seed defaults/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /seed defaults/i }));
+
+    await waitFor(() => expect(screen.getByText(/seed boom/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /seed defaults/i })).toBeDisabled();
+  });
+
+  it("shows 'seed missing' banner + appends only missing kinds", async () => {
+    // 1 kind configured (image), 2 missing (video + raw_camera)
+    const existing: api.DiscoveredPipeline[] = [
+      {
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      },
+    ];
+    const fullDefaults: api.DataEnginePipelineConfig[] = [
+      { fileKind: "image", functionName: "fn-d-img", extensions: [".exr"],
+        targetSchema: "sd", targetTable: "td", sidecarSchemaId: "frame@1" },
+      { fileKind: "video", functionName: "fn-d-vid", extensions: [".mov"],
+        targetSchema: "sd", targetTable: "td", sidecarSchemaId: "video@1" },
+      { fileKind: "raw_camera", functionName: "fn-d-raw", extensions: [".r3d"],
+        targetSchema: "sd", targetTable: "td", sidecarSchemaId: "video@1" },
+    ];
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: existing });
+    vi.spyOn(api, "fetchMetadataPipelineDefaults").mockResolvedValue(fullDefaults);
+    const saveSpy = vi.spyOn(api, "saveMetadataPipelines").mockResolvedValue();
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByText(/missing pipelines for: video, raw_camera/i))
+      .toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /seed missing/i }));
+
+    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+    const arg = saveSpy.mock.calls[0][0];
+    // Preserves existing image config; appends the two missing kinds from defaults
+    expect(arg).toHaveLength(3);
+    expect(arg.find((p) => p.fileKind === "image")?.functionName).toBe("fn");
+    expect(arg.find((p) => p.fileKind === "video")?.functionName).toBe("fn-d-vid");
+    expect(arg.find((p) => p.fileKind === "raw_camera")?.functionName).toBe("fn-d-raw");
+  });
 });

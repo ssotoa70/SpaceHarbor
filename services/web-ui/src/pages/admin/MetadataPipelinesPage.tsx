@@ -70,6 +70,41 @@ export function MetadataPipelinesPage() {
 
   useEffect(() => { void load(false); }, [load]);
 
+  const [seedFailed, setSeedFailed] = useState(false);
+
+  const missingKinds = useMemo((): FileKind[] => {
+    if (!rows) return [];
+    const configured = new Set(rows.map((r) => r.config.fileKind));
+    return ALL_KINDS.filter((k) => !configured.has(k));
+  }, [rows]);
+
+  const handleSeedDefaults = useCallback(async () => {
+    try {
+      const defaults = await fetchMetadataPipelineDefaults();
+      await saveMetadataPipelines(defaults);
+      await load(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Seed failed");
+      setSeedFailed(true);
+    }
+  }, [load]);
+
+  const handleSeedMissing = useCallback(async () => {
+    if (!rows) return;
+    try {
+      const defaults = await fetchMetadataPipelineDefaults();
+      const merged: DataEnginePipelineConfig[] = [
+        ...rows.map((r) => r.config),
+        ...defaults.filter((d) => missingKinds.includes(d.fileKind as FileKind)),
+      ];
+      await saveMetadataPipelines(merged);
+      await load(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Seed missing failed");
+      setSeedFailed(true);
+    }
+  }, [rows, missingKinds, load]);
+
   const handleToggle = useCallback(async (target: DiscoveredPipeline) => {
     if (!rows) return;
     const nextEnabled = !(target.config.enabled !== false);
@@ -102,11 +137,23 @@ export function MetadataPipelinesPage() {
             platform setting.
           </p>
         </div>
+        <Button variant="ghost" onClick={() => void load(true)}>Refresh</Button>
       </header>
 
       {error && (
         <div className="p-3 rounded border border-red-500/30 bg-red-500/10 text-sm text-red-400">
           {error}
+        </div>
+      )}
+
+      {!isEmpty && missingKinds.length > 0 && (
+        <div className="p-3 rounded border border-amber-500/30 bg-amber-500/10 text-sm flex items-center justify-between">
+          <span>
+            Missing pipelines for: {missingKinds.join(", ")}
+          </span>
+          <Button variant="ghost" onClick={() => void handleSeedMissing()} disabled={seedFailed}>
+            Seed missing
+          </Button>
         </div>
       )}
 
@@ -119,12 +166,9 @@ export function MetadataPipelinesPage() {
           <p className="text-sm text-[var(--color-ah-text-muted)] mb-3">
             No pipelines configured. Seed the canonical default set (image / video / raw_camera).
           </p>
-          <Button variant="primary" disabled>
+          <Button variant="primary" onClick={() => void handleSeedDefaults()} disabled={seedFailed}>
             Seed defaults
           </Button>
-          <p className="mt-2 text-[10px] text-[var(--color-ah-text-subtle)]">
-            (Seed action wired in the next task.)
-          </p>
         </Card>
       )}
 
