@@ -235,4 +235,86 @@ describe("MetadataPipelinesPage", () => {
     expect(arg.find((p) => p.fileKind === "video")?.functionName).toBe("fn-d-vid");
     expect(arg.find((p) => p.fileKind === "raw_camera")?.functionName).toBe("fn-d-raw");
   });
+
+  it("opens edit dialog prefilled from row config; fileKind is read-only", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "original-fn", extensions: [".exr", ".dpx"],
+                  targetSchema: "orig_schema", targetTable: "orig_table", sidecarSchemaId: "frame@1",
+                  enabled: true, displayLabel: "Original Label" },
+        live: null, status: "ok",
+      }],
+    });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect((screen.getByLabelText(/function name/i) as HTMLInputElement).value).toBe("original-fn");
+    expect((screen.getByLabelText(/target schema/i) as HTMLInputElement).value).toBe("orig_schema");
+    expect((screen.getByLabelText(/target table/i) as HTMLInputElement).value).toBe("orig_table");
+    expect((screen.getByLabelText(/file kind/i) as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("save merges the edited entry and leaves other rows untouched", async () => {
+    const initial: api.DiscoveredPipeline[] = [
+      {
+        config: { fileKind: "image", functionName: "fn-img", extensions: [".exr"],
+                  targetSchema: "s-img", targetTable: "t-img", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      },
+      {
+        config: { fileKind: "video", functionName: "fn-vid", extensions: [".mov"],
+                  targetSchema: "s-vid", targetTable: "t-vid", sidecarSchemaId: "video@1",
+                  enabled: true },
+        live: null, status: "ok",
+      },
+    ];
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: initial });
+    const saveSpy = vi.spyOn(api, "saveMetadataPipelines").mockResolvedValue();
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByText("fn-img")).toBeInTheDocument());
+
+    // Open the first row's edit dialog
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+
+    const schemaInput = screen.getByLabelText(/target schema/i) as HTMLInputElement;
+    fireEvent.change(schemaInput, { target: { value: "new_schema" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+    const arg = saveSpy.mock.calls[0][0];
+    expect(arg.find((p) => p.fileKind === "image")?.targetSchema).toBe("new_schema");
+    // video row must be unchanged
+    expect(arg.find((p) => p.fileKind === "video")?.targetSchema).toBe("s-vid");
+    expect(arg.find((p) => p.fileKind === "video")?.functionName).toBe("fn-vid");
+  });
+
+  it("surfaces server validation error inline and keeps dialog open", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      }],
+    });
+    vi.spyOn(api, "saveMetadataPipelines").mockRejectedValue(
+      new Error("pipelines[0]: sidecarSchemaId must match /^[a-z][a-z0-9_-]*@.../")
+    );
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(screen.getByText(/sidecarSchemaId must match/)).toBeInTheDocument());
+    // Dialog remains open
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
 });
