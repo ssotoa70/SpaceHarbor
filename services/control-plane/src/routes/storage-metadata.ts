@@ -43,6 +43,85 @@ import { setVastTlsSkip, restoreVastTls } from "../vast/vast-fetch.js";
 
 import { getStorageEndpoints } from "./platform-settings.js";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// High-level sidecar fetcher — exported for use by asset-metadata route.
+// Wraps location resolution + S3 client creation + sidecar fetch into a
+// single call that takes only a source URI and returns a discriminated union.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SidecarFetchResult =
+  | { ok: true; data: { schema_version: string | number | null; file_kind: string; source_uri: string;
+                        sidecar_key: string; bucket: string; bytes: number; data: unknown } }
+  | { ok: false; code: "SIDECAR_NOT_FOUND" | "SIDECAR_READ_ERROR"; message: string };
+
+/**
+ * Resolve and fetch the `_metadata.json` sidecar for `sourceUri`.
+ * Returns a discriminated union — never throws.
+ *
+ * Used by `registerAssetMetadataRoute` as the default sidecarFetcher dep.
+ */
+export async function fetchSidecarForAsset(sourceUri: string): Promise<SidecarFetchResult> {
+  let location;
+  try {
+    location = resolveSidecarLocation(sourceUri);
+  } catch {
+    return { ok: false, code: "SIDECAR_READ_ERROR", message: "Invalid sourceUri" };
+  }
+  if (!location) {
+    return { ok: false, code: "SIDECAR_NOT_FOUND", message: "File kind has no sidecar" };
+  }
+
+  const endpoints = getStorageEndpoints();
+  const ep = location.bucket
+    ? endpoints.find((e) => e.bucket === location.bucket) ?? endpoints[0]
+    : endpoints[0];
+  if (!ep) {
+    return { ok: false, code: "SIDECAR_READ_ERROR", message: "No storage endpoints configured" };
+  }
+  const resolvedBucket = location.bucket ?? ep.bucket;
+
+  setVastTlsSkip();
+  const s3 = new S3Client({
+    endpoint: ep.endpoint,
+    region: (ep as { region?: string }).region || "us-east-1",
+    credentials: ep.accessKeyId && ep.secretAccessKey
+      ? { accessKeyId: ep.accessKeyId, secretAccessKey: ep.secretAccessKey }
+      : undefined,
+    forcePathStyle: (ep as { pathStyle?: boolean }).pathStyle !== false,
+  });
+  try {
+    const fetched = await fetchSidecar(s3, resolvedBucket, location.sidecarKey, DEFAULT_SIDECAR_FETCH_CONFIG);
+    switch (fetched.kind) {
+      case "ok": {
+        const sv = fetched.data.schema_version;
+        return {
+          ok: true,
+          data: {
+            schema_version: (typeof sv === "string" || typeof sv === "number") ? sv : null,
+            file_kind: location.fileKind,
+            source_uri: sourceUri,
+            sidecar_key: location.sidecarKey,
+            bucket: resolvedBucket,
+            bytes: fetched.bytes,
+            data: fetched.data,
+          },
+        };
+      }
+      case "not-found":
+        return { ok: false, code: "SIDECAR_NOT_FOUND", message: `No sidecar at ${location.sidecarKey}` };
+      case "too-large":
+        return { ok: false, code: "SIDECAR_READ_ERROR", message: `Sidecar exceeds max body size of ${fetched.limit} bytes` };
+      case "invalid-json":
+        return { ok: false, code: "SIDECAR_READ_ERROR", message: "Sidecar exists but does not contain valid JSON" };
+      case "error":
+        return { ok: false, code: "SIDECAR_READ_ERROR", message: fetched.error.message };
+    }
+  } finally {
+    s3.destroy();
+    restoreVastTls();
+  }
+}
+
 interface ResolvedEndpoint {
   endpoint: string;
   bucket: string;

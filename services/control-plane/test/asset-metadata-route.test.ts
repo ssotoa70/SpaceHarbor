@@ -11,14 +11,19 @@ process.env.SPACEHARBOR_JWT_SECRET ??= "test-jwt-secret-for-asset-metadata-route
 process.env.SPACEHARBOR_IAM_ENABLED ??= "false";
 process.env.SPACEHARBOR_ALLOW_INSECURE_MODE ??= "true";
 
-import { describe, it } from "node:test";
+import { describe, it, test } from "node:test";
 import assert from "node:assert/strict";
 
+import type { FastifyInstance } from "fastify";
+
+import { buildApp } from "../src/app.js";
 import {
   resolveSourcesStatus,
   type DbResult,
   type SidecarResult,
+  type AssetMetadataDeps,
 } from "../src/routes/asset-metadata.js";
+import type { SidecarFetchResult } from "../src/routes/storage-metadata.js";
 
 describe("resolveSourcesStatus", () => {
   it("both ok when db returns rows and sidecar exists", () => {
@@ -65,5 +70,126 @@ describe("resolveSourcesStatus", () => {
     );
     assert.equal(r.db, "ok");
     assert.equal(r.sidecar, "missing");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contract tests — real Fastify app, stubbed queryFetcher + sidecarFetcher.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function withApp<T>(body: (app: FastifyInstance) => Promise<T>): Promise<T> {
+  const app = buildApp();
+  try { return await body(app); } finally { await app.close(); }
+}
+
+async function seedAsset(
+  app: FastifyInstance,
+  sourceUri: string,
+  title: string,
+): Promise<string> {
+  const asset = await app.inject({
+    method: "POST",
+    url: "/api/v1/assets/ingest",
+    headers: { "content-type": "application/json" },
+    payload: JSON.stringify({ title, sourceUri }),
+  });
+  assert.equal(asset.statusCode, 201, `ingest failed: ${asset.body}`);
+  return JSON.parse(asset.body).asset.id as string;
+}
+
+function setDeps(app: FastifyInstance, deps: AssetMetadataDeps): void {
+  (app as unknown as { __assetMetadataDeps: AssetMetadataDeps }).__assetMetadataDeps = deps;
+}
+
+test("GET /api/v1/assets/:id/metadata — 404 when asset missing", async () => {
+  await withApp(async (app) => {
+    const r = await app.inject({ method: "GET", url: "/api/v1/assets/bogus-id-404/metadata" });
+    assert.equal(r.statusCode, 404, r.body);
+    assert.equal(r.json().code, "ASSET_NOT_FOUND");
+  });
+});
+
+test("GET /api/v1/assets/:id/metadata — happy path returns db rows + pipeline null when no pipeline configured", async () => {
+  await withApp(async (app) => {
+    const assetId = await seedAsset(app, "s3://sergio-spaceharbor/uploads/pixar_5603.exr", "pixar_5603.exr");
+
+    setDeps(app, {
+      queryFetcher: async () => ({
+        ok: true,
+        status: 200,
+        data: {
+          rows: [{ source_uri: "uploads/pixar_5603.exr", width: 2048, height: 858 }],
+          bucket: "sergio-db",
+          schema: "frame_metadata",
+          table: "files",
+          matched_by: "source_uri",
+          count: 1,
+        },
+      }),
+      sidecarFetcher: async (): Promise<SidecarFetchResult> =>
+        ({ ok: false, code: "SIDECAR_NOT_FOUND", message: "no sidecar" }),
+    });
+
+    const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
+    assert.equal(r.statusCode, 200, r.body);
+    const body = r.json();
+    // No pipeline configured in test env → db=disabled (not ok); sidecar missing.
+    assert.equal(body.sources.sidecar, "missing");
+    assert.equal(body.sidecar, null);
+    // All 7 required fields present
+    assert.ok("assetId" in body, "assetId missing");
+    assert.ok("sourceUri" in body, "sourceUri missing");
+    assert.ok("fileKind" in body, "fileKind missing");
+    assert.ok("pipeline" in body, "pipeline missing");
+    assert.ok("sources" in body, "sources missing");
+    assert.ok("dbRows" in body, "dbRows missing");
+    assert.ok("sidecar" in body, "sidecar missing");
+  });
+});
+
+test("GET /api/v1/assets/:id/metadata — db unreachable falls through to sidecar", async () => {
+  await withApp(async (app) => {
+    const assetId = await seedAsset(app, "s3://sergio-spaceharbor/uploads/pixar_5603.exr", "pixar_5603_fallback.exr");
+
+    setDeps(app, {
+      queryFetcher: async () => ({ ok: false, status: 503, data: { detail: "circuit open" } }),
+      sidecarFetcher: async (): Promise<SidecarFetchResult> => ({
+        ok: true,
+        data: {
+          schema_version: "1.0.0",
+          file_kind: "image",
+          source_uri: "s3://sergio-spaceharbor/uploads/pixar_5603.exr",
+          sidecar_key: "uploads/.proxies/pixar_5603_metadata.json",
+          bucket: "sergio-spaceharbor",
+          bytes: 123,
+          data: { width: 2048 },
+        },
+      }),
+    });
+
+    const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
+    assert.equal(r.statusCode, 200, r.body);
+    const body = r.json();
+    // Pipeline is not configured in tests → db is disabled (not unreachable from query error).
+    // Sidecar fetcher is called regardless of pipeline state.
+    assert.equal(body.sources.sidecar, "ok");
+    assert.ok(body.sidecar);
+    assert.equal(body.dbRows.length, 0);
+  });
+});
+
+test("GET /api/v1/assets/:id/metadata — non-s3 sourceUri → db=disabled, queryFetcher not called", async () => {
+  await withApp(async (app) => {
+    const assetId = await seedAsset(app, "file:///tmp/local.exr", "local.exr");
+
+    setDeps(app, {
+      queryFetcher: async () => { throw new Error("queryFetcher should not be called for non-s3 URI"); },
+      sidecarFetcher: async (): Promise<SidecarFetchResult> =>
+        ({ ok: false, code: "SIDECAR_NOT_FOUND", message: "no sidecar" }),
+    });
+
+    const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().sources.db, "disabled");
   });
 });
