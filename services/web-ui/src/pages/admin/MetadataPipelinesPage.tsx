@@ -268,6 +268,10 @@ function EditPipelineDialog({ target, allRows, onCancel, onSaved }: EditPipeline
   const [enabled, setEnabled] = useState(target.config.enabled !== false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lookupPath, setLookupPath] = useState("");
+  const [lookupResult, setLookupResult] = useState<MetadataLookupResult | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [lookupRunning, setLookupRunning] = useState(false);
 
   const buildConfig = useCallback((): DataEnginePipelineConfig => ({
     fileKind: target.config.fileKind,
@@ -296,6 +300,24 @@ function EditPipelineDialog({ target, allRows, onCancel, onSaved }: EditPipeline
       setSubmitting(false);
     }
   }, [allRows, target, buildConfig, onSaved]);
+
+  const handleRunLookup = useCallback(async () => {
+    setLookupRunning(true);
+    setLookupResult(null);
+    setLookupError(null);
+    try {
+      const result = await testMetadataLookup({
+        path: lookupPath.trim(),
+        schema: targetSchema.trim(),
+        table: targetTable.trim(),
+      });
+      setLookupResult(result);
+    } catch (e) {
+      setLookupError(e instanceof Error ? e.message : "Lookup failed");
+    } finally {
+      setLookupRunning(false);
+    }
+  }, [lookupPath, targetSchema, targetTable]);
 
   const canSubmit =
     functionName.trim().length > 0 &&
@@ -392,6 +414,43 @@ function EditPipelineDialog({ target, allRows, onCancel, onSaved }: EditPipeline
             <p className="text-xs text-[var(--color-ah-text-subtle)] italic">
               — Not currently resolved —
             </p>
+          )}
+        </div>
+
+        <div className="mt-4 rounded border border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg-overlay)] p-3">
+          <p className="text-xs font-medium text-[var(--color-ah-text-muted)] mb-2">Test lookup</p>
+          <div className="flex gap-2 items-center">
+            <input
+              type="text"
+              aria-label="S3 path"
+              placeholder="s3://bucket/path/to/file.exr"
+              value={lookupPath}
+              onChange={(e) => setLookupPath(e.target.value)}
+              className="flex-1 px-3 py-1.5 rounded border border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg)] font-[var(--font-ah-mono)] text-xs"
+            />
+            <Button
+              variant="ghost"
+              onClick={() => void handleRunLookup()}
+              disabled={lookupRunning || lookupPath.trim().length === 0}
+            >
+              {lookupRunning ? "Running…" : "Run test"}
+            </Button>
+          </div>
+          {lookupError && (
+            <p className="mt-2 text-xs text-red-400">{lookupError}</p>
+          )}
+          {lookupResult && (
+            <div className="mt-2 text-xs font-[var(--font-ah-mono)]">
+              <p className="text-[var(--color-ah-text-muted)]">
+                {lookupResult.count} row{lookupResult.count === 1 ? "" : "s"}
+                {lookupResult.matched_by ? ` (matched_by: ${lookupResult.matched_by})` : ""}
+              </p>
+              {lookupResult.rows.length > 0 && (
+                <pre className="mt-1 overflow-auto max-h-32 rounded bg-[var(--color-ah-bg)] p-2 text-xs">
+                  {JSON.stringify(lookupResult.rows[0], null, 2)}
+                </pre>
+              )}
+            </div>
           )}
         </div>
 

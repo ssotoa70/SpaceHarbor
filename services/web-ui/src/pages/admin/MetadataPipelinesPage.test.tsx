@@ -362,4 +362,61 @@ describe("MetadataPipelinesPage", () => {
 
     expect(screen.getByText(/not currently resolved/i)).toBeInTheDocument();
   });
+
+  it("lookup uses in-form (unsaved) targetSchema and targetTable values", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "saved_schema", targetTable: "saved_table",
+                  sidecarSchemaId: "frame@1", enabled: true },
+        live: null, status: "ok",
+      }],
+    });
+    const lookupSpy = vi.spyOn(api, "testMetadataLookup").mockResolvedValue({
+      count: 1, rows: [{ file: "test.exr" }], matched_by: "path",
+    });
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    // Change targetSchema in the form (not yet saved)
+    const schemaInput = screen.getByLabelText(/target schema/i) as HTMLInputElement;
+    fireEvent.change(schemaInput, { target: { value: "unsaved_schema" } });
+
+    // Fill S3 path and run lookup
+    const pathInput = screen.getByLabelText(/S3 path/i);
+    fireEvent.change(pathInput, { target: { value: "s3://bucket/test.exr" } });
+    fireEvent.click(screen.getByRole("button", { name: /run test/i }));
+
+    await waitFor(() => expect(lookupSpy).toHaveBeenCalled());
+    const callArgs = lookupSpy.mock.calls[0][0];
+    expect(callArgs.schema).toBe("unsaved_schema");
+    expect(callArgs.table).toBe("saved_table");
+  });
+
+  it("lookup error renders inline but save button stays enabled", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      }],
+    });
+    vi.spyOn(api, "testMetadataLookup").mockRejectedValue(new Error("lookup boom"));
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    const pathInput = screen.getByLabelText(/S3 path/i);
+    fireEvent.change(pathInput, { target: { value: "s3://bucket/test.exr" } });
+    fireEvent.click(screen.getByRole("button", { name: /run test/i }));
+
+    await waitFor(() => expect(screen.getByText(/lookup boom/)).toBeInTheDocument());
+
+    // Save button must remain enabled (error is informational only)
+    expect(screen.getByRole("button", { name: /save changes/i })).not.toBeDisabled();
+  });
 });
