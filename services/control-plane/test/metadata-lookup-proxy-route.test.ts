@@ -98,5 +98,7 @@ describe("GET /api/v1/metadata/lookup (admin proxy)", () => {
       url: "/api/v1/metadata/lookup?path=s3://bucket/missing.exr&schema=frame_metadata&table=files",
     });
     assert.equal(res.statusCode, 404);
+    const body = JSON.parse(res.body);
+    assert.equal(body.detail, "no row found for path");
   });
 });

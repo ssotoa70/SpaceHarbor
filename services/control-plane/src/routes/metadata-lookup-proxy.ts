@@ -17,11 +17,7 @@ import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
 import { proxyToVastdbQuery } from "./exr-metadata.js";
 
-export type MetadataLookupProxy = (path: string) => Promise<{
-  ok: boolean;
-  status: number;
-  data: unknown;
-}>;
+export type MetadataLookupProxy = typeof proxyToVastdbQuery;
 
 let proxyOverride: MetadataLookupProxy | null = null;
 
