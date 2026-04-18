@@ -78,11 +78,16 @@ Modified: `/api/v1/metadata/lookup` handler. **Response shape unchanged.** New i
      Query fallback: WHERE s3_key = <fallback_path> OR file_path = <fallback_path>
      If count > 0:
        log.warn("metadata_lookup.fallback_hit", path=<orig>, fallback=<stripped>, schema=<s>, table=<t>)
+       metadata_lookup_fallback_total.labels(schema=<s>, table=<t>).inc()
        return fallback result
 3. Return result (primary, fallback, or empty)
 ```
 
 Guardrail: only strip if something remains after the first slash.
+
+**Observability.** One structured `warn` log line per fallback hit, plus a Prometheus-style counter metric `metadata_lookup_fallback_total{schema,table}` incremented on each hit. The log is for post-hoc diagnosis; the counter supports automated rate-alerting without log parsing. Ops can alert when fallback rate exceeds 10% of total lookup volume over a 5-minute window (extractor drift signal). Metric surface is the existing FastAPI Prometheus exporter in `main.py` — same pattern as existing counters. If no exporter is wired yet, scope-in the minimum necessary plumbing as part of Layer A.
+
+**Query performance note.** The primary query uses `WHERE s3_key = ? OR file_path = ?`. During Layer A implementation, confirm both columns are indexed on the target VastDB tables. If either is unindexed, the OR predicate may full-scan — in that case, split the primary query into two sequential probes (`s3_key = ?` first, then `file_path = ?` on miss) rather than relying on the OR. Verify via Trino `EXPLAIN` or the equivalent VastDB introspection. See Risks section for the fallback plan if indexes are missing.
 
 ### Layer B — `services/web-ui/src/utils/metadata-routing.ts`
 
@@ -125,28 +130,30 @@ Three behavioral changes:
 
 1. **Metadata lookup** — replace `fetchExrMetadataLookup` / `fetchVideoMetadataLookup` with `useStorageSidecar(sourceUri)`. Render `sidecar.data` as grouped key-value sections (re-use the `Section` / `DetailRow` primitives already in this file). The bespoke EXR-channels / parts sections are dropped — they were reading EXR-specific response fields that don't exist in the sidecar JSON.
 2. **Preview pane** — branch on `classifyForPipelines(filename, pipelines).kind`:
-   - `image` → `<img src={previewUrl} />`
-   - `video` → `<video src={previewUrl} controls muted />`
-   - `raw_camera` → "No preview available for raw camera files"
-   - `none` → existing "No preview" fallback
+   - `image` → `<img src={previewUrl} alt={filename} />` — `alt` is required for screen readers; filename is the minimum acceptable value.
+   - `video` → `<video src={previewUrl} poster={thumbnailUrl} controls />` — `poster` shows a still frame while the video loads (prevents black-rectangle render); `muted` is omitted since there is no `autoplay`. `thumbnailUrl` comes from the existing `fetchMediaUrls(sourceUri).thumbnail`; `previewUrl` is the proxy video URL.
+   - `raw_camera` → styled `EmptyStatePreview` component (same visual treatment as the `none` fallback), copy: "No preview available for raw camera files."
+   - `none` → existing styled "No preview" fallback (unchanged).
+
+   **Proxy format assumption.** `<video>` requires a browser-playable format (H.264/AAC MP4 or HLS/DASH manifest). Before Layer C.2 ships, confirm `fetchMediaUrls(sourceUri).source` returns a browser-compatible URL for video assets. If the proxy format is ProRes/DNxHR/HEVC, the `<video>` element will fail silently. In that case, degrade to the styled "Preview unavailable in this browser" empty-state rather than a broken element — verified by a test that asserts the fallback fires when `previewUrl` is null or the video fails to load.
 3. **Empty-state copy** — replace `"No EXR metadata available"` with format-neutral copy routed by `kind`:
    - `kind === "none"` → `"No pipeline configured for .{ext}"` + link to `/automation/pipelines`
-   - otherwise → `"No metadata extracted yet. The file may not have been processed."`
+   - otherwise → `"Metadata unavailable in this view. Open the asset panel for the full record."` — an honest fallback that does not imply the file was unprocessed (since the DB row may exist even when the sidecar is missing).
 
-**Note on DB-but-no-sidecar edge case.** The current legacy path reads VastDB, not sidecar. If an extractor writes the DB row but fails to write the sidecar (rare; should be atomic), storage-browser will show "No metadata extracted yet" while the DB has the row. Accepted trade-off: sidecar-only avoids adding a new path-keyed control-plane route, and the failure mode is diagnosable via the existing `/metadata/lookup` admin proxy. Tracked as a follow-up if it becomes a real operational issue.
+**Note on DB-but-no-sidecar edge case.** The current legacy path reads VastDB, not sidecar. If an extractor writes the DB row but fails to write the sidecar (rare; should be atomic), storage-browser will surface the honest fallback copy above rather than implying the file was unprocessed. The full metadata is still reachable via the asset panel (`/assets/:id`), which reads the DB row via `useAssetMetadata`. The failure mode is diagnosable via the existing `/metadata/lookup` admin proxy. Tracked as a follow-up if sidecar-write failures become a real operational issue.
 
 #### D.2 spike (time-boxed 1 day)
 
-Investigate `requestProcessing` at line 519. Probes:
+Investigate `requestProcessing` at line 519. Probes, in order of likelihood per MAM failure-mode ranking:
 
-- `POST /api/v1/storage/process` with a working file's sourceUri → confirm 200.
-- Same endpoint with a failing file's sourceUri → inspect response + server logs.
-- Grep the storage-process route for extension/kind filtering logic.
+1. **Hardcoded classifier on the process route or worker dispatch.** `POST /api/v1/storage/process` with a working file's sourceUri → confirm 200. Same endpoint with a failing file's sourceUri → inspect response + server logs. Grep the storage-process route and any downstream worker dispatcher for extension/kind filtering logic.
+2. **Event broker topic routing.** Inspect which Kafka topic the process action publishes to for each file kind. Confirm a consumer is subscribed in the dev environment for all three kinds (image / video / raw_camera). A missing or misrouted topic manifests as "fires but nothing happens."
+3. **IAM / feature-flag gating.** Check whether `storage:process` or equivalent permission is gated by file kind, or whether a feature flag (`SPACEHARBOR_*`) conditionally enables the action for some kinds.
 
 **Exit criteria (decided day 1 of investigation):**
 
-- If root cause is a hardcoded classifier on the process route → fix inside Layer C using `classifyForPipelines`.
-- If root cause is worker dispatch, event broker topic routing, or permissions → carve out to a separate `fix/process-actions` branch with its own brainstorm. Layer C ships without D.2.
+- If root cause is probe 1 (hardcoded classifier) → fix inside Layer C using `classifyForPipelines`.
+- If root cause is probe 2 (event broker routing) or probe 3 (IAM/feature-flag) → carve out to a separate `fix/process-actions` branch with its own brainstorm. Layer C ships without D.2.
 
 ### Layer D — cleanup
 
@@ -216,19 +223,20 @@ User selects file in StorageBrowser (FileDetailSidebar mounts)
 
 ### Layer A — vastdb-query fallback
 
-| Scenario | Response | Log |
-|---|---|---|
-| Primary hit | `count >= 1, matched_by` | — |
-| Primary miss, fallback hit | Same shape as primary | `warn("metadata_lookup.fallback_hit", ...)` |
-| Primary miss, fallback miss | `count: 0, matched_by: null` | — (genuine empty) |
-| Path without `/` to strip | `count: 0, matched_by: null` | — (fallback skipped) |
-| Table/schema doesn't exist | 503 + dict-shaped detail (existing TargetProbe behavior) | existing error log |
-| Downstream SDK error | 503 + plain-text detail (existing) | existing error log |
+| Scenario | Response | Log | Metric |
+|---|---|---|---|
+| Primary hit | `count >= 1, matched_by` | — | — |
+| Primary miss, fallback hit | Same shape as primary | `warn("metadata_lookup.fallback_hit", ...)` | `metadata_lookup_fallback_total{schema,table}.inc()` |
+| Primary miss, fallback miss | `count: 0, matched_by: null` | — (genuine empty) | — |
+| Path without `/` to strip | `count: 0, matched_by: null` | — (fallback skipped) | — |
+| Table/schema doesn't exist | 503 + dict-shaped detail (existing TargetProbe behavior) | existing error log | — |
+| Downstream SDK error | 503 + plain-text detail (existing) | existing error log | — |
 
 Invariants:
 - Fallback is silent to callers.
 - Fallback only fires on `count == 0` from the primary query, not on errors.
 - Log level is `warn` — drift signal, not a user-facing problem.
+- Counter is always paired with the warn log; ops primary signal is the counter rate, log is for per-case diagnosis.
 
 ### Layer B — classifier edge cases
 
@@ -301,7 +309,8 @@ Vitest + Testing Library (`StorageBrowserPage.test.tsx`):
 | `.r3d` renders "No preview available" text | Text present, no `<img>`/`<video>` |
 | `.jpg` with no matching pipeline shows CTA | "No pipeline configured for .jpg" + link to `/automation/pipelines` |
 | Metadata comes from `useStorageSidecar`, not legacy helpers | Spies assert the legacy calls never fire; `fetchStorageMetadata` called with sourceUri |
-| Sidecar `null` (extractor hasn't written one) | Format-neutral "No metadata extracted yet" empty-state |
+| Sidecar `null` (extractor hasn't written one) | Format-neutral "Metadata unavailable in this view" empty-state |
+| Sidecar/DB field-name parity | Fixture test asserts sidecar JSON keys match DB response column names for the same asset (canonical field set). Fails if a key exists in one but not the other — guards against drift where storage-browser and asset-panel would render differently for the same file. |
 | Existing tests (processing pills, selection) | Unchanged |
 
 Mock `useDataEnginePipelines` to return a realistic 3-pipeline config. Use `fireEvent.click` / `fireEvent.change` (codebase standard).
@@ -326,24 +335,35 @@ No new contract tests. Contracts touched:
 
 ### Manual smoke-test checklist (post-merge, `10.143.2.102`)
 
-1. Asset browser → `.exr` → side panel shows >20 metadata fields, preview renders as image.
-2. Asset browser → `.mov` → side panel shows video metadata (previously `DB · empty`), preview renders as playable `<video>`.
-3. Storage browser → bucket navigation → `.exr` → image preview, metadata renders.
-4. Storage browser → `.mov` → video preview (previously broken-image placeholder), metadata renders.
-5. Storage browser → `.jpg` → "No pipeline configured for .jpg" empty-state with working CTA.
-6. Storage browser → Process/Reprocess click → triggered-state pill appears (D.2 if in scope).
-7. Pipelines page → no console errors (no legacy endpoint calls).
-8. vastdb-query logs contain `metadata_lookup.fallback_hit` warn entries on video lookups.
+1. Asset browser → `.exr` → side panel shows >20 metadata fields. **Verify the VFX-critical fields are prominent and human-readably labelled in the grouped-by-family layout: channels list, parts/layers, color space, data window, display window, compression, pixel aspect.** Preview renders as image with `alt` text present.
+2. Asset browser → `.mov` → side panel shows video metadata (previously `DB · empty`), preview renders as playable `<video controls>` with poster thumbnail visible before play.
+3. Storage browser → bucket navigation → `.exr` → image preview with `alt` text, metadata renders from sidecar JSON.
+4. Storage browser → `.mov` → video preview (previously broken-image placeholder) plays in `<video>` element. If proxy format is not browser-compatible, the styled "Preview unavailable in this browser" empty-state is shown instead of a broken element.
+5. Storage browser → `.jpg` → "No pipeline configured for .jpg" empty-state with working CTA to `/automation/pipelines`.
+6. Storage browser → raw camera file (`.r3d` or `.braw`) → styled "No preview available for raw camera files" empty-state (consistent with `none` fallback styling, not bare text).
+7. Storage browser → Process/Reprocess click → triggered-state pill appears (D.2 if in scope).
+8. Pipelines page → no console errors (no legacy endpoint calls).
+9. vastdb-query logs contain `metadata_lookup.fallback_hit` warn entries on video lookups. **Counter metric `metadata_lookup_fallback_total` increments on Prometheus scrape.**
 
 ## Risks & mitigations
 
 | Risk | Mitigation |
 |---|---|
 | D.2 spike uncovers a deep root cause, blocks Layer C | Exit criteria defined upfront: carve out to `fix/process-actions` branch; Layer C ships without D.2. |
-| Legacy endpoint has an external caller we missed | Grep gate catches internal callers; for externals, the 60-second deprecation logging (rejected in Q2) isn't in scope — user confirmed no external callers exist. |
+| Legacy endpoint has an external caller we missed (render-farm, QC scripts, batch ingest) | Grep gate catches internal callers. External-caller safety is an open decision — see below. |
 | `useStorageSidecar` still uses static sets post-B | Accepted — classifier reshape preserves the sync fallback path so the hook's eligibility gate still works. Follow-up tracked in `metadata-routing.ts` JSDoc. |
-| Layer A fallback masks an extractor drift that ought to be fixed upstream | `warn` log gives ops visibility; rate-alert-able. Long-term fix is extractor alignment (tracked separately via `dataengine-functions` team). |
-| Response-shape parity for `fetchAssetMetadata` vs legacy lookups causes UI regressions | Vitest fixtures include both shapes; existing AssetDetailPanel and AssetBrowser tests already assert against the C-1b shape. |
+| Layer A fallback masks an extractor drift that ought to be fixed upstream | `warn` log + `metadata_lookup_fallback_total` counter give ops visibility with rate-alertability. Long-term fix is extractor alignment (tracked separately via `dataengine-functions` team). |
+| Layer A primary query's `s3_key OR file_path` predicate may full-scan if either column is unindexed | Implementer confirms index coverage via VastDB introspection during Layer A; if unindexed, primary query splits into two sequential probes. Pre-ship gate. |
+| Response-shape parity between sidecar JSON and DB response not asserted | Fixture test in Layer C Testing asserts field-name parity for a canonical asset — fails on drift. |
+| EXR UX regression from dropping bespoke channels/parts/color-space sections in favor of grouped-by-family layout | Manual smoke-test step 1 explicitly verifies VFX-critical fields are prominent and human-readably labelled. If labels are opaque, Layer C adds a display-label override map before ship. |
+| `<video>` tag fails silently if proxy format is not browser-compatible (ProRes, DNxHR, HEVC) | `fetchMediaUrls` source URL format is verified before ship. If not browser-compatible, the styled "Preview unavailable in this browser" empty-state fires — test asserts this fallback path. |
+
+## Open decisions (revisit before plan finalization)
+
+| Decision | Options | Current disposition |
+|---|---|---|
+| Deprecated endpoint safety net | (A) Clean delete per Q2. (B) Replace each deleted endpoint with a 410 Gone stub returning `{"error": "endpoint deprecated", "replacement": "/api/v1/metadata/lookup"}` for one release cycle — catches callers missed in grep (render-farm hooks, QC scripts). One-line per endpoint in FastAPI. | Open. Current spec is (A) per Q2; revisit once user evaluates external-caller risk. |
+| Empty-state copy tone | Current is developer-toned ("No pipeline configured for .jpg"). Softer Frame.io-style phrasing is possible. | Deferred — minor bikeshed; accept current copy for this cycle. |
 
 ## Out of scope
 
