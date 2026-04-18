@@ -91,4 +91,38 @@ describe("GET /api/v1/dataengine/pipelines/active", () => {
     // Should not 404 — the legacy prefix is registered alongside /api/v1
     assert.notEqual(res.statusCode, 404);
   });
+
+  it("preserves enabled: false in the active response after PUT", async () => {
+    // Configure a pipeline with enabled: false
+    const putRes = await app.inject({
+      method: "PUT",
+      url: "/api/v1/platform/settings",
+      headers: { "content-type": "application/json" },
+      payload: {
+        dataEnginePipelines: [
+          {
+            fileKind: "image",
+            functionName: "frame-metadata-extractor",
+            extensions: [".exr"],
+            targetSchema: "frame_metadata",
+            targetTable: "files",
+            sidecarSchemaId: "frame@1",
+            enabled: false,
+          },
+        ],
+      },
+    });
+    assert.equal(putRes.statusCode, 200);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/dataengine/pipelines/active?force=true",
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.pipelines.length, 1);
+    // `enabled: false` must be present in the config — not stripped by fast-serialize
+    assert.equal(body.pipelines[0].config.enabled, false,
+      "enabled: false must not be stripped from the response schema");
+  });
 });

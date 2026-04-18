@@ -12,8 +12,10 @@ Environment variables:
   VASTDB_SECRET_KEY   - S3 secret key (required)
   VASTDB_BUCKET       - Database bucket (default: sergio-db)
 
-  # oiio-proxy-generator / exr-inspector output (image path)
-  VASTDB_SCHEMA       - EXR metadata schema name (default: exr_metadata)
+  # frame-metadata-extractor output (image path). Renamed from exr_metadata
+  # to frame_metadata in the 2026-04 realignment — the extractor now covers
+  # EXR, DPX, TIFF, PNG, TGA, HDR, JPEG2000, Cineon all in one schema.
+  VASTDB_SCHEMA       - Image metadata schema name (default: frame_metadata)
 
   # video-metadata-extractor output (video path)
   VASTDB_VIDEO_SCHEMA - Video metadata schema name (default: video_metadata)
@@ -46,9 +48,11 @@ ACCESS_KEY = os.environ.get("VASTDB_ACCESS_KEY", "")
 SECRET_KEY = os.environ.get("VASTDB_SECRET_KEY", "")
 DEFAULT_BUCKET = os.environ.get("VASTDB_BUCKET", "sergio-db")
 
-# EXR metadata (oiio-proxy-generator / exr-inspector) — legacy var name kept
-# for back-compat with existing deployments.
-DEFAULT_SCHEMA = os.environ.get("VASTDB_SCHEMA", "exr_metadata_2")
+# Image metadata (frame-metadata-extractor). The var name VASTDB_SCHEMA is
+# kept for back-compat with existing deployments; the default was updated
+# from exr_metadata to frame_metadata in 2026-04 when the extractor
+# consolidated all image formats into a single schema.
+DEFAULT_SCHEMA = os.environ.get("VASTDB_SCHEMA", "frame_metadata")
 
 # Video metadata (video-metadata-extractor). Schema and table are both
 # env-configurable — the functions team owns the table definition and may

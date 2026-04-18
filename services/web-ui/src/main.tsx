@@ -120,6 +120,9 @@ const WorkflowsPage = React.lazy(() =>
 const NamingTemplatesPage = React.lazy(() =>
   import("./pages/admin/NamingTemplatesPage").then((m) => ({ default: m.NamingTemplatesPage }))
 );
+const MetadataPipelinesPage = React.lazy(() =>
+  import("./pages/admin/MetadataPipelinesPage").then((m) => ({ default: m.MetadataPipelinesPage }))
+);
 const PluginsPage = React.lazy(() =>
   import("./pages/admin/PluginsPage").then((m) => ({ default: m.PluginsPage }))
 );
@@ -214,6 +217,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="automation/triggers" element={<Lazy><TriggersPage /></Lazy>} />
             <Route path="automation/webhooks" element={<Lazy><WebhooksPage /></Lazy>} />
             <Route path="automation/workflows" element={<Lazy><WorkflowsPage /></Lazy>} />
+            <Route path="automation/pipelines" element={<Lazy><MetadataPipelinesPage /></Lazy>} />
             <Route path="automation/naming-templates" element={<Lazy><NamingTemplatesPage /></Lazy>} />
             <Route path="automation/plugins" element={<Lazy><PluginsPage /></Lazy>} />
             <Route path="automation/dispatches" element={<Lazy><DispatchesPage /></Lazy>} />

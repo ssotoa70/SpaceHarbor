@@ -5,6 +5,8 @@ import {
   PipelineDiscoveryService,
   type FunctionFetcher,
   type LiveFunctionRecord,
+  type TargetProbe,
+  type TargetProbeResult,
 } from "../src/data-engine/discovery.js";
 import type { DataEnginePipelineConfig } from "../src/data-engine/pipeline-config.js";
 
@@ -69,6 +71,18 @@ function throwingFetcher(message: string): FunctionFetcher {
   };
 }
 
+/** Build a TargetProbe that always returns the given result. */
+function staticProbe(result: TargetProbeResult): TargetProbe & { callCount: () => number } {
+  let calls = 0;
+  return {
+    check: async () => {
+      calls += 1;
+      return result;
+    },
+    callCount: () => calls,
+  };
+}
+
 describe("PipelineDiscoveryService — merge logic", () => {
   it("merges config + live record on happy path", async () => {
     const fetcher = staticFetcher({
@@ -130,7 +144,7 @@ describe("PipelineDiscoveryService — merge logic", () => {
 describe("PipelineDiscoveryService — cache", () => {
   it("serves from cache within TTL without re-fetching", async () => {
     const fetcher = staticFetcher({ "frame-metadata-extractor": liveFrame });
-    const svc = new PipelineDiscoveryService(() => [frameConfig], fetcher, 60_000);
+    const svc = new PipelineDiscoveryService(() => [frameConfig], fetcher, undefined, 60_000);
 
     await svc.discover();
     await svc.discover();
@@ -145,6 +159,7 @@ describe("PipelineDiscoveryService — cache", () => {
     const svc = new PipelineDiscoveryService(
       () => [frameConfig],
       fetcher,
+      undefined,
       1000,
       () => currentTime,
     );
@@ -221,5 +236,63 @@ describe("PipelineDiscoveryService — cache", () => {
 
     const second = await svc.discover();
     assert.equal(second.length, 2);
+  });
+});
+
+describe("PipelineDiscoveryService — target probe", () => {
+  it("probe not called when function-not-found (short-circuits)", async () => {
+    const fetcher = staticFetcher({}); // every name returns null → function-not-found
+    const probe = staticProbe({ status: "ok" });
+    const svc = new PipelineDiscoveryService(() => [frameConfig], fetcher, probe);
+
+    const result = await svc.discover();
+    assert.equal(result[0].status, "function-not-found");
+    assert.equal(probe.callCount(), 0, "probe must NOT be called when function-not-found");
+  });
+
+  it("target-not-found surfaces as pipeline status + detail", async () => {
+    const fetcher = staticFetcher({ "frame-metadata-extractor": liveFrame });
+    const probe = staticProbe({
+      status: "target-not-found",
+      detail: "Schema/table not found: {'bucket': 'db', 'schema': 'bad_schema'}",
+    });
+    const svc = new PipelineDiscoveryService(() => [frameConfig], fetcher, probe);
+
+    const result = await svc.discover();
+    assert.equal(result[0].status, "target-not-found");
+    assert.match(result[0].statusDetail ?? "", /bad_schema/);
+    assert.equal(result[0].live?.guid, liveFrame.guid, "live record still populated");
+  });
+
+  it("target-unreachable surfaces as pipeline status + detail", async () => {
+    const fetcher = staticFetcher({ "frame-metadata-extractor": liveFrame });
+    const probe = staticProbe({
+      status: "target-unreachable",
+      detail: "vastdb-query unreachable: fetch failed: connect ECONNREFUSED",
+    });
+    const svc = new PipelineDiscoveryService(() => [frameConfig], fetcher, probe);
+
+    const result = await svc.discover();
+    assert.equal(result[0].status, "target-unreachable");
+    assert.match(result[0].statusDetail ?? "", /ECONNREFUSED/);
+  });
+
+  it("probe ok + function ok = pipeline ok", async () => {
+    const fetcher = staticFetcher({ "frame-metadata-extractor": liveFrame });
+    const probe = staticProbe({ status: "ok" });
+    const svc = new PipelineDiscoveryService(() => [frameConfig], fetcher, probe);
+
+    const result = await svc.discover();
+    assert.equal(result[0].status, "ok");
+    assert.equal(probe.callCount(), 1);
+  });
+
+  it("no probe injected = pipeline ok regardless of target (backward compat)", async () => {
+    const fetcher = staticFetcher({ "frame-metadata-extractor": liveFrame });
+    // No probe passed — 3rd constructor arg omitted
+    const svc = new PipelineDiscoveryService(() => [frameConfig], fetcher);
+
+    const result = await svc.discover();
+    assert.equal(result[0].status, "ok");
   });
 });

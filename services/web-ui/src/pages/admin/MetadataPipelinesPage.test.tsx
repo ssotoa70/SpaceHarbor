@@ -1,0 +1,429 @@
+// services/web-ui/src/pages/admin/MetadataPipelinesPage.test.tsx
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import * as api from "../../api";
+import { MetadataPipelinesPage } from "./MetadataPipelinesPage";
+
+describe("MetadataPipelinesPage", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("renders the title while loading", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockImplementation(
+      () => new Promise(() => {}), // never resolves
+    );
+    render(<MetadataPipelinesPage />);
+    expect(screen.getByRole("heading", { name: /metadata pipelines/i })).toBeInTheDocument();
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+  });
+
+  it("renders empty-state seed button when no pipelines are configured", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: [] });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /seed defaults/i })).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a fetch error as a banner", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockRejectedValue(
+      new Error("boom"),
+    );
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByText(/boom/)).toBeInTheDocument());
+  });
+
+  it("renders a row per configured pipeline with status pills", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [
+        {
+          config: {
+            fileKind: "image",
+            functionName: "frame-metadata-extractor",
+            extensions: [".exr", ".dpx"],
+            targetSchema: "frame_metadata",
+            targetTable: "files",
+            sidecarSchemaId: "frame@1",
+            enabled: true,
+          },
+          live: null,
+          status: "ok" as api.DiscoveredPipelineStatus,
+        },
+        {
+          config: {
+            fileKind: "video",
+            functionName: "video-metadata-extractor",
+            extensions: [".mov"],
+            targetSchema: "video_metadata",
+            targetTable: "files",
+            sidecarSchemaId: "video@1",
+            enabled: false,
+          },
+          live: null,
+          status: "function-not-found" as api.DiscoveredPipelineStatus,
+          statusDetail: "no VAST function named 'video-metadata-extractor'",
+        },
+        {
+          config: {
+            fileKind: "raw_camera",
+            functionName: "raw-metadata-extractor",
+            extensions: [".r3d"],
+            targetSchema: "bad_schema",
+            targetTable: "files",
+            sidecarSchemaId: "raw@1",
+            enabled: true,
+          },
+          live: null,
+          status: "target-not-found" as api.DiscoveredPipelineStatus,
+          statusDetail: "Schema/table not found: {'bucket': 'sergio-db', 'schema': 'bad_schema'}",
+        },
+      ],
+    });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    expect(screen.getByText("frame-metadata-extractor")).toBeInTheDocument();
+    expect(screen.getByText(/frame_metadata\.files/)).toBeInTheDocument();
+    expect(screen.getByText(/OK/i)).toBeInTheDocument();
+    expect(screen.getByText(/not found/i)).toBeInTheDocument();
+    expect(screen.getByText(/target missing/i)).toBeInTheDocument();
+
+    // statusDetail surfaces as a tooltip (title attribute)
+    const notFoundPill = screen.getByText(/not found/i);
+    expect(notFoundPill.closest("[title]")?.getAttribute("title"))
+      .toMatch(/no VAST function named/);
+
+    // target-not-found pill shows warning badge with "Target missing" label and correct tooltip
+    const targetMissingPill = screen.getByText(/target missing/i);
+    expect(targetMissingPill.closest("[title]")?.getAttribute("title"))
+      .toMatch(/bad_schema/);
+  });
+
+  it("inline toggle saves the full mutated array", async () => {
+    const initial: api.DiscoveredPipeline[] = [
+      {
+        config: {
+          fileKind: "image", functionName: "fn-img", extensions: [".exr"],
+          targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+          enabled: true,
+        },
+        live: null, status: "ok",
+      },
+      {
+        config: {
+          fileKind: "video", functionName: "fn-vid", extensions: [".mov"],
+          targetSchema: "s2", targetTable: "t2", sidecarSchemaId: "video@1",
+          enabled: true,
+        },
+        live: null, status: "ok",
+      },
+    ];
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: initial });
+    const saveSpy = vi.spyOn(api, "saveMetadataPipelines").mockResolvedValue();
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByText("fn-img")).toBeInTheDocument());
+
+    const imgToggle = screen.getByRole("switch", { name: /toggle image/i });
+    fireEvent.click(imgToggle);
+
+    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+    const arg = saveSpy.mock.calls[0][0];
+    expect(arg).toHaveLength(2);
+    expect(arg.find((p) => p.fileKind === "image")?.enabled).toBe(false);
+    expect(arg.find((p) => p.fileKind === "video")?.enabled).toBe(true);
+  });
+
+  it("rolls back the toggle when save fails", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      }],
+    });
+    vi.spyOn(api, "saveMetadataPipelines").mockRejectedValue(new Error("PUT failed"));
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("switch", { name: /toggle image/i })).toBeInTheDocument());
+
+    const toggle = screen.getByRole("switch", { name: /toggle image/i });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+
+    // After rollback, toggle returns to true and error banner appears
+    await waitFor(() => expect(screen.getByText(/PUT failed/)).toBeInTheDocument());
+    expect(screen.getByRole("switch", { name: /toggle image/i }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("refresh button re-fetches with force=true", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: [] });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(fetchSpy.mock.calls[1][0]).toEqual({ force: true });
+  });
+
+  it("seed-defaults fetches defaults, PUTs, then force-reloads", async () => {
+    const seedList: api.DataEnginePipelineConfig[] = [
+      { fileKind: "image", functionName: "fn", extensions: [".exr"],
+        targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1" },
+      { fileKind: "video", functionName: "fn2", extensions: [".mov"],
+        targetSchema: "s2", targetTable: "t2", sidecarSchemaId: "video@1" },
+    ];
+    const fetchSpy = vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: [] });
+    vi.spyOn(api, "fetchMetadataPipelineDefaults").mockResolvedValue(seedList);
+    const saveSpy = vi.spyOn(api, "saveMetadataPipelines").mockResolvedValue();
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /seed defaults/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /seed defaults/i }));
+
+    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+    expect(saveSpy.mock.calls[0][0]).toEqual(seedList);
+    // After seed, a force-reload happens
+    await waitFor(() => expect(fetchSpy.mock.calls.some((c) => c[0]?.force === true)).toBe(true));
+  });
+
+  it("seed-defaults disabled + banner after loader failure", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: [] });
+    vi.spyOn(api, "fetchMetadataPipelineDefaults").mockRejectedValue(new Error("seed boom"));
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /seed defaults/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /seed defaults/i }));
+
+    await waitFor(() => expect(screen.getByText(/seed boom/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /seed defaults/i })).toBeDisabled();
+  });
+
+  it("shows 'seed missing' banner + appends only missing kinds", async () => {
+    // 1 kind configured (image), 2 missing (video + raw_camera)
+    const existing: api.DiscoveredPipeline[] = [
+      {
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      },
+    ];
+    const fullDefaults: api.DataEnginePipelineConfig[] = [
+      { fileKind: "image", functionName: "fn-d-img", extensions: [".exr"],
+        targetSchema: "sd", targetTable: "td", sidecarSchemaId: "frame@1" },
+      { fileKind: "video", functionName: "fn-d-vid", extensions: [".mov"],
+        targetSchema: "sd", targetTable: "td", sidecarSchemaId: "video@1" },
+      { fileKind: "raw_camera", functionName: "fn-d-raw", extensions: [".r3d"],
+        targetSchema: "sd", targetTable: "td", sidecarSchemaId: "video@1" },
+    ];
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: existing });
+    vi.spyOn(api, "fetchMetadataPipelineDefaults").mockResolvedValue(fullDefaults);
+    const saveSpy = vi.spyOn(api, "saveMetadataPipelines").mockResolvedValue();
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByText(/missing pipelines for: video, raw_camera/i))
+      .toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /seed missing/i }));
+
+    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+    const arg = saveSpy.mock.calls[0][0];
+    // Preserves existing image config; appends the two missing kinds from defaults
+    expect(arg).toHaveLength(3);
+    expect(arg.find((p) => p.fileKind === "image")?.functionName).toBe("fn");
+    expect(arg.find((p) => p.fileKind === "video")?.functionName).toBe("fn-d-vid");
+    expect(arg.find((p) => p.fileKind === "raw_camera")?.functionName).toBe("fn-d-raw");
+  });
+
+  it("opens edit dialog prefilled from row config; fileKind is read-only", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "original-fn", extensions: [".exr", ".dpx"],
+                  targetSchema: "orig_schema", targetTable: "orig_table", sidecarSchemaId: "frame@1",
+                  enabled: true, displayLabel: "Original Label" },
+        live: null, status: "ok",
+      }],
+    });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect((screen.getByLabelText(/function name/i) as HTMLInputElement).value).toBe("original-fn");
+    expect((screen.getByLabelText(/target schema/i) as HTMLInputElement).value).toBe("orig_schema");
+    expect((screen.getByLabelText(/target table/i) as HTMLInputElement).value).toBe("orig_table");
+    expect((screen.getByLabelText(/file kind/i) as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("save merges the edited entry and leaves other rows untouched", async () => {
+    const initial: api.DiscoveredPipeline[] = [
+      {
+        config: { fileKind: "image", functionName: "fn-img", extensions: [".exr"],
+                  targetSchema: "s-img", targetTable: "t-img", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      },
+      {
+        config: { fileKind: "video", functionName: "fn-vid", extensions: [".mov"],
+                  targetSchema: "s-vid", targetTable: "t-vid", sidecarSchemaId: "video@1",
+                  enabled: true },
+        live: null, status: "ok",
+      },
+    ];
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: initial });
+    const saveSpy = vi.spyOn(api, "saveMetadataPipelines").mockResolvedValue();
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByText("fn-img")).toBeInTheDocument());
+
+    // Open the first row's edit dialog
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+
+    const schemaInput = screen.getByLabelText(/target schema/i) as HTMLInputElement;
+    fireEvent.change(schemaInput, { target: { value: "new_schema" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+    const arg = saveSpy.mock.calls[0][0];
+    expect(arg.find((p) => p.fileKind === "image")?.targetSchema).toBe("new_schema");
+    // video row must be unchanged
+    expect(arg.find((p) => p.fileKind === "video")?.targetSchema).toBe("s-vid");
+    expect(arg.find((p) => p.fileKind === "video")?.functionName).toBe("fn-vid");
+  });
+
+  it("surfaces server validation error inline and keeps dialog open", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      }],
+    });
+    vi.spyOn(api, "saveMetadataPipelines").mockRejectedValue(
+      new Error("pipelines[0]: sidecarSchemaId must match /^[a-z][a-z0-9_-]*@.../")
+    );
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(screen.getByText(/sidecarSchemaId must match/)).toBeInTheDocument());
+    // Dialog remains open
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("renders live VAST record details when live !== null", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: {
+          guid: "abc-123",
+          name: "fn",
+          description: "Extract frame metadata",
+          owner: null,
+          createdAt: "2026-03-01T00:00:00Z",
+          updatedAt: "2026-04-10T00:00:00Z",
+          vrn: "vrn:vast:fn:abc",
+          lastRevisionNumber: 5,
+        },
+        status: "ok",
+      }],
+    });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByText(/abc-123/)).toBeInTheDocument();
+    expect(screen.getByText(/Extract frame metadata/)).toBeInTheDocument();
+    expect(screen.getByText(/#5/)).toBeInTheDocument();
+    expect(screen.getByText(/vrn:vast:fn:abc/)).toBeInTheDocument();
+  });
+
+  it("renders 'Not currently resolved' when live is null", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "function-not-found",
+      }],
+    });
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByText(/not currently resolved/i)).toBeInTheDocument();
+  });
+
+  it("lookup uses in-form (unsaved) targetSchema and targetTable values", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "saved_schema", targetTable: "saved_table",
+                  sidecarSchemaId: "frame@1", enabled: true },
+        live: null, status: "ok",
+      }],
+    });
+    const lookupSpy = vi.spyOn(api, "testMetadataLookup").mockResolvedValue({
+      count: 1, rows: [{ file: "test.exr" }], matched_by: "path",
+    });
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    // Change targetSchema in the form (not yet saved)
+    const schemaInput = screen.getByLabelText(/target schema/i) as HTMLInputElement;
+    fireEvent.change(schemaInput, { target: { value: "unsaved_schema" } });
+
+    // Fill S3 path and run lookup
+    const pathInput = screen.getByLabelText(/S3 path/i);
+    fireEvent.change(pathInput, { target: { value: "s3://bucket/test.exr" } });
+    fireEvent.click(screen.getByRole("button", { name: /run test/i }));
+
+    await waitFor(() => expect(lookupSpy).toHaveBeenCalled());
+    const callArgs = lookupSpy.mock.calls[0][0];
+    expect(callArgs.schema).toBe("unsaved_schema");
+    expect(callArgs.table).toBe("saved_table");
+    expect(callArgs.path).toBe("s3://bucket/test.exr");
+    await waitFor(() => expect(screen.getByText(/1 row/)).toBeInTheDocument());
+  });
+
+  it("lookup error renders inline but save button stays enabled", async () => {
+    vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({
+      pipelines: [{
+        config: { fileKind: "image", functionName: "fn", extensions: [".exr"],
+                  targetSchema: "s", targetTable: "t", sidecarSchemaId: "frame@1",
+                  enabled: true },
+        live: null, status: "ok",
+      }],
+    });
+    vi.spyOn(api, "testMetadataLookup").mockRejectedValue(new Error("lookup boom"));
+
+    render(<MetadataPipelinesPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    const pathInput = screen.getByLabelText(/S3 path/i);
+    fireEvent.change(pathInput, { target: { value: "s3://bucket/test.exr" } });
+    fireEvent.click(screen.getByRole("button", { name: /run test/i }));
+
+    await waitFor(() => expect(screen.getByText(/lookup boom/)).toBeInTheDocument());
+
+    // Save button must remain enabled (error is informational only)
+    expect(screen.getByRole("button", { name: /save changes/i })).not.toBeDisabled();
+  });
+});

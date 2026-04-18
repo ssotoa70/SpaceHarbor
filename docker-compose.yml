@@ -198,7 +198,12 @@ services:
       VASTDB_ACCESS_KEY: ${VAST_ACCESS_KEY:-}
       VASTDB_SECRET_KEY: ${VAST_SECRET_KEY:-}
       VASTDB_BUCKET: ${VASTDB_BUCKET:-}
-      VASTDB_SCHEMA: ${VASTDB_SCHEMA:-exr_metadata}
+      # Schema used by the legacy /exr-metadata/* endpoints. Renamed from
+      # exr_metadata to frame_metadata in the 2026-04 pipeline realignment:
+      # the frame-metadata-extractor writes everything (EXR, DPX, TIFF, PNG,
+      # HDR, JPEG2000, Cineon) into frame_metadata.files. Override per-deploy
+      # if a different schema name is in use.
+      VASTDB_SCHEMA: ${VASTDB_SCHEMA:-frame_metadata}
       # video-metadata-extractor writes into a separate schema — name is
       # env-configurable so the functions team can rename without touching code.
       VASTDB_VIDEO_SCHEMA: ${VASTDB_VIDEO_SCHEMA:-video_metadata}
