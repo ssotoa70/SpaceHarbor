@@ -294,3 +294,41 @@ class TestMetadataLookupBucketStrippedFallback:
         # No fallback-indicating field leaks to the caller
         assert "matched_via" not in body
         assert "fallback" not in body
+
+    def test_fallback_hit_increments_counter(self, monkeypatch):
+        """Each fallback hit increments metadata_lookup_fallback_total,
+        labelled by schema and table."""
+        from main import metadata_lookup_fallback_total
+
+        before = metadata_lookup_fallback_total.labels(
+            schema="video_metadata", table="files"
+        )._value.get()
+
+        bkt, _table = _stub_bucket()
+        all_rows = [{"s3_key": "uploads/metric.mov"}]
+        monkeypatch.setattr(app_module, "vast_transaction",
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: all_rows)
+
+        r = client.get(
+            "/api/v1/metadata/lookup",
+            params={"path": "sergio-spaceharbor/uploads/metric.mov",
+                    "schema": "video_metadata", "table": "files"},
+        )
+        assert r.status_code == 200
+        assert r.json()["count"] == 1
+
+        after = metadata_lookup_fallback_total.labels(
+            schema="video_metadata", table="files"
+        )._value.get()
+        assert after == before + 1, f"counter did not increment: before={before} after={after}"
+
+    def test_metrics_endpoint_exposes_counter(self):
+        """/metrics returns Prometheus exposition format including the
+        metadata_lookup_fallback_total counter."""
+        r = client.get("/metrics")
+        assert r.status_code == 200
+        # Prometheus format — plain text, content-type matters for scrapers
+        assert "text/plain" in r.headers.get("content-type", "")
+        assert "metadata_lookup_fallback_total" in r.text

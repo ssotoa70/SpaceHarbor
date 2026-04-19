@@ -2,3 +2,4 @@ fastapi==0.115.12
 uvicorn[standard]==0.34.2
 vastdb>=1.2.0
 pyarrow>=15.0.0
+prometheus-client>=0.20.0

@@ -33,8 +33,9 @@ from typing import Optional
 
 import pyarrow as pa
 import vastdb
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("vastdb-query")
@@ -74,6 +75,22 @@ MATCH_COLUMN_PRIORITY: tuple[str, ...] = (
     "uri",
 )
 
+# ---------------------------------------------------------------------------
+# Prometheus metrics
+# ---------------------------------------------------------------------------
+# Counter incremented each time /api/v1/metadata/lookup falls back from the
+# primary bucket-prefixed key to the bucket-stripped variant. A sustained
+# rate indicates extractor drift (the video-metadata-extractor stores
+# s3_key without the bucket prefix while callers uniformly send the
+# prefixed form). Ops should alert on rate(metadata_lookup_fallback_total[5m])
+# exceeding 10% of rate(metadata_lookup_total[5m]) — that threshold is
+# empirical; tune per deployment.
+metadata_lookup_fallback_total = Counter(
+    "metadata_lookup_fallback_total",
+    "Count of /metadata/lookup calls that hit via the bucket-stripped fallback path",
+    ["schema", "table"],
+)
+
 
 def resolve_match_column(column_names: list[str]) -> Optional[str]:
     """Return the first column from MATCH_COLUMN_PRIORITY that is present in
@@ -93,6 +110,15 @@ app = FastAPI(
     description="Query VAST Database tables created by DataEngine functions",
     version="1.0.0",
 )
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics():
+    """Prometheus scrape endpoint. Exposes all registered metrics in the
+    standard text-based exposition format. No authentication — intended
+    for scraping by a trusted in-cluster Prometheus agent."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -685,6 +711,9 @@ def metadata_lookup(
                             "metadata_lookup.fallback_hit path=%s fallback=%s schema=%s table=%s match_col=%s",
                             path, fallback_key, schema, table, match_col,
                         )
+                        metadata_lookup_fallback_total.labels(
+                            schema=schema, table=table
+                        ).inc()
 
             return {
                 "rows": rows,
