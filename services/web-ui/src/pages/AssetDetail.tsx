@@ -165,16 +165,19 @@ export function AssetDetail() {
                 </dl>
                 {/* AOV / Channel pills — sourced from frame-metadata-extractor sidecar JSON */}
                 {(() => {
-                  const sidecarChannels = metadata.sidecar?.channels as
-                    | Array<{
-                        channel_name: string;
-                        layer_name?: string;
-                        component_name?: string;
-                        channel_type?: string;
-                        part_index?: number;
-                      }>
-                    | undefined;
-                  if (!sidecarChannels || sidecarChannels.length === 0) return null;
+                  const rawChannels = metadata.sidecar?.channels;
+                  if (!Array.isArray(rawChannels)) return null;
+                  const sidecarChannels = (rawChannels as Array<{
+                    channel_name?: string;
+                    layer_name?: string;
+                    component_name?: string;
+                    channel_type?: string;
+                    part_index?: number;
+                  }>).filter(
+                    (ch): ch is Required<Pick<typeof ch, "channel_name">> & typeof ch =>
+                      typeof ch.channel_name === "string"
+                  );
+                  if (sidecarChannels.length === 0) return null;
                   return (
                     <div className="mt-3 pt-3 border-t border-[var(--color-ah-border-muted)]">
                       <h3 className="text-xs font-semibold text-[var(--color-ah-text-muted)] mb-2">
