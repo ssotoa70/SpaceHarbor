@@ -624,6 +624,14 @@ def metadata_lookup(
     to env-bound schemas), this endpoint takes schema + table per request.
     Intended caller: control-plane /assets/:id/metadata, which passes the
     asset's pipeline config's targetSchema/targetTable.
+
+    Bucket-stripped fallback (Bug B): video-metadata-extractor stores
+    s3_key WITHOUT bucket prefix, while frame-metadata-extractor stores
+    file_path WITH bucket prefix. Callers uniformly send the bucket-
+    prefixed form. If the primary match is empty AND the path contains
+    a slash, we re-filter the already-fetched rows with the bucket
+    stripped. A warn log fires on fallback hit so ops can spot extractor
+    drift.
     """
     key = _strip_s3_prefix(path)
     target_bucket = bucket or DEFAULT_BUCKET
@@ -663,7 +671,21 @@ def metadata_lookup(
                         f"{list(MATCH_COLUMN_PRIORITY)}; got {column_names}."
                     ),
                 )
+            # Primary: filter by the bucket-prefixed key (callers' canonical form)
             rows = [r for r in all_rows if r.get(match_col) == key]
+
+            # Bucket-stripped fallback. Only re-filter if primary was empty
+            # AND path has something left after the first slash to strip.
+            if not rows and "/" in key:
+                fallback_key = key.split("/", 1)[1]
+                if fallback_key:  # guard against trailing slash edge case
+                    rows = [r for r in all_rows if r.get(match_col) == fallback_key]
+                    if rows:
+                        logger.warning(
+                            "metadata_lookup.fallback_hit path=%s fallback=%s schema=%s table=%s match_col=%s",
+                            path, fallback_key, schema, table, match_col,
+                        )
+
             return {
                 "rows": rows,
                 "bucket": target_bucket,

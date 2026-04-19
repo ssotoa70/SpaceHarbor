@@ -182,3 +182,115 @@ class TestMetadataLookupEndpoint:
         assert r.status_code == 200
         assert r.json()["count"] == 0
         assert r.json()["rows"] == []
+
+
+class TestMetadataLookupBucketStrippedFallback:
+    """Bug B fix: when primary match returns zero rows, retry with the
+    bucket-stripped key variant. Video extractor stores s3_key WITHOUT
+    bucket prefix; EXR extractor stores file_path WITH bucket prefix.
+    Callers uniformly send the bucket-prefixed form."""
+
+    def test_fallback_hits_when_primary_empty_and_path_has_slash(self, monkeypatch, caplog):
+        """Primary match on `sergio-spaceharbor/uploads/foo.mov` misses.
+        Fallback strips to `uploads/foo.mov` — that matches. Response
+        count should be 1."""
+        bkt, _table = _stub_bucket()
+        all_rows = [
+            {"s3_key": "uploads/foo.mov", "width": 1920, "duration": 42.0},
+        ]
+        monkeypatch.setattr(app_module, "vast_transaction",
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: all_rows)
+
+        with caplog.at_level("WARNING"):
+            r = client.get(
+                "/api/v1/metadata/lookup",
+                params={"path": "sergio-spaceharbor/uploads/foo.mov",
+                        "schema": "video_metadata", "table": "files"},
+            )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["count"] == 1
+        assert body["matched_by"] == "s3_key"
+        assert body["rows"][0]["duration"] == 42.0
+        # Warn log captured with structured fields
+        fallback_logs = [
+            rec for rec in caplog.records
+            if "metadata_lookup.fallback_hit" in rec.getMessage()
+        ]
+        assert len(fallback_logs) == 1, "expected exactly one fallback_hit warn log"
+
+    def test_fallback_skipped_when_path_has_no_slash(self, monkeypatch, caplog):
+        """Path without `/` (e.g. bare filename) — fallback has nothing
+        to strip. Return the empty primary result without a warn log."""
+        bkt, _table = _stub_bucket()
+        all_rows = [{"s3_key": "uploads/foo.mov"}]
+        monkeypatch.setattr(app_module, "vast_transaction",
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: all_rows)
+
+        with caplog.at_level("WARNING"):
+            r = client.get(
+                "/api/v1/metadata/lookup",
+                params={"path": "bogus.mov",
+                        "schema": "video_metadata", "table": "files"},
+            )
+
+        assert r.status_code == 200
+        assert r.json()["count"] == 0
+        fallback_logs = [
+            rec for rec in caplog.records
+            if "metadata_lookup.fallback_hit" in rec.getMessage()
+        ]
+        assert len(fallback_logs) == 0
+
+    def test_fallback_miss_returns_empty_no_warn(self, monkeypatch, caplog):
+        """Both primary and fallback miss. Response count=0, no warn log
+        (genuine empty is expected, not a drift signal)."""
+        bkt, _table = _stub_bucket()
+        all_rows = [{"s3_key": "uploads/other.mov"}]
+        monkeypatch.setattr(app_module, "vast_transaction",
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: all_rows)
+
+        with caplog.at_level("WARNING"):
+            r = client.get(
+                "/api/v1/metadata/lookup",
+                params={"path": "sergio-spaceharbor/uploads/missing.mov",
+                        "schema": "video_metadata", "table": "files"},
+            )
+
+        assert r.status_code == 200
+        assert r.json()["count"] == 0
+        fallback_logs = [
+            rec for rec in caplog.records
+            if "metadata_lookup.fallback_hit" in rec.getMessage()
+        ]
+        assert len(fallback_logs) == 0
+
+    def test_fallback_preserves_response_shape(self, monkeypatch):
+        """Fallback-hit response shape must be IDENTICAL to primary-hit
+        response shape — callers don't know which path matched."""
+        bkt, _table = _stub_bucket()
+        all_rows = [{"s3_key": "uploads/baz.mov", "codec": "h264"}]
+        monkeypatch.setattr(app_module, "vast_transaction",
+                            lambda bucket=None: _ctx(bkt))
+        monkeypatch.setattr(app_module, "table_to_records",
+                            lambda table_obj, limit=10000, columns=None: all_rows)
+
+        r = client.get(
+            "/api/v1/metadata/lookup",
+            params={"path": "sergio-spaceharbor/uploads/baz.mov",
+                    "schema": "video_metadata", "table": "files"},
+        )
+
+        body = r.json()
+        # Exact key set — same as primary-hit response
+        assert set(body.keys()) == {"rows", "bucket", "schema", "table", "matched_by", "count"}
+        # No fallback-indicating field leaks to the caller
+        assert "matched_via" not in body
+        assert "fallback" not in body
