@@ -82,9 +82,9 @@ MATCH_COLUMN_PRIORITY: tuple[str, ...] = (
 # primary bucket-prefixed key to the bucket-stripped variant. A sustained
 # rate indicates extractor drift (the video-metadata-extractor stores
 # s3_key without the bucket prefix while callers uniformly send the
-# prefixed form). Ops should alert on rate(metadata_lookup_fallback_total[5m])
-# exceeding 10% of rate(metadata_lookup_total[5m]) — that threshold is
-# empirical; tune per deployment.
+# prefixed form). Ops should alert when rate(metadata_lookup_fallback_total[5m])
+# is sustained above ~0.5/s — that threshold is empirical; tune per deployment.
+# (A request-total counter may be added later to enable ratio-based alerting.)
 metadata_lookup_fallback_total = Counter(
     "metadata_lookup_fallback_total",
     "Count of /metadata/lookup calls that hit via the bucket-stripped fallback path",
