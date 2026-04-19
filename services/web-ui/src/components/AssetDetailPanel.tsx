@@ -1340,10 +1340,11 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
       <FrameBar info={info} />
 
       {/* AOV tag pills — show channel layers from EXR metadata (images only) */}
-      {mediaType === "image" && (
+      {mediaType === "image" && Array.isArray(panelMetadata.data?.sidecar?.channels) &&
+       (panelMetadata.data?.sidecar?.channels as unknown[]).length > 0 && (
         <div className="px-4 py-2 border-b border-[var(--color-ah-border-muted)]">
           <ChannelPills
-            channels={panelMetadata.data?.sidecar?.channels}
+            channels={panelMetadata.data!.sidecar!.channels}
             mode="dedup-by-layer"
             containerClassName="flex flex-wrap gap-1.5"
             pillClassName="px-2 py-0.5 rounded-full text-[10px] font-[var(--font-ah-mono)] border border-[var(--color-ah-border)] text-[var(--color-ah-text-muted)] bg-[var(--color-ah-bg)]"
