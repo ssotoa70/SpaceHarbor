@@ -17,6 +17,15 @@ vi.mock("../api", () => ({
     { id: "e1", message: "Asset ingested", at: "2026-03-10T10:00:00Z", signal: null },
     { id: "e2", message: "QC approved", at: "2026-03-10T11:00:00Z", signal: null },
   ]),
+  fetchAssetMetadata: vi.fn().mockResolvedValue({
+    assetId: "test-asset-1",
+    sourceUri: "s3://bucket/hero_comp_v003.exr",
+    fileKind: "exr",
+    pipeline: null,
+    sources: { db: "empty", sidecar: "missing" },
+    dbRows: [],
+    sidecar: null,
+  }),
 }));
 
 function renderAtRoute(path: string) {
