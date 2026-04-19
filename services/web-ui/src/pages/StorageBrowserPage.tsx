@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback, useRef, type DragEvent } from "react"
 import {
   fetchStorageEndpoints,
   fetchStorageBrowse,
-  fetchExrMetadataLookup,
-  fetchVideoMetadataLookup,
   fetchMediaUrls,
   fetchProcessingStatus,
   deriveDisplayState,
@@ -12,15 +10,15 @@ import {
   type StorageEndpoint,
   type StorageBrowseFile,
   type StorageBrowseFolder,
-  type ExrMetadataLookupResult,
-  type VideoMetadataLookupResult,
-  type MediaUrls,
   type ProcessingStatusEntry,
   type ProcessingDisplayState,
 } from "../api";
 import { IngestPanel } from "../components/IngestPanel";
 import { Button } from "../design-system";
-import { metadataKindForFilename } from "../utils/metadata-routing";
+import { useStorageSidecar } from "../hooks/useStorageSidecar";
+import { useDataEnginePipelines } from "../hooks/useDataEnginePipelines";
+import { classifyForPipelines } from "../utils/metadata-routing";
+import { ChannelPills } from "../components/ChannelPills";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -44,168 +42,150 @@ function mediaTypeColor(type: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// File Detail Sidebar — shows EXR metadata from the exr_metadata schema
+// File Detail Sidebar — sidecar-only metadata + format-correct preview
 // ---------------------------------------------------------------------------
 
 function FileDetailSidebar({ file, onClose }: { file: StorageBrowseFile; onClose: () => void }) {
-  const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
-  const [videoMeta, setVideoMeta] = useState<VideoMetadataLookupResult | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
   const filename = file.key.split("/").pop() ?? file.key;
-  const metadataKind = metadataKindForFilename(filename);
+  const ext = filename.includes(".")
+    ? filename.substring(filename.lastIndexOf(".")).toLowerCase()
+    : "";
+
+  // Classify the file using the live pipeline registry — no hardcoded ext lists.
+  const { pipelines } = useDataEnginePipelines();
+  const { kind } = classifyForPipelines(filename, pipelines.length > 0 ? pipelines : null);
+
+  // Sidecar metadata — the canonical format-neutral source of truth for this view.
+  const { sidecar, loading: sidecarLoading, error: sidecarError } = useStorageSidecar(file.sourceUri);
+  const sidecarData = (sidecar?.data as Record<string, unknown> | undefined) ?? null;
+
+  // Preview URL — same for all file kinds; the media-urls endpoint handles
+  // the .proxies/ convention internally.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    setExrMeta(null);
-    setVideoMeta(null);
     setPreviewUrl(null);
-
-    // Fetch metadata from the right service based on file kind. The EXR
-    // sidecar and the video sidecar have different schemas — don't hit
-    // both for every file, it just wastes calls.
-    if (metadataKind === "image") {
-      void fetchExrMetadataLookup(filename).then((res) => {
-        setExrMeta(res);
-        setLoading(false);
-      });
-    } else if (metadataKind === "video") {
-      void fetchVideoMetadataLookup(filename).then((res) => {
-        setVideoMeta(res);
-        setLoading(false);
-      });
-    } else {
-      setLoading(false); // no metadata expected for this extension
-    }
-
-    // Preview URL lookup is the same for all file kinds — the media-urls
-    // endpoint already handles the .proxies/ convention per file type.
+    setThumbnailUrl(null);
+    setPreviewFailed(false);
     void fetchMediaUrls(file.sourceUri).then((urls) => {
-      setPreviewUrl(urls.thumbnail ?? urls.source ?? null);
+      setThumbnailUrl(urls.thumbnail ?? null);
+      setPreviewUrl(urls.source ?? urls.thumbnail ?? null);
     });
-  }, [file.key, filename, file.sourceUri, metadataKind]);
-
-  const summary = exrMeta?.summary;
-  const parts = exrMeta?.parts ?? [];
-  const channels = exrMeta?.channels ?? [];
-  const part0 = parts[0];
+  }, [file.sourceUri]);
 
   return (
     <div className="w-96 border-l border-gray-700 bg-gray-900/95 overflow-y-auto flex flex-col shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-        <h3 className="text-sm font-semibold text-white truncate">{filename}</h3>
+        <h3 className="text-sm font-semibold text-white truncate" title={filename}>{filename}</h3>
         <button onClick={onClose} className="text-gray-400 hover:text-white text-lg leading-none">&times;</button>
       </div>
 
-      {/* Preview area */}
+      {/* Preview area — branches by pipeline-classified file kind */}
       <div className="h-48 bg-gray-950 flex items-center justify-center border-b border-gray-700">
-        {previewUrl ? (
-          <img src={previewUrl} alt={filename} className="max-h-full max-w-full object-contain" />
+        {kind === "image" && previewUrl && !previewFailed ? (
+          <img
+            src={previewUrl}
+            alt={filename}
+            className="max-h-full max-w-full object-contain"
+            onError={() => setPreviewFailed(true)}
+          />
+        ) : kind === "video" && previewUrl && !previewFailed ? (
+          <video
+            src={previewUrl}
+            poster={thumbnailUrl ?? undefined}
+            controls
+            className="max-h-full max-w-full"
+            onError={() => setPreviewFailed(true)}
+          />
+        ) : kind === "video" && previewFailed ? (
+          <div className="text-gray-500 text-xs font-mono px-4 text-center">
+            Preview unavailable in this browser
+          </div>
+        ) : kind === "raw_camera" ? (
+          <div className="text-gray-500 text-xs font-mono px-4 text-center">
+            No preview available for raw camera files
+          </div>
         ) : (
           <div className="text-gray-600 text-xs font-mono">No preview</div>
         )}
       </div>
 
-      {loading ? (
-        <div className="p-4 text-gray-500 text-sm">Loading metadata...</div>
-      ) : metadataKind === "image" && exrMeta?.found ? (
+      {/* AOV channel pills — images only, when sidecar has a channels array */}
+      {kind === "image" &&
+        Array.isArray(sidecarData?.channels) &&
+        (sidecarData?.channels as unknown[]).length > 0 && (
+          <div className="px-4 py-2 border-b border-gray-700">
+            <ChannelPills
+              channels={sidecarData!.channels}
+              mode="dedup-by-layer"
+              containerClassName="flex flex-wrap gap-1.5"
+            />
+          </div>
+        )}
+
+      {/* Metadata area — sourced from sidecar JSON, format-neutral */}
+      {sidecarLoading ? (
+        <div className="p-4 text-gray-500 text-sm">Loading metadata…</div>
+      ) : sidecarData ? (
         <div className="p-4 space-y-4">
-          {/* Summary section */}
-          {summary && (
-            <Section title="Image">
-              <DetailRow label="Resolution" value={summary.resolution} />
-              <DetailRow label="Channels" value={String(summary.channelCount)} />
-              <DetailRow label="Deep" value={summary.isDeep ? "Yes" : "No"} />
-              {summary.frameNumber != null && <DetailRow label="Frame" value={String(summary.frameNumber)} />}
-            </Section>
-          )}
-
-          {/* Technical section from part0 */}
-          {part0 && (
-            <Section title="Technical">
-              <DetailRow label="Compression" value={part0.compression} />
-              <DetailRow label="Color Space" value={part0.color_space ?? "-"} />
-              <DetailRow label="Pixel Aspect" value={String(part0.pixel_aspect_ratio)} />
-              <DetailRow label="Tiled" value={part0.is_tiled ? `${part0.tile_width}\u00d7${part0.tile_height}` : "Scanline"} />
-              {part0.render_software && <DetailRow label="Software" value={part0.render_software.split(" ")[0]} />}
-              <DetailRow label="Data Window" value={part0.data_window ?? "-"} />
-              <DetailRow label="Display Window" value={part0.display_window ?? "-"} />
-            </Section>
-          )}
-
-          {/* Channels/AOVs */}
-          {channels.length > 0 && (
-            <Section title={`Channels (${channels.length})`}>
-              <div className="flex flex-wrap gap-1">
-                {channels.map((ch) => (
-                  <span key={`${ch.part_index}-${ch.channel_name}`} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-700 text-gray-300">
-                    {ch.channel_name} <span className="text-gray-500">{ch.channel_type}</span>
-                  </span>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {/* File info */}
-          <Section title="File">
-            <DetailRow label="Size" value={formatBytes(file.sizeBytes)} />
-            <DetailRow label="Path" value={file.key} mono />
-            <DetailRow label="S3 URI" value={file.sourceUri} mono />
-            {exrMeta.file && <DetailRow label="Inspected" value={new Date(exrMeta.file.inspection_timestamp).toLocaleString()} />}
-          </Section>
-        </div>
-      ) : metadataKind === "video" && videoMeta?.found ? (
-        <div className="p-4 space-y-4">
-          {/*
-            Video detail view is fully dynamic — we don't hardcode the field
-            list because the video_metadata schema is owned by the functions
-            team and may evolve. summary holds the well-known highlights;
-            attributes is a flat kv list of every other column in the row.
-          */}
-          {videoMeta.summary && Object.keys(videoMeta.summary).length > 0 && (
-            <Section title="Media">
-              {Object.entries(videoMeta.summary)
-                .filter(([, v]) => v !== undefined && v !== null && v !== "")
-                .map(([key, value]) => (
-                  <DetailRow
-                    key={key}
-                    label={humanizeLabel(key)}
-                    value={formatMetaValue(value)}
-                  />
-                ))}
-            </Section>
-          )}
-
-          {videoMeta.attributes && videoMeta.attributes.length > 0 && (
-            <Section title={`Attributes (${videoMeta.attributes.length})`}>
-              {videoMeta.attributes.map((attr) => (
+          <Section title="Metadata">
+            {Object.entries(sidecarData)
+              .filter(
+                ([k, v]) =>
+                  v != null &&
+                  v !== "" &&
+                  typeof v !== "object" &&
+                  !["channels", "parts", "attributes", "layers"].includes(k)
+              )
+              .map(([key, value]) => (
                 <DetailRow
-                  key={attr.name}
-                  label={humanizeLabel(attr.name)}
-                  value={formatMetaValue(attr.value)}
-                  mono
+                  key={key}
+                  label={humanizeLabel(key)}
+                  value={String(value)}
+                  mono={key.includes("uri") || key.includes("path")}
                 />
               ))}
-            </Section>
-          )}
-
+          </Section>
           <Section title="File">
             <DetailRow label="Size" value={formatBytes(file.sizeBytes)} />
             <DetailRow label="Path" value={file.key} mono />
             <DetailRow label="S3 URI" value={file.sourceUri} mono />
-            <DetailRow label="Modified" value={file.lastModified ? new Date(file.lastModified).toLocaleString() : "-"} />
+            {file.lastModified && (
+              <DetailRow label="Modified" value={new Date(file.lastModified).toLocaleString()} />
+            )}
           </Section>
         </div>
       ) : (
         <div className="p-4 space-y-3">
           <div className="text-xs text-gray-500">
-            {metadataKind === "none"
-              ? "No metadata expected — this file type is not processed by the pipeline."
-              : metadataKind === "video"
-                ? "No video metadata available yet. The file may not have been processed."
-                : "No EXR metadata available for this file."}
+            {kind === "none" ? (
+              <>
+                <p>
+                  No pipeline configured for{" "}
+                  <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded">
+                    {ext || "this file type"}
+                  </code>
+                  .
+                </p>
+                <p className="mt-2">
+                  <a
+                    href="/automation/pipelines"
+                    className="text-cyan-400 hover:text-cyan-300 underline"
+                  >
+                    Configure Metadata Pipelines →
+                  </a>
+                </p>
+              </>
+            ) : (
+              <p>
+                {sidecarError
+                  ? "Metadata unavailable in this view. Open the asset panel for the full record."
+                  : "Metadata unavailable in this view. Open the asset panel for the full record."}
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <DetailRow label="File" value={filename} />
