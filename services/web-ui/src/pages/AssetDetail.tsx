@@ -163,6 +163,39 @@ export function AssetDetail() {
                     </div>
                   )}
                 </dl>
+                {/* AOV / Channel pills — sourced from frame-metadata-extractor sidecar JSON */}
+                {(() => {
+                  const sidecarChannels = metadata.sidecar?.channels as
+                    | Array<{
+                        channel_name: string;
+                        layer_name?: string;
+                        component_name?: string;
+                        channel_type?: string;
+                        part_index?: number;
+                      }>
+                    | undefined;
+                  if (!sidecarChannels || sidecarChannels.length === 0) return null;
+                  return (
+                    <div className="mt-3 pt-3 border-t border-[var(--color-ah-border-muted)]">
+                      <h3 className="text-xs font-semibold text-[var(--color-ah-text-muted)] mb-2">
+                        AOVs / Channels
+                      </h3>
+                      <div className="flex flex-wrap gap-1">
+                        {sidecarChannels.map((ch, i) => (
+                          <span
+                            key={`${ch.part_index ?? ""}-${ch.channel_name}-${i}`}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-700 text-gray-300"
+                          >
+                            {ch.layer_name && ch.layer_name !== "rgba"
+                              ? `${ch.layer_name}.`
+                              : ""}
+                            {ch.channel_name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </Card>
             );
           })()}
