@@ -11,6 +11,7 @@ import { useAssetMetadata } from "../hooks/useAssetMetadata";
 import { Badge, Button, Card, Skeleton } from "../design-system";
 import { CustomFieldsPanel } from "../components/CustomFieldsPanel";
 import { VersionDispatchCard } from "../components/VersionDispatchCard";
+import { ChannelPills } from "../components/ChannelPills";
 
 const statusVariant = (s: string) => {
   if (s === "completed" || s === "qc_approved") return "success" as const;
@@ -164,41 +165,18 @@ export function AssetDetail() {
                   )}
                 </dl>
                 {/* AOV / Channel pills — sourced from frame-metadata-extractor sidecar JSON */}
-                {(() => {
-                  const rawChannels = metadata.sidecar?.channels;
-                  if (!Array.isArray(rawChannels)) return null;
-                  const sidecarChannels = (rawChannels as Array<{
-                    channel_name?: string;
-                    layer_name?: string;
-                    component_name?: string;
-                    channel_type?: string;
-                    part_index?: number;
-                  }>).filter(
-                    (ch): ch is Required<Pick<typeof ch, "channel_name">> & typeof ch =>
-                      typeof ch.channel_name === "string"
-                  );
-                  if (sidecarChannels.length === 0) return null;
-                  return (
-                    <div className="mt-3 pt-3 border-t border-[var(--color-ah-border-muted)]">
-                      <h3 className="text-xs font-semibold text-[var(--color-ah-text-muted)] mb-2">
-                        AOVs / Channels
-                      </h3>
-                      <div className="flex flex-wrap gap-1">
-                        {sidecarChannels.map((ch, i) => (
-                          <span
-                            key={`${ch.part_index ?? ""}-${ch.channel_name}-${i}`}
-                            className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-700 text-gray-300"
-                          >
-                            {ch.layer_name && ch.layer_name !== "rgba"
-                              ? `${ch.layer_name}.`
-                              : ""}
-                            {ch.channel_name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
+                {Array.isArray(metadata.sidecar?.channels) &&
+                  (metadata.sidecar!.channels as unknown[]).length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-[var(--color-ah-border-muted)]">
+                    <h3 className="text-xs font-semibold text-[var(--color-ah-text-muted)] mb-2">
+                      AOVs / Channels
+                    </h3>
+                    <ChannelPills
+                      channels={metadata.sidecar!.channels}
+                      mode="per-channel"
+                    />
+                  </div>
+                )}
               </Card>
             );
           })()}
