@@ -498,9 +498,12 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
   const dbRow = metadata?.dbRows?.[0] as Record<string, unknown> | undefined;
   const sidecar = metadata?.sidecar as Record<string, unknown> | null | undefined;
   // Helper: prefer dbRow value, fall back to sidecar, coerce to string or null.
+  // Returns null for arrays/objects — those are not renderable as a single field value.
   const field = (name: string): string | null => {
     const v = dbRow?.[name] ?? sidecar?.[name];
-    return v == null ? null : String(v);
+    if (v == null) return null;
+    if (typeof v === "object") return null;
+    return String(v);
   };
 
   addField("File", "Filename", asset.title);
@@ -562,11 +565,17 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
     "render_software", "display_window", "display_width", "display_height",
     "data_window", "pixel_aspect_ratio", "line_order", "is_tiled",
     "tile_width", "tile_height", "multi_view",
+    // Structured sidecar arrays — rendered by dedicated components, not here.
+    "parts", "attributes", "layers",
   ]);
   const combined = { ...(sidecar ?? {}), ...(dbRow ?? {}) };
   for (const [k, v] of Object.entries(combined)) {
     if (ALREADY_RENDERED.has(k)) continue;
     if (v == null || v === "") continue;
+    // Skip arrays and nested objects — they render as ugly JSON blobs via
+    // JSON.stringify fallback. Structured fields (channels, parts, attributes)
+    // should be rendered by dedicated components, not the generic Media loop.
+    if (typeof v === "object") continue;
     addField("Media", humanizeMetaLabel(k), formatMetaFieldValue(v));
   }
 
