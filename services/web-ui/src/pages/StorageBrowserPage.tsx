@@ -104,6 +104,10 @@ function FileDetailSidebar({ file, onClose }: { file: StorageBrowseFile; onClose
           <div className="text-gray-500 text-xs font-mono px-4 text-center">
             Preview unavailable in this browser
           </div>
+        ) : kind === "image" && previewFailed ? (
+          <div className="text-gray-500 text-xs font-mono px-4 text-center">
+            Image unavailable
+          </div>
         ) : kind === "raw_camera" ? (
           <div className="text-gray-500 text-xs font-mono px-4 text-center">
             No preview available for raw camera files
@@ -182,7 +186,7 @@ function FileDetailSidebar({ file, onClose }: { file: StorageBrowseFile; onClose
             ) : (
               <p>
                 {sidecarError
-                  ? "Metadata unavailable in this view. Open the asset panel for the full record."
+                  ? "Could not load metadata. Please try again or check the asset panel."
                   : "Metadata unavailable in this view. Open the asset panel for the full record."}
               </p>
             )}

@@ -270,7 +270,6 @@ describe("FileDetailSidebar — video preview (.mov)", () => {
 
   it("renders <video> with controls for video files (Bug C fix)", async () => {
     await openSidebar();
-    const video = await screen.findByRole("img", { hidden: true }).catch(() => null);
     // video element has no implicit role — query DOM directly
     await waitFor(() => {
       expect(document.querySelector("video")).not.toBeNull();
@@ -300,6 +299,16 @@ describe("FileDetailSidebar — video preview (.mov)", () => {
     await waitFor(() => {
       const videoEl = document.querySelector("video") as HTMLVideoElement;
       expect(videoEl.poster).toBe("http://cdn/hero_grade_thumb.jpg");
+    });
+  });
+
+  it("degrades to 'Preview unavailable' when video element errors", async () => {
+    await openSidebar();
+    await waitFor(() => expect(document.querySelector("video")).not.toBeNull());
+    const videoEl = document.querySelector("video")!;
+    fireEvent.error(videoEl);
+    await waitFor(() => {
+      expect(screen.getByText(/Preview unavailable in this browser/i)).toBeInTheDocument();
     });
   });
 });
