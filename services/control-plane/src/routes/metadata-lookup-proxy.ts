@@ -15,7 +15,7 @@ import type { FastifyInstance } from "fastify";
 import { sendError } from "../http/errors.js";
 import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
-import { proxyToVastdbQuery } from "./exr-metadata.js";
+import { proxyToVastdbQuery } from "../http/proxy.js";
 
 export type MetadataLookupProxy = typeof proxyToVastdbQuery;
 
