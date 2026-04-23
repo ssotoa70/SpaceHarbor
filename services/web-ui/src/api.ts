@@ -3122,7 +3122,10 @@ export async function fetchProcessingStatus(sourceUris: string[]): Promise<Proce
     }
     const data = (await response.json()) as { results: ProcessingStatusEntry[] };
     return data.results ?? [];
-  } catch {
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.warn(`[fetchProcessingStatus] network error; returning []:`, err);
+    }
     return [];
   }
 }

@@ -637,8 +637,8 @@ export async function registerStorageBrowseRoutes(
             const resolvedBucket = bucket ?? ep.bucket;
 
             // Branch on file kind — different functions own different formats
-            // and emit artifacts with different naming conventions. See the
-            // module-level comment on inferFileKind for the routing rules.
+            // and emit artifacts with different naming conventions. See
+            // `inferFileKind` in ../storage/file-kinds.ts for the routing rules.
             const dir = key.includes("/") ? key.substring(0, key.lastIndexOf("/")) : "";
             const filename = key.includes("/") ? key.substring(key.lastIndexOf("/") + 1) : key;
             const baseName = filename.replace(/\.[^.]+$/, "");
