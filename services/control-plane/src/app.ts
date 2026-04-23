@@ -50,9 +50,7 @@ import { registerDeliveryRoutes } from "./routes/delivery.js";
 import { registerNavBadgeRoutes } from "./routes/nav-badges.js";
 import { registerStorageBrowseRoutes } from "./routes/storage-browse.js";
 import { registerStorageMetadataRoutes } from "./routes/storage-metadata.js";
-import { registerExrMetadataRoutes } from "./routes/exr-metadata.js";
 import { registerAssetMetadataRoute } from "./routes/asset-metadata.js";
-import { registerVideoMetadataRoutes } from "./routes/video-metadata.js";
 import { registerDataEnginePipelineRoutes } from "./routes/dataengine-pipelines.js";
 import { registerDataEnginePipelineDefaultsRoute } from "./routes/dataengine-pipelines-defaults.js";
 import { registerMetadataLookupProxyRoute } from "./routes/metadata-lookup-proxy.js";
@@ -498,10 +496,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     // requiring env var changes and container restarts.
     const catalogTrino = buildTrinoFromSettings();
     void registerCatalogRoutes(app, catalogTrino, prefixes);
-
-    // EXR metadata routes — query exr-inspector tables via Trino
-    void registerExrMetadataRoutes(app, catalogTrino, prefixes);
-    void registerVideoMetadataRoutes(app, prefixes);
 
     // Unified asset metadata reader (DB + sidecar, dependency-injectable)
     void registerAssetMetadataRoute(app, persistence, prefixes);
