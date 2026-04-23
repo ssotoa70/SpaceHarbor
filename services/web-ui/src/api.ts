@@ -2637,28 +2637,6 @@ export interface ExrAttributeMetadata {
   [key: string]: unknown;
 }
 
-export async function fetchExrMetadataFiles(options?: {
-  pathPrefix?: string;
-  limit?: number;
-  offset?: number;
-}): Promise<{ files: ExrFileMetadata[]; total: number }> {
-  try {
-    const params = new URLSearchParams();
-    if (options?.pathPrefix) params.set("pathPrefix", options.pathPrefix);
-    if (options?.limit) params.set("limit", String(options.limit));
-    if (options?.offset) params.set("offset", String(options.offset));
-
-    const response = await fetch(
-      `${API_BASE_URL}/api/v1/exr-metadata/files?${params.toString()}`,
-      { headers: withAuth() },
-    );
-    if (!response.ok) return { files: [], total: 0 };
-    return (await response.json()) as { files: ExrFileMetadata[]; total: number };
-  } catch {
-    return { files: [], total: 0 };
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Storage metadata lookup — reads the _metadata.json sidecar from S3 via the
 // control-plane route. Schema-agnostic: the response envelope exposes the
