@@ -3112,7 +3112,14 @@ export async function fetchProcessingStatus(sourceUris: string[]): Promise<Proce
       headers: withAuth({ "content-type": "application/json" }),
       body: JSON.stringify({ sourceUris }),
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      if (import.meta.env.DEV) {
+        console.warn(
+          `[fetchProcessingStatus] server returned ${response.status} ${response.statusText}; returning []`,
+        );
+      }
+      return [];
+    }
     const data = (await response.json()) as { results: ProcessingStatusEntry[] };
     return data.results ?? [];
   } catch {
