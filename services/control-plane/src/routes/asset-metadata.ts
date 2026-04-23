@@ -21,7 +21,7 @@ import {
   parseSourceUri,
   InvalidSourceUriError,
 } from "../storage/sidecar-resolver.js";
-import { proxyToVastdbQuery } from "./exr-metadata.js";
+import { proxyToVastdbQuery } from "../http/proxy.js";
 import { getDataEnginePipelines } from "./platform-settings.js";
 import {
   fetchSidecarForAsset,
