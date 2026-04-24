@@ -13,10 +13,29 @@
  * protocol-agnostic.
  */
 
+import type { FastifyBaseLogger } from "fastify";
+
+import { callWithRetryAndTiming } from "../infra/retry-with-timing.js";
 import { vastFetch } from "../vast/vast-fetch.js";
 import { VmsTokenManager } from "../vast/vms-token-manager.js";
 
 import type { FunctionFetcher, LiveFunctionRecord } from "./discovery.js";
+
+/** Fallback logger for the retry wrapper's [timing] emissions — the
+ *  FunctionFetcher interface doesn't carry a logger through, and we
+ *  want telemetry regardless of call site. Routes to stdout/stderr
+ *  so it still lands in the container's log stream. */
+const FALLBACK_LOG = {
+  info: console.log,
+  warn: console.warn,
+  error: console.error,
+  debug: console.log,
+  fatal: console.error,
+  trace: console.log,
+  child: () => FALLBACK_LOG,
+  level: "info",
+  silent: () => {},
+} as unknown as FastifyBaseLogger;
 
 export interface VastFetcherContext {
   /** Base URL of the VAST cluster (e.g. `https://var201.selab.vastdata.com`). */
@@ -56,40 +75,64 @@ export function createVastFunctionFetcher(
         return headers;
       };
 
-      let token: string;
-      try {
-        token = await ctx.tokenManager.getToken();
-      } catch (err) {
-        throw new Error(
-          `VAST auth failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-
       let response: Response;
       try {
-        response = await doFetch(url.toString(), {
-          method: "GET",
-          headers: buildHeaders(token),
-        });
-      } catch (err) {
-        throw new Error(
-          `VAST DataEngine unreachable: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+        response = await callWithRetryAndTiming(
+          async () => {
+            let token: string;
+            try {
+              token = await ctx.tokenManager.getToken();
+            } catch (err) {
+              throw new Error(
+                `VAST auth failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
 
-      // One-shot 401 retry with a refreshed token (matches dataengine-proxy pattern)
-      if (response.status === 401) {
-        try {
-          token = await ctx.tokenManager.forceRefresh();
-        } catch (err) {
-          throw new Error(
-            `VAST re-auth failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
+            let r: Response;
+            try {
+              r = await doFetch(url.toString(), {
+                method: "GET",
+                headers: buildHeaders(token),
+              });
+            } catch (err) {
+              throw new Error(
+                `VAST DataEngine unreachable: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+
+            if (r.status === 401) {
+              // Refresh the token so the retry picks up the new value via
+              // getToken() on the next attempt.
+              try {
+                await ctx.tokenManager.forceRefresh();
+              } catch (err) {
+                throw new Error(
+                  `VAST re-auth failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+              const authErr = new Error("401 Unauthorized") as Error & { status?: number };
+              authErr.status = 401;
+              throw authErr;
+            }
+            return r;
+          },
+          {
+            op: "vast-function-fetch",
+            log: FALLBACK_LOG,
+            maxAttempts: 2,
+            backoffMs: [0],
+            jitter: false,
+            shouldRetry: (err) => (err as Error & { status?: number }).status === 401,
+          },
+        );
+      } catch (err) {
+        // callWithRetryAndTiming throws RetryExhaustedError on all-attempts-fail
+        // or the original error on shouldRetry=false. Unwrap so the outer
+        // caller still sees the VAST-prefixed message.
+        if (err instanceof Error && "cause" in err && err.cause instanceof Error) {
+          throw err.cause;
         }
-        response = await doFetch(url.toString(), {
-          method: "GET",
-          headers: buildHeaders(token),
-        });
+        throw err;
       }
 
       if (!response.ok) {
