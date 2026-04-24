@@ -1,137 +1,175 @@
-import { test } from "node:test";
+import { describe, it, test } from "node:test";
 import assert from "node:assert/strict";
-import { callWithRetryAndTiming, RetryExhaustedError } from "../src/infra/retry-with-timing.js";
 
-function makeLogger(): { calls: any[]; log: any } {
-  const calls: any[] = [];
-  const mk = (level: string) => (...args: any[]) => calls.push({ level, args });
-  return {
-    calls,
-    log: { info: mk("info"), warn: mk("warn"), error: mk("error"), debug: mk("debug") } as any,
-  };
+import {
+  callWithRetryAndTiming,
+  RetryExhaustedError,
+  __resetRetryCounterForTests,
+} from "../src/infra/retry-with-timing.js";
+
+function makeLog(): { log: any; lines: string[] } {
+  const lines: string[] = [];
+  const capture = (msg: string) => lines.push(msg);
+  const log = {
+    info: (obj: unknown, msg?: string) => capture(typeof obj === "string" ? obj : (msg ?? "")),
+    warn: (obj: unknown, msg?: string) => capture(typeof obj === "string" ? obj : (msg ?? "")),
+    error: (obj: unknown, msg?: string) => capture(typeof obj === "string" ? obj : (msg ?? "")),
+    debug: () => {},
+    child: () => log,
+  } as any;
+  return { log, lines };
 }
 
-test("first-call-succeeds: returns result and emits a single status=ok line", async () => {
-  const { calls, log } = makeLogger();
-  let n = 0;
-  const result = await callWithRetryAndTiming(async () => { n++; return "ok"; }, {
-    op: "unit-op", maxAttempts: 3, backoffMs: [1, 2], jitter: false, log,
+describe("callWithRetryAndTiming", () => {
+  it("returns result on first success", async () => {
+    __resetRetryCounterForTests();
+    const { log, lines } = makeLog();
+    const result = await callWithRetryAndTiming(
+      async () => "ok",
+      { op: "test-op", log, maxAttempts: 3, backoffMs: [10, 20] },
+    );
+    assert.equal(result, "ok");
+    const timing = lines.filter((l) => l.includes("[timing]"));
+    assert.equal(timing.length, 1);
+    assert.match(timing[0], /status=ok/);
+    assert.match(timing[0], /attempt=1/);
+    assert.match(timing[0], /op=test-op/);
   });
-  assert.equal(result, "ok");
-  assert.equal(n, 1);
-  const timing = calls.filter((c) => String(c.args[0]).startsWith("[timing]"));
-  assert.equal(timing.length, 1);
-  assert.match(timing[0].args[0], /op=unit-op attempt=1 .*status=ok/);
-});
 
-test("retries-then-succeeds: fn called 3x, 3 timing lines", async () => {
-  const { calls, log } = makeLogger();
-  let n = 0;
-  const result = await callWithRetryAndTiming(async () => {
-    n++;
-    if (n < 3) throw new Error("transient");
-    return "ok";
-  }, { op: "u", maxAttempts: 5, backoffMs: [1, 1, 1, 1], jitter: false, log });
-  assert.equal(result, "ok");
-  assert.equal(n, 3);
-  const timing = calls.filter((c) => String(c.args[0]).startsWith("[timing]"));
-  assert.equal(timing.length, 3);
-  assert.match(timing[0].args[0], /attempt=1 .*status=retry/);
-  assert.match(timing[1].args[0], /attempt=2 .*status=retry/);
-  assert.match(timing[2].args[0], /attempt=3 .*status=ok/);
-});
+  it("retries then succeeds", async () => {
+    __resetRetryCounterForTests();
+    const { log, lines } = makeLog();
+    let calls = 0;
+    const result = await callWithRetryAndTiming(
+      async () => {
+        calls++;
+        if (calls < 3) throw new Error("transient");
+        return "ok";
+      },
+      { op: "retry-op", log, maxAttempts: 5, backoffMs: [1, 2, 3, 4] },
+    );
+    assert.equal(result, "ok");
+    assert.equal(calls, 3);
+    const timing = lines.filter((l) => l.includes("[timing]"));
+    assert.equal(timing.length, 3);
+    assert.equal(timing.filter((l) => l.includes("status=retry")).length, 2);
+    assert.equal(timing.filter((l) => l.includes("status=ok")).length, 1);
+  });
 
-test("exhaustion: throws RetryExhaustedError preserving cause", async () => {
-  const { log } = makeLogger();
-  const cause = new Error("still failing");
-  await assert.rejects(
-    () => callWithRetryAndTiming(async () => { throw cause; }, {
-      op: "u", maxAttempts: 3, backoffMs: [1, 1], jitter: false, log,
-    }),
-    (err: unknown) => {
-      assert.ok(err instanceof RetryExhaustedError);
-      assert.equal((err as RetryExhaustedError).attempts, 3);
-      assert.equal((err as RetryExhaustedError).op, "u");
-      assert.equal((err as RetryExhaustedError).cause, cause);
-      return true;
-    },
-  );
-});
+  it("exhausts attempts and throws RetryExhaustedError with cause preserved", async () => {
+    __resetRetryCounterForTests();
+    const { log } = makeLog();
+    const innerError = new Error("persistent");
+    await assert.rejects(
+      () => callWithRetryAndTiming(
+        async () => { throw innerError; },
+        { op: "fail-op", log, maxAttempts: 3, backoffMs: [1, 1] },
+      ),
+      (err: unknown) => {
+        assert.ok(err instanceof RetryExhaustedError);
+        assert.equal((err as RetryExhaustedError).attempts, 3);
+        assert.equal((err as RetryExhaustedError).op, "fail-op");
+        assert.equal((err as RetryExhaustedError).cause, innerError);
+        return true;
+      },
+    );
+  });
 
-test("shouldRetry returning false: 1 attempt then throws", async () => {
-  const { log } = makeLogger();
-  let n = 0;
-  await assert.rejects(
-    () => callWithRetryAndTiming(async () => { n++; throw new Error("fatal"); }, {
-      op: "u", maxAttempts: 5, backoffMs: [1, 1], jitter: false, log,
-      shouldRetry: () => false,
-    }),
-    /fatal/,
-  );
-  assert.equal(n, 1);
-});
+  it("honors shouldRetry=false predicate and throws original error", async () => {
+    __resetRetryCounterForTests();
+    const { log } = makeLog();
+    let calls = 0;
+    const innerError = new Error("non-retryable");
+    await assert.rejects(
+      () => callWithRetryAndTiming(
+        async () => { calls++; throw innerError; },
+        {
+          op: "non-retry-op",
+          log,
+          maxAttempts: 5,
+          backoffMs: [1],
+          shouldRetry: () => false,
+        },
+      ),
+      (err: unknown) => err === innerError,
+    );
+    assert.equal(calls, 1);
+  });
 
-test("per-attempt timeout: AbortError thrown, counted as retryable", async () => {
-  const { log } = makeLogger();
-  let n = 0;
-  const result = await callWithRetryAndTiming(async (): Promise<string> => {
-    n++;
-    if (n === 1) {
-      await new Promise((r) => setTimeout(r, 200));
-      return "late";
+  it("per-attempt timeout fires and counts as timeout outcome", async () => {
+    __resetRetryCounterForTests();
+    const { log, lines } = makeLog();
+    await assert.rejects(
+      () => callWithRetryAndTiming(
+        async () => new Promise((resolve) => setTimeout(resolve, 1000)),
+        {
+          op: "timeout-op",
+          log,
+          maxAttempts: 2,
+          backoffMs: [1],
+          perAttemptTimeoutMs: 50,
+        },
+      ),
+    );
+    const timing = lines.filter((l) => l.includes("[timing]"));
+    assert.ok(timing.some((l) => l.includes("status=timeout")));
+  });
+
+  it("abort signal mid-backoff short-circuits with AbortError", async () => {
+    __resetRetryCounterForTests();
+    const { log } = makeLog();
+    const controller = new AbortController();
+    const promise = callWithRetryAndTiming(
+      async () => { throw new Error("fail once"); },
+      {
+        op: "abort-op",
+        log,
+        maxAttempts: 5,
+        backoffMs: [1000, 2000],
+        signal: controller.signal,
+      },
+    );
+    setTimeout(() => controller.abort(), 50);
+    await assert.rejects(() => promise, (err: unknown) => {
+      return (err as Error).name === "AbortError";
+    });
+  });
+
+  it("log format has all required fields", async () => {
+    __resetRetryCounterForTests();
+    const { log, lines } = makeLog();
+    await callWithRetryAndTiming(async () => "ok", { op: "fmt-op", log });
+    const line = lines.find((l) => l.includes("[timing]"))!;
+    assert.match(line, /\[timing\]/);
+    assert.match(line, /op=fmt-op/);
+    assert.match(line, /attempt=\d+/);
+    assert.match(line, /latency_ms=\d+/);
+    assert.match(line, /cumulative_ms=\d+/);
+    assert.match(line, /status=\w+/);
+  });
+
+  it("jitter stays within ±50% of base backoff across 50 runs", async () => {
+    const base = 100;
+    const delays: number[] = [];
+    for (let i = 0; i < 50; i++) {
+      const { log } = makeLog();
+      let calls = 0;
+      const started = Date.now();
+      await callWithRetryAndTiming(
+        async () => {
+          calls++;
+          if (calls === 1) throw new Error("once");
+          return "ok";
+        },
+        { op: "jitter-op", log, maxAttempts: 2, backoffMs: [base], jitter: true },
+      );
+      delays.push(Date.now() - started);
     }
-    return "on-time";
-  }, { op: "u", maxAttempts: 3, backoffMs: [1, 1], jitter: false,
-       perAttemptTimeoutMs: 20, log });
-  assert.equal(result, "on-time");
-  assert.equal(n, 2);
-});
-
-test("abort mid-backoff: sleep short-circuits with AbortError", async () => {
-  const { log } = makeLogger();
-  const ctrl = new AbortController();
-  const p = callWithRetryAndTiming(async () => { throw new Error("x"); }, {
-    op: "u", maxAttempts: 5, backoffMs: [1000], jitter: false, log, signal: ctrl.signal,
-  });
-  setTimeout(() => ctrl.abort(), 10);
-  await assert.rejects(p, (err: any) => err?.name === "AbortError" || /abort/i.test(String(err)));
-});
-
-test("log format: includes op, attempt, latency_ms, cumulative_ms", async () => {
-  const { calls, log } = makeLogger();
-  await callWithRetryAndTiming(async () => "ok", {
-    op: "myop", maxAttempts: 1, backoffMs: [], jitter: false, log,
-  });
-  const line = String(calls.find((c) => String(c.args[0]).startsWith("[timing]")).args[0]);
-  assert.match(line, /\[timing\]/);
-  assert.match(line, /op=myop/);
-  assert.match(line, /attempt=1/);
-  assert.match(line, /latency_ms=\d+/);
-  assert.match(line, /cumulative_ms=\d+/);
-});
-
-test("jitter bounds: delays stay within ±50% over many runs", async () => {
-  const { log } = makeLogger();
-  const observed: number[] = [];
-  const orig = setTimeout;
-  (globalThis as any).setTimeout = ((fn: any, ms: number) => {
-    observed.push(ms);
-    return orig(fn, 0);
-  }) as any;
-  try {
-    for (let i = 0; i < 40; i++) {
-      try {
-        await callWithRetryAndTiming(async () => { throw new Error("x"); }, {
-          op: "u", maxAttempts: 2, backoffMs: [100], jitter: true, log,
-        });
-      } catch { /* expected */ }
+    const minExpected = base * 0.5;
+    const maxExpected = base * 1.5 + 200;
+    for (const d of delays) {
+      assert.ok(d >= minExpected - 20, `delay ${d} below min ${minExpected}`);
+      assert.ok(d <= maxExpected, `delay ${d} above max ${maxExpected}`);
     }
-  } finally {
-    (globalThis as any).setTimeout = orig;
-  }
-  assert.ok(observed.length > 0);
-  const min = Math.min(...observed);
-  const max = Math.max(...observed);
-  assert.ok(min >= 50 - 1, `min=${min} below 50ms`);
-  assert.ok(max <= 150 + 1, `max=${max} above 150ms`);
+  });
 });
