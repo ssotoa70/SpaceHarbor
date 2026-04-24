@@ -96,24 +96,63 @@ function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-async function runWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number | undefined): Promise<T> {
-  if (!timeoutMs) return fn();
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      const err = new Error(`attempt exceeded ${timeoutMs}ms`);
-      err.name = "TimeoutError";
-      reject(err);
-    }, timeoutMs);
-    fn().then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (err) => { clearTimeout(timer); reject(err); },
-    );
-  });
+async function runWithTimeout<T>(
+  fn: (signal?: AbortSignal) => Promise<T>,
+  timeoutMs: number | undefined,
+  parentSignal?: AbortSignal,
+): Promise<T> {
+  // When no timeout AND no parent signal, no orchestration needed.
+  if (!timeoutMs && !parentSignal) return fn();
+
+  const controller = new AbortController();
+  // Forward the caller's AbortSignal into the inner controller so fn
+  // sees it as a unified abort source (timeout OR external cancel).
+  const onParentAbort = () => controller.abort();
+  parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (timeoutMs) {
+      timer = setTimeout(() => {
+        controller.abort();
+      }, timeoutMs);
+    }
+    // Race the fn against an abort-rejecting promise so we see timeouts
+    // even if fn doesn't respect the signal.
+    const abortPromise = new Promise<never>((_, reject) => {
+      const onAbort = () => {
+        const err = new Error(timeoutMs ? `attempt exceeded ${timeoutMs}ms` : "aborted");
+        err.name = timeoutMs ? "TimeoutError" : "AbortError";
+        reject(err);
+      };
+      if (controller.signal.aborted) onAbort();
+      else controller.signal.addEventListener("abort", onAbort, { once: true });
+    });
+    // Swallow unhandled rejection on the losing side of the race: if fn()
+    // rejects after abortPromise wins, Node would otherwise warn.
+    const fnPromise = fn(controller.signal);
+    fnPromise.catch(() => {});
+    return await Promise.race([fnPromise, abortPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", onParentAbort);
+  }
 }
 
 function jitterAround(baseMs: number, jitter: boolean): number {
   if (!jitter) return baseMs;
   return Math.round(baseMs * (0.5 + Math.random()));
+}
+
+/**
+ * Map metric outcome label → log status token.
+ *
+ * Spec (Layer A error model): log `status=error` for non-retryable failures
+ * while the metric retains `outcome="non_retryable"`. All other outcomes
+ * pass through unchanged.
+ */
+function logStatusFor(outcome: RetryOutcome): string {
+  return outcome === "non_retryable" ? "error" : outcome;
 }
 
 function emitTimingLine(
@@ -133,7 +172,7 @@ function emitTimingLine(
     `attempt=${fields.attempt}`,
     `latency_ms=${fields.latencyMs}`,
     `cumulative_ms=${fields.cumulativeMs}`,
-    `status=${fields.outcome}`,
+    `status=${logStatusFor(fields.outcome)}`,
   ];
   if (fields.reason) {
     const reason = fields.reason.replace(/\s+/g, " ").slice(0, 180);
@@ -152,7 +191,7 @@ function emitTimingLine(
  *   - On shouldRetry=false, throws the original error directly (no wrapper).
  */
 export async function callWithRetryAndTiming<T>(
-  fn: () => Promise<T>,
+  fn: (signal?: AbortSignal) => Promise<T>,
   opts: RetryOptions,
 ): Promise<T> {
   const maxAttempts = opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
@@ -170,7 +209,7 @@ export async function callWithRetryAndTiming<T>(
     }
     const attemptStartedAt = Date.now();
     try {
-      const result = await runWithTimeout(fn, opts.perAttemptTimeoutMs);
+      const result = await runWithTimeout(fn, opts.perAttemptTimeoutMs, opts.signal);
       const now = Date.now();
       emitTimingLine(opts.log, {
         op: opts.op,

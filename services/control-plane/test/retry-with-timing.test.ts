@@ -148,6 +148,48 @@ describe("callWithRetryAndTiming", () => {
     assert.match(line, /status=\w+/);
   });
 
+  it("emits status=error (not status=non_retryable) on shouldRetry=false", async () => {
+    __resetRetryCounterForTests();
+    const { log, lines } = makeLog();
+    await assert.rejects(
+      () => callWithRetryAndTiming(
+        async () => { throw new Error("persistent"); },
+        { op: "err-op", log, maxAttempts: 5, backoffMs: [1], shouldRetry: () => false },
+      ),
+    );
+    const timing = lines.filter((l) => l.includes("[timing]"));
+    assert.equal(timing.length, 1);
+    assert.match(timing[0], /status=error/);
+    assert.ok(!timing[0].includes("status=non_retryable"), "should not emit status=non_retryable in logs");
+  });
+
+  it("passes an AbortSignal to fn that is aborted when perAttemptTimeoutMs fires", async () => {
+    __resetRetryCounterForTests();
+    const { log } = makeLog();
+    let signalSeenByFn: AbortSignal | undefined;
+    let abortObservedByFn = false;
+    await assert.rejects(
+      () => callWithRetryAndTiming(
+        async (signal) => {
+          signalSeenByFn = signal;
+          // Park long enough for the timeout to fire; note whether the
+          // signal aborts during our wait.
+          return new Promise((resolve, reject) => {
+            const onAbort = () => {
+              abortObservedByFn = true;
+              reject(new Error("fn observed abort"));
+            };
+            signal?.addEventListener("abort", onAbort, { once: true });
+            setTimeout(resolve, 500);
+          });
+        },
+        { op: "cancel-op", log, maxAttempts: 1, backoffMs: [1], perAttemptTimeoutMs: 30 },
+      ),
+    );
+    assert.ok(signalSeenByFn, "fn should have received an AbortSignal argument");
+    assert.equal(abortObservedByFn, true, "fn's abort listener should have fired");
+  });
+
   it("jitter stays within ±50% of base backoff across 50 runs", async () => {
     const base = 100;
     const delays: number[] = [];
