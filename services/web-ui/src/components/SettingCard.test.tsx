@@ -33,7 +33,7 @@ describe("SettingCard", () => {
 
   test("Save fires onSave with parsed value", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<SettingCard config={baseConfig({ valueType: "int", value: 4, default: 4 })}
+    render(<SettingCard config={baseConfig({ valueType: "int", value: 4, default: 4, min: 1, max: 16 })}
                         onSave={onSave} onReset={vi.fn()} />);
     const input = screen.getByRole("spinbutton") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "7" } });
@@ -52,7 +52,7 @@ describe("SettingCard", () => {
 
   test("Save error from backend shows inline message", async () => {
     const onSave = vi.fn().mockRejectedValue(new Error("permission denied"));
-    render(<SettingCard config={baseConfig({ valueType: "int", value: 4, default: 4 })}
+    render(<SettingCard config={baseConfig({ valueType: "int", value: 4, default: 4, min: 1, max: 16 })}
                         onSave={onSave} onReset={vi.fn()} />);
     fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "6" } });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
