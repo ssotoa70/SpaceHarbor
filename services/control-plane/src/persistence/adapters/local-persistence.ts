@@ -71,6 +71,7 @@ import {
   ReferentialIntegrityError
 } from "../types.js";
 import type {
+  AssetIntegritySnapshot,
   AssetStatsSnapshot,
   AuditRetentionApplyResult,
   AuditRetentionPreview,
@@ -1247,6 +1248,16 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
       byStatus,
       byKind,
       integrity: { hashed: 0, withKeyframes: 0 }
+    };
+  }
+
+  async getAssetIntegrity(assetId: string): Promise<AssetIntegritySnapshot> {
+    // Local adapter has no asset_integrity tables — return existence only,
+    // both payloads null. The route renders sources={hashes:empty,keyframes:empty}.
+    return {
+      assetExists: this.assets.has(assetId),
+      hashes: null,
+      keyframes: null
     };
   }
 

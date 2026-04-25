@@ -8,6 +8,7 @@ import type { AuditSignal } from "../../domain/models.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
 import type {
+  AssetIntegritySnapshot,
   AssetStatsSnapshot,
   AuditRetentionApplyResult,
   AuditRetentionPreview,
@@ -387,6 +388,58 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
       byKind: base.byKind,
       integrity
     };
+  }
+
+  async getAssetIntegrity(assetId: string): Promise<AssetIntegritySnapshot> {
+    // Asset existence is delegated to the local fallback (which mirrors the
+    // catalog state for most dev topologies). A C2-follow-up may push this
+    // down to the workflow client once a dedicated existence-check is added.
+    const exists = (await this.localFallback.getAssetIntegrity(assetId)).assetExists;
+
+    // Integrity payloads from asset_integrity.*. Graceful when the schema
+    // does not yet exist (Phase 6.0 tables land with the DataEngine function
+    // rollout) — a failed query here must not fail the route.
+    let hashes: AssetIntegritySnapshot["hashes"] = null;
+    let keyframes: AssetIntegritySnapshot["keyframes"] = null;
+
+    if (this.trinoClient && exists) {
+      try {
+        const [hashesR, keyframesR] = await Promise.all([
+          this.trinoClient.query(
+            `SELECT sha256, perceptual_hash, algorithm_version, bytes_hashed, hashed_at FROM vast."asset_integrity".hashes WHERE asset_id = '${assetId.replace(/'/g, "''")}' LIMIT 1`
+          ),
+          this.trinoClient.query(
+            `SELECT keyframe_count, keyframe_prefix, thumbnail_key, extracted_at FROM vast."asset_integrity".keyframes WHERE asset_id = '${assetId.replace(/'/g, "''")}' LIMIT 1`
+          )
+        ]);
+        if (hashesR.data.length > 0) {
+          const row = hashesR.data[0];
+          hashes = {
+            sha256: String(row[0]),
+            perceptualHash: row[1] == null ? null : String(row[1]),
+            algorithmVersion: String(row[2]),
+            bytesHashed: Number(row[3]),
+            hashedAt: String(row[4])
+          };
+        }
+        if (keyframesR.data.length > 0) {
+          const row = keyframesR.data[0];
+          keyframes = {
+            keyframeCount: Number(row[0]),
+            keyframePrefix: String(row[1]),
+            thumbnailKey: String(row[2]),
+            extractedAt: String(row[3])
+          };
+        }
+      } catch {
+        // Tables not deployed yet — degrade gracefully. Route returns
+        // sources={hashes:empty,keyframes:empty}.
+        hashes = null;
+        keyframes = null;
+      }
+    }
+
+    return { assetExists: exists, hashes, keyframes };
   }
 
   async listAssetQueueRows() {

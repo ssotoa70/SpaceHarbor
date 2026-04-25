@@ -732,6 +732,30 @@ export interface AssetStatsSnapshot {
   integrity: { hashed: number; withKeyframes: number };
 }
 
+/**
+ * Per-asset integrity snapshot returned by {@link PersistenceAdapter.getAssetIntegrity}.
+ *
+ * Consumed by `GET /api/v1/assets/:id/integrity` (Phase 6.0 Layer C2). The caller
+ * derives `sources={hashes,keyframes} ∈ {ok|empty}` from the nullability of each
+ * payload object. `assetExists=false` triggers a 404 ASSET_NOT_FOUND at the route.
+ */
+export interface AssetIntegritySnapshot {
+  assetExists: boolean;
+  hashes: {
+    sha256: string;
+    perceptualHash: string | null;
+    algorithmVersion: string;
+    bytesHashed: number;
+    hashedAt: string;
+  } | null;
+  keyframes: {
+    keyframeCount: number;
+    keyframePrefix: string;
+    thumbnailKey: string;
+    extractedAt: string;
+  } | null;
+}
+
 export interface PersistenceAdapter extends VfxHierarchyAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
@@ -768,6 +792,7 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
   publishOutbox(context: WriteContext): Promise<number>;
   getWorkflowStats(nowIso?: string): Promise<WorkflowStats>;
   getAssetStats(): Promise<AssetStatsSnapshot>;
+  getAssetIntegrity(assetId: string): Promise<AssetIntegritySnapshot>;
   listAssetQueueRows(): Promise<AssetQueueRow[]>;
   getAuditEvents(): Promise<AuditEvent[]>;
   previewAuditRetention(cutoffIso: string): Promise<AuditRetentionPreview>;
