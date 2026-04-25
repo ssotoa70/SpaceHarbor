@@ -85,3 +85,13 @@ test("DB unreachable: 503", async () => {
   assert.equal((res.json() as { code: string }).code, "DB_UNREACHABLE");
   await app.close();
 });
+
+test("malformed asset id: 400 (route param pattern rejects SQL injection chars)", async () => {
+  const app = mkApp({ assetExists: true, hashes: null, keyframes: null });
+  const res = await app.inject({
+    method: "GET",
+    url: "/api/v1/assets/abc'%20OR%201=1/integrity",
+  });
+  assert.equal(res.statusCode, 400);
+  await app.close();
+});
