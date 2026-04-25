@@ -10,6 +10,7 @@ import { AssetDetailPanel } from "../components/AssetDetailPanel";
 import { AssetSelectionToolbar } from "../components/AssetSelectionToolbar";
 import { AssetContextMenu } from "../components/AssetContextMenu";
 import { CloseIcon } from "../components/CloseIcon";
+import { KpiCounterStrip } from "../components/KpiCounterStrip";
 import { MediaTypeIcon } from "../components/MediaTypeIcon";
 import type { PipelineStage } from "../types";
 import {
@@ -1300,6 +1301,7 @@ export function AssetBrowser() {
     <section aria-label="Asset browser" className="flex gap-0 h-full">
       {/* ── Main content area ── */}
       <div className={`flex-1 min-w-0 ${panelOpen ? "pr-0" : ""}`}>
+      <KpiCounterStrip />
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold">Assets</h1>
         <div className="flex items-center gap-2">
