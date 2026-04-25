@@ -137,6 +137,17 @@ export const workflowTransitionTotal = new client.Counter({
 });
 
 // ---------------------------------------------------------------------------
+// Business counters — retry helper
+// ---------------------------------------------------------------------------
+
+export const retryAttemptsTotal = new client.Counter({
+  name: "spaceharbor_retry_attempts_total",
+  help: "Attempts made by callWithRetryAndTiming, labelled by op and outcome",
+  labelNames: ["op", "outcome"] as const,
+  registers: [registry],
+});
+
+// ---------------------------------------------------------------------------
 // Business gauges — queue + circuit breaker state
 // ---------------------------------------------------------------------------
 

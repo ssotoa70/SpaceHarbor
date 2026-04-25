@@ -1,3 +1,6 @@
+import type { DiscoveredPipeline } from "../api";
+import { findPipelineForFilename } from "../hooks/useDataEnginePipelines";
+
 /**
  * Metadata lookup routing — synchronous extension → file-kind classifier.
  *
@@ -34,7 +37,7 @@ export const METADATA_VIDEO_EXTS: ReadonlySet<string> = new Set([
   ".r3d", ".braw",
 ]);
 
-export type MetadataKind = "image" | "video" | "none";
+export type MetadataKind = "image" | "video" | "raw_camera" | "none";
 
 /** Classify a filename into the metadata lookup path. Returns "none" for
  *  formats the DataEngine pipeline does not process.
@@ -51,4 +54,53 @@ export function metadataKindForFilename(filename: string): MetadataKind {
   if (METADATA_IMAGE_EXTS.has(ext)) return "image";
   if (METADATA_VIDEO_EXTS.has(ext)) return "video";
   return "none";
+}
+
+/** Result of a pipeline-aware classification. `kind` reflects the
+ *  matched pipeline's `fileKind` (including `raw_camera` when the
+ *  filename matches a raw pipeline). `pipeline` is the full
+ *  DiscoveredPipeline so callers can read schema/table/functionName
+ *  without a second lookup. */
+export interface ClassificationResult {
+  kind: MetadataKind;
+  pipeline: DiscoveredPipeline | null;
+}
+
+/**
+ * Pipeline-aware file-kind classifier. Preferred over
+ * `metadataKindForFilename` when the caller has async access to the
+ * discovered pipelines list.
+ *
+ * - `pipelines: DiscoveredPipeline[]` → match filename's extension against
+ *   each pipeline's `extensions` list. Return `{ kind, pipeline }` where
+ *   `kind` is the pipeline's `fileKind` (`"image" | "video" | "raw_camera"`).
+ *   Returns `{ kind: "none", pipeline: null }` when no pipeline matches.
+ *
+ * - `pipelines: null` → falls through to the static-set path via
+ *   `metadataKindForFilename`. Used by `useStorageSidecar` on mount
+ *   before the pipelines fetch resolves.
+ *
+ * - `pipelines: []` (empty config) → returns `{ kind: "none", pipeline: null }`
+ *   for every filename. Callers render "No pipeline configured".
+ *
+ * Case-insensitive on extension. Returns the first matching pipeline
+ * when multiple have overlapping extensions (the server-side validator
+ * prevents this at write time).
+ */
+export function classifyForPipelines(
+  filename: string,
+  pipelines: DiscoveredPipeline[] | null,
+): ClassificationResult {
+  if (pipelines === null) {
+    // Fall through to static-set path — preserves useStorageSidecar's
+    // on-mount eligibility gate behavior.
+    return { kind: metadataKindForFilename(filename), pipeline: null };
+  }
+
+  const pipeline = findPipelineForFilename(pipelines, filename);
+  if (!pipeline) {
+    return { kind: "none", pipeline: null };
+  }
+
+  return { kind: pipeline.config.fileKind, pipeline };
 }

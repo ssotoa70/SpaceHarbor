@@ -1,14 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Skeleton } from "../design-system";
 import {
   fetchVersionDetail,
-  fetchExrMetadataLookup,
   devAdvanceAsset,
   type VersionDetailInfo,
   type VersionDetailHistoryEvent,
-  type ExrMetadataLookupResult,
   type ExrAttributeMetadata,
+  type ExrFileMetadata,
+  type ExrPartMetadata,
+  type ExrChannelMetadata,
 } from "../api";
 import type { AssetRow } from "../types";
 import { formatTC } from "../utils/timecode";
@@ -19,13 +20,42 @@ import {
   findPipelineForFilename,
 } from "../hooks/useDataEnginePipelines";
 import { useAssetMetadata } from "../hooks/useAssetMetadata";
+import { useAssetIntegrity } from "../hooks/useAssetIntegrity";
 import { VideoMetadataRenderer, detectSchema } from "./metadata";
+import { ChannelPills } from "./ChannelPills";
+
+// ---------------------------------------------------------------------------
+// Local alias — shape-compatible with the former ExrMetadataLookupResult.
+// Uses the same sub-types exported from api.ts so all field accesses type-
+// check. Kept as a separate local alias so we don't re-export a transitional
+// type from api.ts.
+// ---------------------------------------------------------------------------
+
+type ExrChannel = ExrChannelMetadata;
+type ExrPart = ExrPartMetadata;
+type ExrFile = ExrFileMetadata;
+interface ExrSummary {
+  resolution: string;
+  compression: string;
+  colorSpace: string;
+  channelCount: number;
+  isDeep: boolean;
+  frameNumber: number | null;
+}
+interface ExrMetadataLookupResultLike {
+  found: boolean;
+  channels: ExrChannel[];
+  parts: ExrPart[];
+  summary?: ExrSummary;
+  file?: ExrFile;
+  attributes?: ExrAttributeMetadata[];
+}
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type TabId = "metadata" | "info" | "aovs" | "streams" | "vast" | "history";
+type TabId = "metadata" | "info" | "aovs" | "streams" | "vast" | "history" | "integrity";
 
 interface AssetDetailPanelProps {
   asset: AssetRow;
@@ -312,6 +342,7 @@ function getTabsForMediaType(mediaType: string): TabDef[] {
     base.push({ id: "streams", label: "STREAMS" });
   }
   base.push({ id: "vast", label: "VAST" });
+  base.push({ id: "integrity", label: "INTEGRITY" });
   base.push({ id: "history", label: "HISTORY" });
   return base;
 }
@@ -490,7 +521,7 @@ function InfoTab({
 }: {
   info: VersionDetailInfo | null;
   asset: AssetRow;
-  exrMeta?: ExrMetadataLookupResult | null;
+  exrMeta?: ExrMetadataLookupResultLike | null;
   onAdvanced?: (updatedAsset: AssetRow) => void;
 }) {
   // When no version detail is available (asset ingested without VFX hierarchy),
@@ -978,7 +1009,7 @@ const LAYER_COLORS = [
   "#a855f7", "#3b82f6", "#f59e0b", "#22c55e", "#ef4444", "#06b6d4", "#ec4899", "#8b5cf6",
 ];
 
-function AovsTab({ exrMeta }: { exrMeta: ExrMetadataLookupResult | null }) {
+function AovsTab({ exrMeta }: { exrMeta: ExrMetadataLookupResultLike | null }) {
   if (!exrMeta?.found || !exrMeta.channels || exrMeta.channels.length === 0) {
     return (
       <div className="p-4 text-xs text-[var(--color-ah-text-subtle)]">
@@ -988,7 +1019,7 @@ function AovsTab({ exrMeta }: { exrMeta: ExrMetadataLookupResult | null }) {
   }
 
   // Group channels by layer
-  const layerMap = new Map<string, typeof exrMeta.channels>();
+  const layerMap = new Map<string, ExrChannel[]>();
   for (const ch of exrMeta.channels!) {
     const layer = ch.layer_name || "(root)";
     if (!layerMap.has(layer)) layerMap.set(layer, []);
@@ -1046,7 +1077,7 @@ function attrDisplayValue(attr: ExrAttributeMetadata): string {
 // VastTab — VAST Storage info
 // ---------------------------------------------------------------------------
 
-function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLookupResult | null }) {
+function VastTab({ asset, exrMeta }: { asset: AssetRow; exrMeta: ExrMetadataLookupResultLike | null }) {
   // Live discovered pipelines — zero hardcoded function names, schemas,
   // or tables. The admin controls which functions handle which file
   // kinds via PlatformSettings, and the control-plane merges that with
@@ -1212,7 +1243,6 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
   const [activeTab, setActiveTab] = useState<TabId>("metadata");
   const [info, setInfo] = useState<VersionDetailInfo | null>(null);
   const [history, setHistory] = useState<VersionDetailHistoryEvent[] | null>(null);
-  const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
   const [loadingInfo, setLoadingInfo] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -1238,11 +1268,45 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
     });
   }, [asset.currentVersionId]);
 
-  // Fetch rich per-frame metadata written by frame-metadata-extractor (non-blocking background)
-  useEffect(() => {
-    if (!asset.sourceUri) return;
-    void fetchExrMetadataLookup(asset.sourceUri).then(setExrMeta);
-  }, [asset.sourceUri]);
+  // Derive EXR-like metadata from useAssetMetadata (replaces legacy fetchExrMetadataLookup)
+  const panelMetadata = useAssetMetadata(asset.id);
+  const exrMeta: ExrMetadataLookupResultLike | null = useMemo(() => {
+    if (!panelMetadata.data) return null;
+    const sidecar = panelMetadata.data.sidecar as Record<string, unknown> | null;
+    const dbRow = panelMetadata.data.dbRows[0] as Record<string, unknown> | undefined;
+
+    const rawChannels = sidecar?.channels;
+    const channels: ExrChannel[] = Array.isArray(rawChannels)
+      ? (rawChannels as Array<Partial<ExrChannel>>).filter(
+          (ch): ch is ExrChannel => typeof ch.channel_name === "string"
+        )
+      : [];
+
+    const rawParts = sidecar?.parts;
+    const parts: ExrPart[] = Array.isArray(rawParts) ? (rawParts as ExrPart[]) : [];
+
+    const summary = (sidecar?.summary as ExrSummary | undefined) ??
+      (dbRow
+        ? {
+            resolution: (dbRow.resolution as string | undefined) ?? "unknown",
+            compression: (dbRow.compression as string | undefined) ?? "unknown",
+            colorSpace: (dbRow.color_space as string | undefined) ?? "unknown",
+            channelCount: (dbRow.channel_count as number | undefined) ?? 0,
+            isDeep: (dbRow.is_deep as boolean | undefined) ?? false,
+            frameNumber: (dbRow.frame_number as number | undefined) ?? null,
+          } satisfies ExrSummary
+        : undefined);
+
+    const found = panelMetadata.data.dbRows.length > 0 || !!sidecar;
+
+    return {
+      found,
+      channels,
+      parts,
+      summary,
+      file: (sidecar?.file as ExrFile | undefined) ?? undefined,
+    };
+  }, [panelMetadata.data]);
 
   // Fetch history (lazy)
   useEffect(() => {
@@ -1263,7 +1327,6 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
   useEffect(() => {
     setInfo(null);
     setHistory(null);
-    setExrMeta(null);
     // Reset to the first available tab for this media type — "metadata"
     // when supported, "info" otherwise.
     const mt = inferMediaType(asset.title, asset.sourceUri);
@@ -1279,13 +1342,15 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
       <FrameBar info={info} />
 
       {/* AOV tag pills — show channel layers from EXR metadata (images only) */}
-      {mediaType === "image" && exrMeta?.found && exrMeta.channels && exrMeta.channels.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-4 py-2 border-b border-[var(--color-ah-border-muted)]">
-          {[...new Set(exrMeta.channels.map((c) => c.layer_name || c.channel_name))].map((name) => (
-            <span key={name}
-              className="px-2 py-0.5 rounded-full text-[10px] font-[var(--font-ah-mono)] border border-[var(--color-ah-border)] text-[var(--color-ah-text-muted)] bg-[var(--color-ah-bg)]"
-            >{name}</span>
-          ))}
+      {mediaType === "image" && Array.isArray(panelMetadata.data?.sidecar?.channels) &&
+       (panelMetadata.data?.sidecar?.channels as unknown[]).length > 0 && (
+        <div className="px-4 py-2 border-b border-[var(--color-ah-border-muted)]">
+          <ChannelPills
+            channels={panelMetadata.data!.sidecar!.channels}
+            mode="dedup-by-layer"
+            containerClassName="flex flex-wrap gap-1.5"
+            pillClassName="px-2 py-0.5 rounded-full text-[10px] font-[var(--font-ah-mono)] border border-[var(--color-ah-border)] text-[var(--color-ah-text-muted)] bg-[var(--color-ah-bg)]"
+          />
         </div>
       )}
 
@@ -1298,7 +1363,129 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
         {activeTab === "history" && <HistoryTab events={loadingHistory ? null : history} />}
         {activeTab === "aovs" && <AovsTab exrMeta={exrMeta} />}
         {activeTab === "vast" && <VastTab asset={asset} exrMeta={exrMeta} />}
+        {activeTab === "integrity" && (
+          <IntegrityTabPanel assetId={asset.id} fileKind={inferIntegrityKind(asset)} />
+        )}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// IntegrityTabPanel — hashes + keyframes from GET /api/v1/assets/:id/integrity
+// ---------------------------------------------------------------------------
+
+function inferIntegrityKind(asset: AssetRow): "video" | "raw_camera" | "image" | "other" {
+  const t = inferMediaType(asset.title, asset.sourceUri);
+  if (t === "video") return "video";
+  if (t === "raw") return "raw_camera";
+  if (t === "image") return "image";
+  return "other";
+}
+
+interface IntegrityTabPanelProps {
+  assetId: string;
+  fileKind: "video" | "raw_camera" | "image" | "other";
+}
+
+function IntegrityTabPanel({ assetId, fileKind }: IntegrityTabPanelProps): JSX.Element {
+  const state = useAssetIntegrity(assetId);
+
+  if (state.status === "loading") {
+    return <div className="p-4 text-sm text-[var(--color-ah-text-muted)]">Loading integrity data…</div>;
+  }
+  if (state.status === "error") {
+    return (
+      <div className="p-4">
+        <div className="text-sm text-red-400">Unable to load integrity data</div>
+        <div className="text-[10px] text-[var(--color-ah-text-subtle)] mt-1 font-[var(--font-ah-mono)]">{state.error}</div>
+        <button
+          type="button"
+          className="mt-3 px-3 py-1 rounded border border-[var(--color-ah-border)] text-[var(--color-ah-text-muted)] text-[11px] hover:text-[var(--color-ah-text)] cursor-pointer"
+          onClick={state.retry}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (state.status !== "ready") {
+    return <div className="p-4 text-sm text-[var(--color-ah-text-subtle)]">No asset selected.</div>;
+  }
+
+  const { hashes, keyframes, sources } = state.data;
+  const hashesStatus: "ok" | "empty" | "n/a" = sources.hashes;
+  const keyframesStatus: "ok" | "empty" | "n/a" =
+    fileKind === "video" || fileKind === "raw_camera" ? sources.keyframes : "n/a";
+
+  return (
+    <div className="overflow-auto px-4 py-3 space-y-5" style={{ maxHeight: "calc(100vh - 200px)" }}>
+      <div className="flex gap-2">
+        <IntegrityStatusPill label="HASHES" status={hashesStatus} />
+        <IntegrityStatusPill label="KEYFRAMES" status={keyframesStatus} />
+      </div>
+
+      <section>
+        <SectionHeader title="Hashes" />
+        {hashes ? (
+          <dl>
+            <MetaRow label="SHA-256" value={truncateHash(hashes.sha256)} copyable />
+            {hashes.perceptual_hash && (
+              <MetaRow label="Perceptual" value={truncateHash(hashes.perceptual_hash)} />
+            )}
+            <MetaRow label="Algorithm" value={hashes.algorithm_version} />
+            <MetaRow label="Bytes hashed" value={hashes.bytes_hashed.toLocaleString()} />
+            <MetaRow
+              label="Hashed at"
+              value={new Date(hashes.hashed_at).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })}
+            />
+          </dl>
+        ) : (
+          <p className="text-[11px] text-[var(--color-ah-text-subtle)]">Not yet hashed.</p>
+        )}
+      </section>
+
+      <section>
+        <SectionHeader title="Keyframes" />
+        {keyframes ? (
+          <dl>
+            <MetaRow label="Frames" value={`${keyframes.keyframe_count}`} accent />
+            <MetaRow label="Prefix" value={keyframes.keyframe_prefix} copyable />
+            {keyframes.thumbnail_key && (
+              <MetaRow label="Thumbnail" value={keyframes.thumbnail_key} copyable />
+            )}
+            {keyframes.extracted_at && (
+              <MetaRow
+                label="Extracted at"
+                value={new Date(keyframes.extracted_at).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })}
+              />
+            )}
+          </dl>
+        ) : keyframesStatus === "n/a" ? (
+          <p className="text-[11px] text-[var(--color-ah-text-subtle)]">Not applicable for this asset kind.</p>
+        ) : (
+          <p className="text-[11px] text-[var(--color-ah-text-subtle)]">No keyframes.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function truncateHash(h: string): string {
+  if (h.length <= 20) return h;
+  return `${h.slice(0, 12)}…${h.slice(-6)}`;
+}
+
+function IntegrityStatusPill({ label, status }: { label: string; status: "ok" | "empty" | "n/a" }): JSX.Element {
+  const cls =
+    status === "ok"
+      ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+      : status === "empty"
+        ? "bg-[var(--color-ah-bg)] text-[var(--color-ah-text-muted)] border-[var(--color-ah-border)]"
+        : "bg-[var(--color-ah-bg)] text-[var(--color-ah-text-subtle)] border-[var(--color-ah-border-muted)]";
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-[10px] font-[var(--font-ah-mono)] border ${cls}`}>
+      {label} · {status}
+    </span>
   );
 }

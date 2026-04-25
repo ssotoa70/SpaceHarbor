@@ -2637,123 +2637,6 @@ export interface ExrAttributeMetadata {
   [key: string]: unknown;
 }
 
-export interface ExrMetadataLookupResult {
-  found: boolean;
-  file?: ExrFileMetadata;
-  parts?: ExrPartMetadata[];
-  channels?: ExrChannelMetadata[];
-  attributes?: ExrAttributeMetadata[];
-  summary?: {
-    resolution: string;
-    compression: string;
-    colorSpace: string;
-    channelCount: number;
-    isDeep: boolean;
-    frameNumber: number | null;
-  };
-}
-
-export interface ExrMetadataStats {
-  totalFiles: number;
-  totalParts: number;
-  totalChannels: number;
-  totalAttributes: number;
-  schema: string;
-}
-
-export async function fetchExrMetadataFiles(options?: {
-  pathPrefix?: string;
-  limit?: number;
-  offset?: number;
-}): Promise<{ files: ExrFileMetadata[]; total: number }> {
-  try {
-    const params = new URLSearchParams();
-    if (options?.pathPrefix) params.set("pathPrefix", options.pathPrefix);
-    if (options?.limit) params.set("limit", String(options.limit));
-    if (options?.offset) params.set("offset", String(options.offset));
-
-    const response = await fetch(
-      `${API_BASE_URL}/api/v1/exr-metadata/files?${params.toString()}`,
-      { headers: withAuth() },
-    );
-    if (!response.ok) return { files: [], total: 0 };
-    return (await response.json()) as { files: ExrFileMetadata[]; total: number };
-  } catch {
-    return { files: [], total: 0 };
-  }
-}
-
-export async function fetchExrMetadataLookup(path: string): Promise<ExrMetadataLookupResult> {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/api/v1/exr-metadata/lookup?path=${encodeURIComponent(path)}`,
-      { headers: withAuth() },
-    );
-    if (!response.ok) return { found: false };
-    return (await response.json()) as ExrMetadataLookupResult;
-  } catch {
-    return { found: false };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Video metadata lookup — parallel surface for video-metadata-extractor output.
-//
-// The schema is owned by the functions team and is INTENTIONALLY loose here:
-// the UI consumes `summary` (a best-effort dict of well-known fields if
-// present) and `attributes` (a flat list of every other column) so the
-// sidebar can render any shape the function chooses to emit without code
-// changes on this side.
-// ---------------------------------------------------------------------------
-
-export interface VideoMetadataSummary {
-  resolution?: string;
-  codec?: string;
-  duration?: string | number;
-  fps?: string | number;
-  bitrate?: string | number;
-  colorSpace?: string;
-  hdr?: string;
-  audioChannels?: string | number;
-  cameraMake?: string;
-  cameraModel?: string;
-  timecodeStart?: string;
-  rawMetadataOnly?: boolean;
-  // Intentionally open — the Python service populates whatever well-known
-  // fields it can find. Unknown keys fall through to `attributes`.
-  [key: string]: unknown;
-}
-
-export interface VideoMetadataAttribute {
-  name: string;
-  value: unknown;
-}
-
-export interface VideoMetadataLookupResult {
-  found: boolean;
-  /** Raw row from the video_metadata table, passed through unchanged. */
-  file?: Record<string, unknown>;
-  /** Best-effort computed highlights from well-known column names. */
-  summary?: VideoMetadataSummary;
-  /** All other row columns as generic name/value pairs for dynamic rendering. */
-  attributes?: VideoMetadataAttribute[];
-  /** Optional diagnostic surfaced from the sidecar on query failure. */
-  error?: string;
-}
-
-export async function fetchVideoMetadataLookup(path: string): Promise<VideoMetadataLookupResult> {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/api/v1/video-metadata/lookup?path=${encodeURIComponent(path)}`,
-      { headers: withAuth() },
-    );
-    if (!response.ok) return { found: false };
-    return (await response.json()) as VideoMetadataLookupResult;
-  } catch {
-    return { found: false };
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Storage metadata lookup — reads the _metadata.json sidecar from S3 via the
 // control-plane route. Schema-agnostic: the response envelope exposes the
@@ -2958,19 +2841,6 @@ export async function testMetadataLookup(args: {
   return (await response.json()) as MetadataLookupResult;
 }
 
-export async function fetchExrMetadataStats(): Promise<ExrMetadataStats | null> {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/api/v1/exr-metadata/stats`,
-      { headers: withAuth() },
-    );
-    if (!response.ok) return null;
-    return (await response.json()) as ExrMetadataStats;
-  } catch {
-    return null;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // S3 Presigned URL — for media preview in browser
 // ---------------------------------------------------------------------------
@@ -3112,10 +2982,20 @@ export async function fetchProcessingStatus(sourceUris: string[]): Promise<Proce
       headers: withAuth({ "content-type": "application/json" }),
       body: JSON.stringify({ sourceUris }),
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      if (import.meta.env.DEV) {
+        console.warn(
+          `[fetchProcessingStatus] server returned ${response.status} ${response.statusText}; returning []`,
+        );
+      }
+      return [];
+    }
     const data = (await response.json()) as { results: ProcessingStatusEntry[] };
     return data.results ?? [];
-  } catch {
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.warn(`[fetchProcessingStatus] network error; returning []:`, err);
+    }
     return [];
   }
 }
@@ -3946,4 +3826,95 @@ export interface AssetMetadataResponse {
 
 export async function fetchAssetMetadata(assetId: string): Promise<AssetMetadataResponse> {
   return apiFetch<AssetMetadataResponse>(`/assets/${encodeURIComponent(assetId)}/metadata`);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Phase 6.0 — asset stats + integrity + function configs
+// ─────────────────────────────────────────────────────────────────────
+
+export interface AssetStatsResponse {
+  total: number;
+  byStatus: Record<string, number>;
+  byKind: Record<string, number>;
+  integrity: { hashed: number; with_keyframes: number };
+}
+
+export async function fetchAssetStats(): Promise<AssetStatsResponse> {
+  const response = await fetch("/api/v1/assets/stats", { credentials: "include" });
+  if (!response.ok) throw new ApiRequestError(response.status, `asset stats: ${response.status}`);
+  return (await response.json()) as AssetStatsResponse;
+}
+
+export interface AssetIntegrityHashes {
+  sha256: string;
+  perceptual_hash: string | null;
+  algorithm_version: string;
+  bytes_hashed: number;
+  hashed_at: string;
+}
+export interface AssetIntegrityKeyframes {
+  keyframe_count: number;
+  keyframe_prefix: string;
+  thumbnail_key: string;
+  extracted_at: string;
+}
+export interface AssetIntegrityResponse {
+  assetId: string;
+  sources: { hashes: "ok" | "empty"; keyframes: "ok" | "empty" };
+  hashes: AssetIntegrityHashes | null;
+  keyframes: AssetIntegrityKeyframes | null;
+}
+
+export async function fetchAssetIntegrity(assetId: string): Promise<AssetIntegrityResponse> {
+  const response = await fetch(`/api/v1/assets/${encodeURIComponent(assetId)}/integrity`, { credentials: "include" });
+  if (!response.ok) throw new ApiRequestError(response.status, `asset integrity: ${response.status}`);
+  return (await response.json()) as AssetIntegrityResponse;
+}
+
+export type FunctionConfigValueType = "int" | "float" | "bool" | "string" | "duration_seconds";
+
+export interface FunctionConfigDTO {
+  scope: string;
+  key: string;
+  valueType: FunctionConfigValueType;
+  value: unknown;
+  default: unknown;
+  min: number | null;
+  max: number | null;
+  description: string;
+  label: string;
+  category: string;
+  lastEditedBy: string | null;
+  lastEditedAt: string | null;
+}
+
+export async function fetchFunctionConfigs(scope: string): Promise<FunctionConfigDTO[]> {
+  const response = await fetch(`/api/v1/function-configs/${encodeURIComponent(scope)}`, { credentials: "include" });
+  if (!response.ok) throw new ApiRequestError(response.status, `function-configs list: ${response.status}`);
+  const body = (await response.json()) as { configs: FunctionConfigDTO[] };
+  return body.configs;
+}
+
+export async function saveFunctionConfig(
+  scope: string, key: string, value: unknown,
+): Promise<FunctionConfigDTO> {
+  const response = await fetch(
+    `/api/v1/function-configs/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`,
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    },
+  );
+  if (!response.ok) {
+    let msg = `function-configs save: ${response.status}`;
+    try {
+      const body = await response.json() as { message?: string };
+      if (body.message) msg = body.message;
+    } catch { /* no-op */ }
+    throw new ApiRequestError(response.status, msg);
+  }
+  const body = (await response.json()) as { config: FunctionConfigDTO };
+  return body.config;
 }

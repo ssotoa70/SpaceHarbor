@@ -65,6 +65,6 @@ export function createVastdbTargetProbe(proxy?: ProxyFn): TargetProbe {
  * data-engine and routes folders.
  */
 export async function createProductionVastdbTargetProbe(): Promise<TargetProbe> {
-  const { proxyToVastdbQuery } = await import("../routes/exr-metadata.js");
+  const { proxyToVastdbQuery } = await import("../http/proxy.js");
   return createVastdbTargetProbe(proxyToVastdbQuery);
 }

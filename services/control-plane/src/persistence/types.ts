@@ -718,6 +718,44 @@ export interface AuditRetentionApplyResult {
   remainingCount: number;
 }
 
+/**
+ * Catalog-wide asset counters returned by {@link PersistenceAdapter.getAssetStats}.
+ *
+ * Consumed by `GET /api/v1/assets/stats` (Phase 6.0 Layer C1) to populate the
+ * <KpiCounterStrip> on the Asset Browser. Integrity counters gracefully return
+ * 0 when `asset_integrity.*` tables are empty or not yet deployed.
+ */
+export interface AssetStatsSnapshot {
+  total: number;
+  byStatus: Record<string, number>;
+  byKind: Record<string, number>;
+  integrity: { hashed: number; withKeyframes: number };
+}
+
+/**
+ * Per-asset integrity snapshot returned by {@link PersistenceAdapter.getAssetIntegrity}.
+ *
+ * Consumed by `GET /api/v1/assets/:id/integrity` (Phase 6.0 Layer C2). The caller
+ * derives `sources={hashes,keyframes} ∈ {ok|empty}` from the nullability of each
+ * payload object. `assetExists=false` triggers a 404 ASSET_NOT_FOUND at the route.
+ */
+export interface AssetIntegritySnapshot {
+  assetExists: boolean;
+  hashes: {
+    sha256: string;
+    perceptualHash: string | null;
+    algorithmVersion: string;
+    bytesHashed: number;
+    hashedAt: string;
+  } | null;
+  keyframes: {
+    keyframeCount: number;
+    keyframePrefix: string;
+    thumbnailKey: string;
+    extractedAt: string;
+  } | null;
+}
+
 export interface PersistenceAdapter extends VfxHierarchyAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
@@ -753,6 +791,8 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
   getOutboxItems(): Promise<OutboxItem[]>;
   publishOutbox(context: WriteContext): Promise<number>;
   getWorkflowStats(nowIso?: string): Promise<WorkflowStats>;
+  getAssetStats(): Promise<AssetStatsSnapshot>;
+  getAssetIntegrity(assetId: string): Promise<AssetIntegritySnapshot>;
   listAssetQueueRows(): Promise<AssetQueueRow[]>;
   getAuditEvents(): Promise<AuditEvent[]>;
   previewAuditRetention(cutoffIso: string): Promise<AuditRetentionPreview>;

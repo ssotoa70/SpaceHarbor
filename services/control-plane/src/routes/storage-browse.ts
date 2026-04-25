@@ -15,6 +15,7 @@ import { withPrefix } from "../http/routes.js";
 import { errorEnvelopeSchema } from "../http/schemas.js";
 import { getStorageEndpoints } from "./platform-settings.js";
 import { setVastTlsSkip, restoreVastTls } from "../vast/vast-fetch.js";
+import { inferFileKind, type FileKind } from "../storage/file-kinds.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,46 +42,6 @@ function inferMediaType(path: string): string {
   return EXTENSION_MEDIA_MAP[ext] ?? "other";
 }
 
-// ---------------------------------------------------------------------------
-// Processing-pipeline file kind routing
-//
-// The /storage/processing-status endpoint branches on "file kind" to decide
-// which DataEngine function is expected to produce artifacts for a given
-// source file, and therefore which .proxies/ keys to HEAD-check.
-//
-//   image      → oiio-proxy-generator      (underscore separator: _thumb.jpg, _proxy.jpg)
-//   video      → video-proxy-generator +
-//                video-metadata-extractor  (hyphen separator:     -proxy.mp4, -sprites.jpg/vtt)
-//   raw_camera → video-metadata-extractor only (no proxy will ever be produced —
-//                raw transcoding needs vendor SDKs not available in the
-//                serverless container). Metadata presence is the final state.
-//   other      → formats the pipeline doesn't process (pdf, txt, etc.)
-//
-// The authoritative contract is documented in the project memory at
-// project_dataengine_function_coverage.md — keep that file and this block in sync.
-// ---------------------------------------------------------------------------
-
-type FileKind = "image" | "video" | "raw_camera" | "other";
-
-const IMAGE_PIPELINE_EXTS = new Set([
-  ".exr", ".dpx", ".tif", ".tiff", ".png", ".jpg", ".jpeg",
-]);
-const VIDEO_PIPELINE_EXTS = new Set([
-  ".mp4", ".mov", ".mxf", ".avi", ".mkv", ".m4v", ".webm", ".m2ts",
-]);
-const RAW_CAMERA_EXTS = new Set([
-  ".r3d", ".braw",
-]);
-
-function inferFileKind(filename: string): FileKind {
-  const lastDot = filename.lastIndexOf(".");
-  if (lastDot === -1) return "other";
-  const ext = filename.substring(lastDot).toLowerCase();
-  if (IMAGE_PIPELINE_EXTS.has(ext)) return "image";
-  if (VIDEO_PIPELINE_EXTS.has(ext)) return "video";
-  if (RAW_CAMERA_EXTS.has(ext)) return "raw_camera";
-  return "other";
-}
 
 function makeS3Client(ep: { endpoint: string; accessKeyId: string; secretAccessKey: string; region: string; pathStyle: boolean; useSsl: boolean }): S3Client {
   return new S3Client({
@@ -676,8 +637,8 @@ export async function registerStorageBrowseRoutes(
             const resolvedBucket = bucket ?? ep.bucket;
 
             // Branch on file kind — different functions own different formats
-            // and emit artifacts with different naming conventions. See the
-            // module-level comment on inferFileKind for the routing rules.
+            // and emit artifacts with different naming conventions. See
+            // `inferFileKind` in ../storage/file-kinds.ts for the routing rules.
             const dir = key.includes("/") ? key.substring(0, key.lastIndexOf("/")) : "";
             const filename = key.includes("/") ? key.substring(key.lastIndexOf("/") + 1) : key;
             const baseName = filename.replace(/\.[^.]+$/, "");

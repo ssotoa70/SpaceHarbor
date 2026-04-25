@@ -2,14 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchExrMetadataLookup, fetchVideoMetadataLookup, fetchMediaUrls, type AssetRow, type AssetDependencyData, type UnregisteredFile, type ExrMetadataLookupResult, type VideoMetadataLookupResult } from "../api";
+import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchMediaUrls, type AssetRow, type AssetDependencyData, type UnregisteredFile } from "../api";
+import { useAssetMetadata } from "../hooks/useAssetMetadata";
 import { Badge, Button, Input, Skeleton } from "../design-system";
 import { AssetDetailPanel } from "../components/AssetDetailPanel";
-import { metadataKindForFilename } from "../utils/metadata-routing";
 
 import { AssetSelectionToolbar } from "../components/AssetSelectionToolbar";
 import { AssetContextMenu } from "../components/AssetContextMenu";
 import { CloseIcon } from "../components/CloseIcon";
+import { KpiCounterStrip } from "../components/KpiCounterStrip";
 import { MediaTypeIcon } from "../components/MediaTypeIcon";
 import type { PipelineStage } from "../types";
 import {
@@ -406,14 +407,7 @@ interface MediaPreviewProps {
   onNavigate: (asset: AssetRow) => void;
 }
 
-function attrDisplayValue(attr: { value_text?: string | null; value_float?: number | null; value_int?: number | null }): string {
-  if (attr.value_text != null && attr.value_text !== "") return attr.value_text;
-  if (attr.value_float != null) return String(attr.value_float);
-  if (attr.value_int != null) return String(attr.value_int);
-  return "(empty)";
-}
-
-// Dynamic-field helpers used by the video metadata rendering path. Both are
+// Dynamic-field helpers used by the metadata rendering path. Both are
 // schema-agnostic: humanizeMetaLabel turns snake_case / camelCase column
 // names into "Title Case" display labels, and formatMetaFieldValue coerces
 // any JSON value (string / number / bool / array / nested object) to a safe
@@ -441,8 +435,8 @@ function formatMetaFieldValue(value: unknown): string {
 
 function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [exrMeta, setExrMeta] = useState<ExrMetadataLookupResult | null>(null);
-  const [videoMeta, setVideoMeta] = useState<VideoMetadataLookupResult | null>(null);
+  const metadataResult = useAssetMetadata(asset?.id ?? null);
+  const metadata = metadataResult.status === "ready" ? metadataResult.data : undefined;
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoaded, setPreviewLoaded] = useState(false);
@@ -491,46 +485,6 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
     });
   }, [asset.sourceUri, asset.title]);
 
-  // Load metadata — routed by file extension to the right DataEngine lookup.
-  // EXR files go through fetchExrMetadataLookup (oiio-inspector schema),
-  // video + raw camera files go through fetchVideoMetadataLookup
-  // (video-metadata-extractor schema). The extension→kind mapping lives in
-  // utils/metadata-routing so the Storage Browser and this view stay in sync.
-  useEffect(() => {
-    setExrMeta(null);
-    setVideoMeta(null);
-    if (!asset.sourceUri) return;
-
-    const filename = asset.title || asset.sourceUri.split("/").pop() || "";
-    const kind = metadataKindForFilename(filename);
-
-    if (kind === "image") {
-      void fetchExrMetadataLookup(asset.sourceUri).then((res) => {
-        if (res.found) { setExrMeta(res); return; }
-        // Fallback: try the bare filename (the exr_metadata table may store
-        // filenames without the full s3:// prefix).
-        if (filename && filename !== asset.sourceUri) {
-          void fetchExrMetadataLookup(filename).then(setExrMeta);
-        } else {
-          setExrMeta(res);
-        }
-      });
-    } else if (kind === "video") {
-      void fetchVideoMetadataLookup(asset.sourceUri).then((res) => {
-        if (res.found) { setVideoMeta(res); return; }
-        if (filename && filename !== asset.sourceUri) {
-          void fetchVideoMetadataLookup(filename).then(setVideoMeta);
-        } else {
-          setVideoMeta(res);
-        }
-      });
-    }
-    // kind === "none" — no metadata expected, leave both null.
-  }, [asset.sourceUri, asset.title]);
-
-  const exr = exrMeta?.found ? exrMeta : null;
-  const summary = exr?.summary;
-  const firstPart = exr?.parts?.[0];
   const mediaType = inferMediaType(asset.title, asset.sourceUri);
 
   // Build dynamic fields
@@ -540,54 +494,90 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
     fields.push({ group, label, value: String(value) });
   };
 
+  // Unified metadata from useAssetMetadata — reads DB rows + S3 sidecar via
+  // the /assets/:id/metadata endpoint (C-1b unified reader + Layer A fallback).
+  const dbRow = metadata?.dbRows?.[0] as Record<string, unknown> | undefined;
+  const sidecar = metadata?.sidecar as Record<string, unknown> | null | undefined;
+  // Helper: prefer dbRow value, fall back to sidecar, coerce to string or null.
+  // Returns null for arrays/objects — those are not renderable as a single field value.
+  const field = (name: string): string | null => {
+    const v = dbRow?.[name] ?? sidecar?.[name];
+    if (v == null) return null;
+    if (typeof v === "object") return null;
+    return String(v);
+  };
+
   addField("File", "Filename", asset.title);
   addField("File", "Source", asset.sourceUri);
-  if (asset.metadata?.file_size_bytes) addField("File", "Size", formatFileSize(asset.metadata.file_size_bytes));
-  else if (exr?.file?.size_bytes) addField("File", "Size", formatFileSize(exr.file.size_bytes));
+  if (asset.metadata?.file_size_bytes) {
+    addField("File", "Size", formatFileSize(asset.metadata.file_size_bytes));
+  } else {
+    const sizeBytes = field("size_bytes") ?? field("file_size_bytes");
+    if (sizeBytes) addField("File", "Size", formatFileSize(Number(sizeBytes)));
+  }
   if (asset.createdAt) addField("File", "Created", new Date(asset.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }));
 
-  if (summary) {
-    addField("Image", "Resolution", summary.resolution);
-    addField("Image", "Compression", summary.compression);
-    addField("Image", "Channels", String(summary.channelCount));
-    addField("Image", "Color Space", summary.colorSpace);
-    if (summary.isDeep) addField("Image", "Type", "Deep EXR");
-    if (summary.frameNumber != null) addField("Image", "Frame", String(summary.frameNumber));
+  // Image fields — read from unified dbRow/sidecar (oiio-inspector or sidecar shape).
+  const resolution =
+    field("resolution") ??
+    (field("width") && field("height") ? `${field("width")}x${field("height")}` : null);
+  const compression = field("compression");
+  const colorSpace = field("color_space") ?? field("colorSpace");
+  const channelCount = field("channel_count") ?? field("channelCount") ?? field("channels");
+  const isDeep = field("is_deep") ?? field("isDeep");
+  const frameNumber = field("frame_number") ?? field("frameNumber");
+
+  if (resolution || compression || channelCount || colorSpace) {
+    addField("Image", "Resolution", resolution);
+    addField("Image", "Compression", compression);
+    if (channelCount) addField("Image", "Channels", channelCount);
+    addField("Image", "Color Space", colorSpace);
+    if (isDeep === "true" || isDeep === "1") addField("Image", "Type", "Deep EXR");
+    if (frameNumber != null) addField("Image", "Frame", frameNumber);
   }
 
-  if (firstPart) {
-    if (firstPart.render_software) addField("Technical", "Render Software", firstPart.render_software);
-    if (firstPart.display_window) addField("Technical", "Display Window", firstPart.display_window);
-    else if (firstPart.display_width) addField("Technical", "Display Window", `${firstPart.display_width}x${firstPart.display_height}`);
-    if (firstPart.data_window) addField("Technical", "Data Window", firstPart.data_window);
-    if (firstPart.pixel_aspect_ratio != null && firstPart.pixel_aspect_ratio !== 1) addField("Technical", "Pixel Aspect", String(firstPart.pixel_aspect_ratio));
-    if (firstPart.line_order) addField("Technical", "Line Order", firstPart.line_order);
-    if (firstPart.is_tiled) addField("Technical", "Tiling", `${firstPart.tile_width ?? "?"}x${firstPart.tile_height ?? "?"}`);
-    if (firstPart.multi_view) addField("Technical", "Multi-View", "Yes");
+  // Technical fields (EXR part-level metadata preserved from the sidecar/dbRow).
+  addField("Technical", "Render Software", field("render_software"));
+  const displayWindow = field("display_window") ??
+    (field("display_width") && field("display_height") ? `${field("display_width")}x${field("display_height")}` : null);
+  addField("Technical", "Display Window", displayWindow);
+  addField("Technical", "Data Window", field("data_window"));
+  const pixelAspect = field("pixel_aspect_ratio");
+  if (pixelAspect && pixelAspect !== "1" && pixelAspect !== "1.0") {
+    addField("Technical", "Pixel Aspect", pixelAspect);
+  }
+  addField("Technical", "Line Order", field("line_order"));
+  if (field("is_tiled") === "true" || field("is_tiled") === "1") {
+    const tw = field("tile_width") ?? "?";
+    const th = field("tile_height") ?? "?";
+    addField("Technical", "Tiling", `${tw}x${th}`);
+  }
+  if (field("multi_view") === "true" || field("multi_view") === "1") {
+    addField("Technical", "Multi-View", "Yes");
   }
 
-  if (exr?.attributes) {
-    for (const attr of exr.attributes) {
-      addField("Attributes", attr.attr_name, attrDisplayValue(attr));
-    }
-  }
-
-  // Video metadata — dynamic rendering since the video_metadata schema is
-  // owned by the functions team and we don't want to hardcode field names.
-  // summary goes into a "Media" group for prominence; every other column
-  // from the raw row falls through to a generic "Attributes" group via the
-  // attributes array.
-  const video = videoMeta?.found ? videoMeta : null;
-  if (video?.summary) {
-    for (const [key, value] of Object.entries(video.summary)) {
-      if (value === undefined || value === null || value === "") continue;
-      addField("Media", humanizeMetaLabel(key), formatMetaFieldValue(value));
-    }
-  }
-  if (video?.attributes) {
-    for (const attr of video.attributes) {
-      addField("Attributes", humanizeMetaLabel(attr.name), formatMetaFieldValue(attr.value));
-    }
+  // Dynamic fields — merge sidecar + dbRow and emit everything not already
+  // captured above into the "Media" group.  dbRow takes precedence over sidecar.
+  // This handles the video/raw-camera schema without hardcoding column names.
+  const ALREADY_RENDERED = new Set([
+    "resolution", "width", "height", "compression", "color_space", "colorSpace",
+    "channel_count", "channelCount", "channels", "is_deep", "isDeep",
+    "frame_number", "frameNumber", "size_bytes", "file_size_bytes",
+    "render_software", "display_window", "display_width", "display_height",
+    "data_window", "pixel_aspect_ratio", "line_order", "is_tiled",
+    "tile_width", "tile_height", "multi_view",
+    // Structured sidecar arrays — rendered by dedicated components, not here.
+    "parts", "attributes", "layers",
+  ]);
+  const combined = { ...(sidecar ?? {}), ...(dbRow ?? {}) };
+  for (const [k, v] of Object.entries(combined)) {
+    if (ALREADY_RENDERED.has(k)) continue;
+    if (v == null || v === "") continue;
+    // Skip arrays and nested objects — they render as ugly JSON blobs via
+    // JSON.stringify fallback. Structured fields (channels, parts, attributes)
+    // should be rendered by dedicated components, not the generic Media loop.
+    if (typeof v === "object") continue;
+    addField("Media", humanizeMetaLabel(k), formatMetaFieldValue(v));
   }
 
   const grouped = new Map<string, typeof fields>();
@@ -616,10 +606,10 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
             <span className="text-[13px] text-gray-500">Library</span>
             <span className="text-gray-600 text-xs">/</span>
             <h2 className="text-[13px] font-medium text-white truncate">{asset.title}</h2>
-            {summary && (
+            {resolution && (
               <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-500 shrink-0 ml-2">
-                {summary.resolution} &middot; {summary.compression}
-                {summary.colorSpace !== "unknown" ? ` \u00b7 ${summary.colorSpace}` : ""}
+                {resolution}{compression ? ` \u00b7 ${compression}` : ""}
+                {colorSpace && colorSpace !== "unknown" ? ` \u00b7 ${colorSpace}` : ""}
               </span>
             )}
           </div>
@@ -715,16 +705,20 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
                 Created {new Date(asset.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
               </p>
             )}
-            {summary && (
+            {(resolution || compression) && (
               <div className="flex gap-4">
-                <div className="text-center">
-                  <div className="text-[9px] font-[var(--font-ah-mono)] tracking-[0.12em] text-gray-500 uppercase mb-0.5">Format</div>
-                  <div className="text-[13px] font-semibold text-white">{summary.compression?.toUpperCase() || "EXR"}</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-[9px] font-[var(--font-ah-mono)] tracking-[0.12em] text-gray-500 uppercase mb-0.5">Resolution</div>
-                  <div className="text-[13px] font-semibold text-white">{summary.resolution}</div>
-                </div>
+                {compression && (
+                  <div className="text-center">
+                    <div className="text-[9px] font-[var(--font-ah-mono)] tracking-[0.12em] text-gray-500 uppercase mb-0.5">Format</div>
+                    <div className="text-[13px] font-semibold text-white">{compression.toUpperCase()}</div>
+                  </div>
+                )}
+                {resolution && (
+                  <div className="text-center">
+                    <div className="text-[9px] font-[var(--font-ah-mono)] tracking-[0.12em] text-gray-500 uppercase mb-0.5">Resolution</div>
+                    <div className="text-[13px] font-semibold text-white">{resolution}</div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -755,7 +749,7 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
             ))}
             {fields.length === 0 && (
               <p className="text-[11px] text-gray-600 py-4 text-center">
-                {exrMeta === null ? "Loading metadata..." : "No metadata available."}
+                {metadataResult.status === "loading" ? "Loading metadata..." : "No metadata available."}
               </p>
             )}
           </div>
@@ -1307,6 +1301,7 @@ export function AssetBrowser() {
     <section aria-label="Asset browser" className="flex gap-0 h-full">
       {/* ── Main content area ── */}
       <div className={`flex-1 min-w-0 ${panelOpen ? "pr-0" : ""}`}>
+      <KpiCounterStrip />
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold">Assets</h1>
         <div className="flex items-center gap-2">

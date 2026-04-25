@@ -74,11 +74,18 @@ describe("pickFirstMatch", () => {
 });
 
 describe("createVastFunctionFetcher — HTTP orchestration", () => {
-  /** Fake token manager — returns a fixed token, never hits the network. */
+  /** Fake token manager — returns a fixed token, never hits the network.
+   *  Tracks state across forceRefresh() so that subsequent getToken() calls
+   *  return the refreshed value (required because the retry wrapper calls
+   *  fn() fresh on each attempt, which calls getToken() fresh). */
   function fakeTokenManager(token = "fake-access-token"): VmsTokenManager {
     const mgr = Object.create(VmsTokenManager.prototype) as VmsTokenManager;
-    (mgr as unknown as { getToken: () => Promise<string> }).getToken = async () => token;
-    (mgr as unknown as { forceRefresh: () => Promise<string> }).forceRefresh = async () => token + "-refreshed";
+    let current = token;
+    (mgr as unknown as { getToken: () => Promise<string> }).getToken = async () => current;
+    (mgr as unknown as { forceRefresh: () => Promise<string> }).forceRefresh = async () => {
+      current = token + "-refreshed";
+      return current;
+    };
     return mgr;
   }
 

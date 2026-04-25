@@ -27,10 +27,11 @@ import { migration as m020 } from "./020_triggers_webhooks.js";
 import { migration as m021 } from "./021_workflow_engine.js";
 import { migration as m022 } from "./022_dataengine_dispatches.js";
 import { migration as m023 } from "./023_naming_templates.js";
+import { migration as m024 } from "./024_function_configs.js";
 
 export type { Migration } from "./types.js";
 
 export const migrations: Migration[] = [
   m001, m002, m003, m004, m005, m006, m007, m008, m009, m010,
-  m011, m012, m013, m014, m015, m016, m017, m018, m019, m020, m021, m022, m023,
+  m011, m012, m013, m014, m015, m016, m017, m018, m019, m020, m021, m022, m023, m024,
 ];

@@ -3,27 +3,17 @@ SpaceHarbor VAST Database Query Service.
 
 Lightweight REST API that queries VAST Database tables using the vastdb
 Python SDK. Designed to read tables created by DataEngine serverless
-functions (e.g. exr-inspector, video-metadata-extractor) without requiring
-Trino.
+functions without requiring Trino.
 
 Environment variables:
   VASTDB_ENDPOINT     - CNode VIP or S3 endpoint (required)
   VASTDB_ACCESS_KEY   - S3 access key (required)
   VASTDB_SECRET_KEY   - S3 secret key (required)
   VASTDB_BUCKET       - Database bucket (default: sergio-db)
-
-  # frame-metadata-extractor output (image path). Renamed from exr_metadata
-  # to frame_metadata in the 2026-04 realignment — the extractor now covers
-  # EXR, DPX, TIFF, PNG, TGA, HDR, JPEG2000, Cineon all in one schema.
-  VASTDB_SCHEMA       - Image metadata schema name (default: frame_metadata)
-
-  # video-metadata-extractor output (video path)
-  VASTDB_VIDEO_SCHEMA - Video metadata schema name (default: video_metadata)
-  VASTDB_VIDEO_TABLE  - Table name inside the video schema (default: files)
-
   PORT                - HTTP port (default: 8070)
 
-All schema and table names MUST be env-configurable. Never hardcode.
+Note: Schema and table names are now passed per-request to the /metadata/lookup
+endpoint, eliminating env-bound schema coupling.
 """
 
 import logging
@@ -33,8 +23,9 @@ from typing import Optional
 
 import pyarrow as pa
 import vastdb
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("vastdb-query")
@@ -48,17 +39,6 @@ ACCESS_KEY = os.environ.get("VASTDB_ACCESS_KEY", "")
 SECRET_KEY = os.environ.get("VASTDB_SECRET_KEY", "")
 DEFAULT_BUCKET = os.environ.get("VASTDB_BUCKET", "sergio-db")
 
-# Image metadata (frame-metadata-extractor). The var name VASTDB_SCHEMA is
-# kept for back-compat with existing deployments; the default was updated
-# from exr_metadata to frame_metadata in 2026-04 when the extractor
-# consolidated all image formats into a single schema.
-DEFAULT_SCHEMA = os.environ.get("VASTDB_SCHEMA", "frame_metadata")
-
-# Video metadata (video-metadata-extractor). Schema and table are both
-# env-configurable — the functions team owns the table definition and may
-# rename either without touching this service.
-DEFAULT_VIDEO_SCHEMA = os.environ.get("VASTDB_VIDEO_SCHEMA", "video_metadata")
-DEFAULT_VIDEO_TABLE = os.environ.get("VASTDB_VIDEO_TABLE", "files")
 
 # ---------------------------------------------------------------------------
 # Schema-agnostic metadata lookup — Phase 5.4 (asset metadata DB reader)
@@ -72,6 +52,22 @@ MATCH_COLUMN_PRIORITY: tuple[str, ...] = (
     "path",
     "file_path",
     "uri",
+)
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics
+# ---------------------------------------------------------------------------
+# Counter incremented each time /api/v1/metadata/lookup falls back from the
+# primary bucket-prefixed key to the bucket-stripped variant. A sustained
+# rate indicates extractor drift (the video-metadata-extractor stores
+# s3_key without the bucket prefix while callers uniformly send the
+# prefixed form). Ops should alert when rate(metadata_lookup_fallback_total[5m])
+# is sustained above ~0.5/s — that threshold is empirical; tune per deployment.
+# (A request-total counter may be added later to enable ratio-based alerting.)
+metadata_lookup_fallback_total = Counter(
+    "metadata_lookup_fallback_total",
+    "Count of /metadata/lookup calls that hit via the bucket-stripped fallback path",
+    ["schema", "table"],
 )
 
 
@@ -93,6 +89,15 @@ app = FastAPI(
     description="Query VAST Database tables created by DataEngine functions",
     version="1.0.0",
 )
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics():
+    """Prometheus scrape endpoint. Exposes all registered metrics in the
+    standard text-based exposition format. No authentication — intended
+    for scraping by a trusted in-cluster Prometheus agent."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -144,22 +149,6 @@ def table_to_records(
 
 
 # ---------------------------------------------------------------------------
-# Columns to exclude (vector columns break some readers)
-# ---------------------------------------------------------------------------
-
-FILES_COLUMNS = [
-    "file_id", "file_path", "file_path_normalized", "header_hash",
-    "size_bytes", "mtime", "multipart_count", "is_deep",
-    "frame_number", "inspection_timestamp", "inspection_count", "last_inspected",
-]
-
-CHANNELS_COLUMNS = [
-    "file_id", "file_path", "part_index", "channel_name",
-    "layer_name", "component_name", "channel_type",
-    "x_sampling", "y_sampling",
-]
-
-# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -170,418 +159,11 @@ def health():
         "service": "vastdb-query",
         "endpoint": ENDPOINT or "not configured",
         "bucket": DEFAULT_BUCKET,
-        "exr_schema": DEFAULT_SCHEMA,
-        "video_schema": DEFAULT_VIDEO_SCHEMA,
-        "video_table": DEFAULT_VIDEO_TABLE,
     }
 
 
-@app.get("/api/v1/exr-metadata/stats")
-def exr_stats(
-    bucket: str = Query(DEFAULT_BUCKET),
-    schema: str = Query(DEFAULT_SCHEMA),
-):
-    """Get summary counts from exr-inspector tables."""
-    try:
-        with vast_transaction(bucket) as bkt:
-            s = bkt.schema(schema)
-            files_count = len(s.table("files").select(columns=["file_id"]).read_all())
-            parts_count = len(s.table("parts").select(columns=["file_id"]).read_all())
-            channels_count = len(s.table("channels").select(columns=["file_id"]).read_all())
-            attrs_count = len(s.table("attributes").select(columns=["file_id"]).read_all())
-
-        return {
-            "totalFiles": files_count,
-            "totalParts": parts_count,
-            "totalChannels": channels_count,
-            "totalAttributes": attrs_count,
-            "schema": f"{bucket}/{schema}",
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("stats query failed")
-        raise HTTPException(503, detail=str(e))
 
 
-@app.get("/api/v1/exr-metadata/files")
-def exr_files(
-    bucket: str = Query(DEFAULT_BUCKET),
-    schema: str = Query(DEFAULT_SCHEMA),
-    pathPrefix: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-):
-    """List EXR files with metadata."""
-    try:
-        with vast_transaction(bucket) as bkt:
-            tbl = bkt.schema(schema).table("files")
-            records = table_to_records(tbl, columns=FILES_COLUMNS, limit=10000)
-
-        # Filter by path prefix in Python
-        if pathPrefix:
-            records = [r for r in records if str(r.get("file_path", "")).startswith(pathPrefix)]
-
-        total = len(records)
-        paged = records[offset:offset + limit]
-        return {"files": paged, "total": total, "schema": f"{bucket}/{schema}"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("files query failed")
-        raise HTTPException(503, detail=str(e))
-
-
-@app.get("/api/v1/exr-metadata/files/{file_id}")
-def exr_file_detail(
-    file_id: str,
-    bucket: str = Query(DEFAULT_BUCKET),
-    schema: str = Query(DEFAULT_SCHEMA),
-):
-    """Get full detail for one EXR file: parts, channels, attributes."""
-    try:
-        with vast_transaction(bucket) as bkt:
-            s = bkt.schema(schema)
-
-            all_files = table_to_records(s.table("files"), columns=FILES_COLUMNS, limit=10000)
-            files = [f for f in all_files if f.get("file_id") == file_id]
-            if not files:
-                raise HTTPException(404, detail=f"File not found: {file_id}")
-
-            all_parts = table_to_records(s.table("parts"), limit=10000)
-            parts = [p for p in all_parts if p.get("file_id") == file_id]
-
-            all_channels = table_to_records(s.table("channels"), columns=CHANNELS_COLUMNS, limit=50000)
-            channels = [c for c in all_channels if c.get("file_id") == file_id]
-
-            all_attrs = table_to_records(s.table("attributes"), limit=50000)
-            attributes = [a for a in all_attrs if a.get("file_id") == file_id]
-
-        return {
-            "file": files[0],
-            "parts": parts,
-            "channels": channels,
-            "attributes": attributes,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("file detail query failed")
-        raise HTTPException(503, detail=str(e))
-
-
-@app.get("/api/v1/exr-metadata/lookup")
-def exr_lookup(
-    path: str = Query(..., description="File path or S3 URI to look up"),
-    bucket: str = Query(DEFAULT_BUCKET),
-    schema: str = Query(DEFAULT_SCHEMA),
-):
-    """Look up EXR metadata by file path. Correlates SpaceHarbor assets with exr-inspector data."""
-    # Normalize path: strip s3://bucket/ prefix
-    normalized = path
-    for prefix in ("s3://", "vast://"):
-        if normalized.startswith(prefix):
-            normalized = "/" + normalized.split("/", 3)[-1] if normalized.count("/") >= 3 else normalized
-
-    try:
-        with vast_transaction(bucket) as bkt:
-            s = bkt.schema(schema)
-            parts_tbl = s.table("parts")
-
-            # Try to find by file_path on parts table (no vector columns)
-            all_parts = table_to_records(parts_tbl, limit=10000)
-
-            # Search for matching file — try exact path, normalized, and filename
-            filename = path.rsplit("/", 1)[-1] if "/" in path else path
-            matched_file_id = None
-            for p in all_parts:
-                fp = str(p.get("file_path", ""))
-                fp_name = fp.rsplit("/", 1)[-1] if "/" in fp else fp
-                if fp == normalized or fp == path or fp_name == filename:
-                    matched_file_id = p.get("file_id")
-                    break
-
-            if not matched_file_id:
-                return {"found": False}
-
-            # Get all data for matched file (filter in Python — vastdb SDK predicate compat)
-            all_files = table_to_records(s.table("files"), columns=FILES_COLUMNS, limit=10000)
-            files = [f for f in all_files if f.get("file_id") == matched_file_id]
-
-            parts = [p for p in all_parts if p.get("file_id") == matched_file_id]
-
-            all_channels = table_to_records(s.table("channels"), columns=CHANNELS_COLUMNS, limit=50000)
-            channels = [c for c in all_channels if c.get("file_id") == matched_file_id]
-
-            all_attrs = table_to_records(s.table("attributes"), limit=50000)
-            attributes = [a for a in all_attrs if a.get("file_id") == matched_file_id]
-
-        file_info = files[0] if files else {}
-        first_part = parts[0] if parts else {}
-
-        summary = {
-            "resolution": f"{first_part.get('width', '?')}x{first_part.get('height', '?')}"
-            if first_part.get("width") else "unknown",
-            "compression": str(first_part.get("compression", "unknown")),
-            "colorSpace": str(first_part.get("color_space", "unknown")),
-            "channelCount": len(channels),
-            "isDeep": bool(file_info.get("is_deep", False)),
-            "frameNumber": file_info.get("frame_number"),
-        }
-
-        return {
-            "found": True,
-            "file": file_info,
-            "parts": parts,
-            "channels": channels,
-            "attributes": attributes,
-            "summary": summary,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("lookup query failed")
-        raise HTTPException(503, detail=str(e))
-
-
-# ---------------------------------------------------------------------------
-# Video metadata routes (video-metadata-extractor output)
-#
-# video-metadata-extractor writes a single flat table (default name "files"
-# inside the "video_metadata" schema) with one row per processed video /
-# raw-camera file. Unlike the EXR path, we don't know the exact column set
-# at write time — the functions team can add columns freely. Endpoints below
-# are therefore schema-agnostic: they return raw rows plus a best-effort
-# "summary" dict that picks well-known field names if present.
-#
-# The UI (StorageBrowserPage FileDetailSidebar and AssetBrowser MediaPreview)
-# renders the response as dynamic fields (summary on top, attributes below)
-# per the feedback_ui_dynamic_fields memory rule.
-# ---------------------------------------------------------------------------
-
-# Well-known column names the function is LIKELY to emit. If present we
-# surface them in the `summary` dict as a UX convenience. If absent we
-# silently skip them. NEVER REQUIRE any of these — the table contract is
-# owned by the functions team and this list is advisory only.
-_VIDEO_SUMMARY_FIELDS = {
-    # Logical summary field → list of candidate column names (first match wins)
-    "resolution": None,  # computed from width+height, special-cased below
-    "codec":      ["codec", "video_codec", "codec_name"],
-    "duration":   ["duration_sec", "duration_seconds", "duration", "duration_ms"],
-    "fps":        ["fps", "frame_rate", "framerate"],
-    "bitrate":    ["bitrate_bps", "bitrate", "bit_rate"],
-    "colorSpace": ["color_space", "colorspace", "color_primaries"],
-    "hdr":        ["hdr_format", "hdr", "transfer_function"],
-    "audioChannels": ["audio_channels", "channel_count"],
-    "cameraMake": ["camera_make", "make", "device_make"],
-    "cameraModel": ["camera_model", "model", "device_model"],
-    "timecodeStart": ["timecode_start", "start_timecode"],
-    "rawMetadataOnly": ["braw_metadata_only", "raw_metadata_only"],
-}
-
-
-def _compute_video_summary(row: dict) -> dict:
-    """Best-effort summary from a raw video metadata row. Skips fields that
-    don't exist. Never throws on missing columns."""
-    summary: dict = {}
-
-    # Resolution: special-case because it needs two columns
-    width = row.get("width") or row.get("w")
-    height = row.get("height") or row.get("h")
-    if width and height:
-        summary["resolution"] = f"{width}x{height}"
-
-    for logical, candidates in _VIDEO_SUMMARY_FIELDS.items():
-        if logical == "resolution":
-            continue  # handled above
-        if candidates is None:
-            continue
-        for col in candidates:
-            if col in row and row[col] is not None and row[col] != "":
-                summary[logical] = row[col]
-                break
-    return summary
-
-
-def _row_to_attributes(row: dict, exclude: Optional[set] = None) -> list[dict]:
-    """Flatten any row into a list of {name, value} pairs for generic UI rendering."""
-    exclude = exclude or set()
-    out = []
-    for key, value in row.items():
-        if key in exclude:
-            continue
-        if value is None or value == "":
-            continue
-        # pyarrow may give us bytes/datetime/etc — stringify for transport safety
-        if isinstance(value, (bytes, bytearray)):
-            value = value.decode("utf-8", errors="replace")
-        out.append({"name": key, "value": value})
-    return out
-
-
-@app.get("/api/v1/video-metadata/stats")
-def video_stats(
-    bucket: str = Query(DEFAULT_BUCKET),
-    schema: str = Query(DEFAULT_VIDEO_SCHEMA),
-    table: str = Query(DEFAULT_VIDEO_TABLE),
-):
-    """Count rows in the video metadata table."""
-    try:
-        with vast_transaction(bucket) as bkt:
-            s = bkt.schema(schema)
-            records = table_to_records(s.table(table), limit=1000000)
-        return {
-            "totalFiles": len(records),
-            "schema": f"{bucket}/{schema}",
-            "table": table,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Missing schema / table is a common state until the functions team
-        # ships — return a 200 with zero counts so the UI degrades gracefully.
-        logger.info("video stats query failed (schema/table may not exist yet): %s", e)
-        return {
-            "totalFiles": 0,
-            "schema": f"{bucket}/{schema}",
-            "table": table,
-            "error": str(e),
-        }
-
-
-@app.get("/api/v1/video-metadata/files")
-def video_files(
-    bucket: str = Query(DEFAULT_BUCKET),
-    schema: str = Query(DEFAULT_VIDEO_SCHEMA),
-    table: str = Query(DEFAULT_VIDEO_TABLE),
-    pathPrefix: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-):
-    """List video metadata rows with optional path-prefix filter."""
-    try:
-        with vast_transaction(bucket) as bkt:
-            s = bkt.schema(schema)
-            records = table_to_records(s.table(table), limit=10000)
-
-        if pathPrefix:
-            records = [
-                r for r in records
-                if str(r.get("file_path", r.get("s3_key", ""))).startswith(pathPrefix)
-            ]
-
-        total = len(records)
-        paged = records[offset:offset + limit]
-        return {
-            "files": paged,
-            "total": total,
-            "schema": f"{bucket}/{schema}",
-            "table": table,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.info("video files query failed: %s", e)
-        return {"files": [], "total": 0, "schema": f"{bucket}/{schema}", "table": table, "error": str(e)}
-
-
-@app.get("/api/v1/video-metadata/files/{file_id}")
-def video_file_detail(
-    file_id: str,
-    bucket: str = Query(DEFAULT_BUCKET),
-    schema: str = Query(DEFAULT_VIDEO_SCHEMA),
-    table: str = Query(DEFAULT_VIDEO_TABLE),
-):
-    """Get full detail for one video file by id."""
-    try:
-        with vast_transaction(bucket) as bkt:
-            s = bkt.schema(schema)
-            records = table_to_records(s.table(table), limit=10000)
-
-        # Match on any id-like column the function might use
-        match = None
-        for r in records:
-            if (
-                str(r.get("file_id", "")) == file_id
-                or str(r.get("id", "")) == file_id
-                or str(r.get("guid", "")) == file_id
-            ):
-                match = r
-                break
-        if not match:
-            raise HTTPException(404, detail=f"Video metadata row not found: {file_id}")
-
-        summary = _compute_video_summary(match)
-        attributes = _row_to_attributes(match, exclude={"file_id", "id", "guid"})
-        return {"file": match, "summary": summary, "attributes": attributes}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.info("video file detail query failed: %s", e)
-        raise HTTPException(503, detail=str(e))
-
-
-@app.get("/api/v1/video-metadata/lookup")
-def video_lookup(
-    path: str = Query(..., description="File path or S3 URI to look up"),
-    bucket: str = Query(DEFAULT_BUCKET),
-    schema: str = Query(DEFAULT_VIDEO_SCHEMA),
-    table: str = Query(DEFAULT_VIDEO_TABLE),
-):
-    """Look up video metadata by file path or filename.
-
-    Matches on any of `file_path`, `s3_key`, or the bare filename from any of
-    those columns. The function writer may use any column name convention;
-    we try several to be robust to schema drift.
-    """
-    filename = path.rsplit("/", 1)[-1] if "/" in path else path
-    # Strip any s3://bucket/ prefix for comparison
-    normalized = path
-    for prefix in ("s3://", "vast://"):
-        if normalized.startswith(prefix):
-            parts = normalized.split("/", 3)
-            normalized = "/" + parts[-1] if len(parts) >= 4 else normalized
-
-    try:
-        with vast_transaction(bucket) as bkt:
-            s = bkt.schema(schema)
-            records = table_to_records(s.table(table), limit=10000)
-
-        match = None
-        for r in records:
-            # Try several column names the functions team might choose
-            for col in ("file_path", "s3_key", "path", "source_uri", "filename"):
-                val = str(r.get(col, ""))
-                if not val:
-                    continue
-                val_name = val.rsplit("/", 1)[-1] if "/" in val else val
-                if val == path or val == normalized or val_name == filename:
-                    match = r
-                    break
-            if match:
-                break
-
-        if not match:
-            return {"found": False}
-
-        summary = _compute_video_summary(match)
-        attributes = _row_to_attributes(
-            match,
-            exclude={"file_id", "id", "guid", "file_path", "s3_key", "path", "source_uri", "filename"},
-        )
-        return {
-            "found": True,
-            "file": match,
-            "summary": summary,
-            "attributes": attributes,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Same graceful-degradation pattern as stats: log and return not-found
-        # so the UI falls back to the "no metadata" state instead of erroring.
-        logger.info("video lookup query failed: %s", e)
-        return {"found": False, "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -591,11 +173,9 @@ def video_lookup(
 # so pipeline platform settings become the single source of truth.
 #
 # SDK access pattern: `vast_transaction(bucket)` returns a Bucket object
-# directly (see existing /exr-metadata/lookup + /video-metadata/lookup).
-# SDK predicate pushdown isn't supported for this schema shape in the
-# current vastdb release — commit 5786cab switched the other endpoints
-# to Python-side filtering via `table_to_records(...)`. We follow the
-# same pattern here for consistency and correctness.
+# directly. SDK predicate pushdown isn't supported for this schema shape in the
+# current vastdb release — we filter using Python-side filtering via
+# `table_to_records(...)`.
 
 
 def _strip_s3_prefix(path: str) -> str:
@@ -620,10 +200,17 @@ def metadata_lookup(
 ):
     """Schema-agnostic lookup of extractor output rows keyed by file path.
 
-    Unlike /exr-metadata/lookup and /video-metadata/lookup (both hardcoded
-    to env-bound schemas), this endpoint takes schema + table per request.
+    Takes schema + table per request, decoupling from env-bound schema constants.
     Intended caller: control-plane /assets/:id/metadata, which passes the
     asset's pipeline config's targetSchema/targetTable.
+
+    Bucket-stripped fallback (Bug B): video-metadata-extractor stores
+    s3_key WITHOUT bucket prefix, while frame-metadata-extractor stores
+    file_path WITH bucket prefix. Callers uniformly send the bucket-
+    prefixed form. If the primary match is empty AND the path contains
+    a slash, we re-filter the already-fetched rows with the bucket
+    stripped. A warn log fires on fallback hit so ops can spot extractor
+    drift.
     """
     key = _strip_s3_prefix(path)
     target_bucket = bucket or DEFAULT_BUCKET
@@ -663,7 +250,24 @@ def metadata_lookup(
                         f"{list(MATCH_COLUMN_PRIORITY)}; got {column_names}."
                     ),
                 )
+            # Primary: filter by the bucket-prefixed key (callers' canonical form)
             rows = [r for r in all_rows if r.get(match_col) == key]
+
+            # Bucket-stripped fallback. Only re-filter if primary was empty
+            # AND path has something left after the first slash to strip.
+            if not rows and "/" in key:
+                fallback_key = key.split("/", 1)[1]
+                if fallback_key:  # guard against trailing slash edge case
+                    rows = [r for r in all_rows if r.get(match_col) == fallback_key]
+                    if rows:
+                        logger.warning(
+                            "metadata_lookup.fallback_hit path=%s fallback=%s schema=%s table=%s match_col=%s",
+                            path, fallback_key, schema, table, match_col,
+                        )
+                        metadata_lookup_fallback_total.labels(
+                            schema=schema, table=table
+                        ).inc()
+
             return {
                 "rows": rows,
                 "bucket": target_bucket,
@@ -684,7 +288,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8070"))
     logger.info("Starting vastdb-query service on port %d", port)
     logger.info(
-        "Endpoint: %s, Bucket: %s, EXR Schema: %s, Video Schema: %s, Video Table: %s",
-        ENDPOINT, DEFAULT_BUCKET, DEFAULT_SCHEMA, DEFAULT_VIDEO_SCHEMA, DEFAULT_VIDEO_TABLE,
+        "Endpoint: %s, Bucket: %s",
+        ENDPOINT, DEFAULT_BUCKET,
     )
     uvicorn.run(app, host="0.0.0.0", port=port)

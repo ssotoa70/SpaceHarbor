@@ -1,9 +1,10 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import * as api from "../api";
 import { AssetBrowser } from "./AssetBrowser";
+import { __resetAssetMetadataCacheForTests } from "../hooks/useAssetMetadata";
 
 function renderWithRouter(ui: React.ReactElement, initialEntries = ["/"]) {
   return render(<MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>);
@@ -35,11 +36,22 @@ vi.mock("../api", () => ({
   fetchCatalogUnregistered: vi.fn().mockResolvedValue([]),
   fetchVersionDependencies: vi.fn().mockResolvedValue([]),
   ingestAsset: vi.fn().mockResolvedValue(undefined),
+  fetchMediaUrls: vi.fn().mockResolvedValue({ source: null, thumbnail: null, preview: null, proxy: null }),
+  fetchAssetMetadata: vi.fn().mockResolvedValue({
+    assetId: "a1",
+    sourceUri: "/data/hero.exr",
+    fileKind: "exr",
+    pipeline: null,
+    sources: { db: "empty" as const, sidecar: "missing" as const },
+    dbRows: [],
+    sidecar: null,
+  }),
 }));
 
 describe("AssetBrowser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetAssetMetadataCacheForTests();
   });
 
   it("renders the asset browser heading", () => {
@@ -119,5 +131,92 @@ describe("AssetBrowser", () => {
     await screen.findByTestId("gallery-grid");
 
     expect(screen.getByLabelText("Status")).toHaveValue("processing");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MediaPreview field composition — I-1 coverage for C2 migration
+// ---------------------------------------------------------------------------
+describe("MediaPreview field composition", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetAssetMetadataCacheForTests();
+  });
+
+  it("renders resolution and compression from dbRow when populated", async () => {
+    vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
+      assetId: "a1",
+      sourceUri: "/data/hero.exr",
+      fileKind: "exr",
+      pipeline: null,
+      sources: { db: "ok" as const, sidecar: "ok" as const },
+      dbRows: [{ width: 2048, height: 858, compression: "zip", color_space: "ACES2065-1" }],
+      sidecar: null,
+    } as any);
+
+    renderWithRouter(<AssetBrowser />);
+    const grid = await screen.findByTestId("gallery-grid");
+    fireEvent.doubleClick(grid.children[0]);
+
+    // Sidebar header shows resolution and compression (may appear in multiple places: breadcrumb + badge area)
+    await waitFor(() => {
+      expect(screen.getAllByText("2048x858").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("ZIP").length).toBeGreaterThanOrEqual(1);
+    });
+    // Image field group should list Compression
+    expect(screen.getByText("Compression")).toBeInTheDocument();
+  });
+
+  it("falls back to sidecar when dbRows is empty", async () => {
+    vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
+      assetId: "a1",
+      sourceUri: "/data/hero.exr",
+      fileKind: "exr",
+      pipeline: null,
+      sources: { db: "empty" as const, sidecar: "ok" as const },
+      dbRows: [],
+      sidecar: { width: 2048, height: 1080, compression: "piz", color_space: "scene-linear" },
+    } as any);
+
+    renderWithRouter(<AssetBrowser />);
+    const grid = await screen.findByTestId("gallery-grid");
+    fireEvent.doubleClick(grid.children[0]);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("2048x1080").length).toBeGreaterThanOrEqual(1);
+    });
+    // Compression from sidecar fallback
+    expect(screen.getAllByText("piz").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not render channels/parts arrays as JSON strings in dynamic loop", async () => {
+    vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
+      assetId: "a1",
+      sourceUri: "/data/hero.exr",
+      fileKind: "exr",
+      pipeline: null,
+      sources: { db: "empty" as const, sidecar: "ok" as const },
+      dbRows: [],
+      sidecar: {
+        channels: [{ channel_name: "R", layer_name: "rgba", channel_type: "FLOAT", part_index: 0 }],
+        parts: [{ name: "rgba", type: "scanlineimage" }],
+        duration: 42,
+      },
+    } as any);
+
+    renderWithRouter(<AssetBrowser />);
+    const grid = await screen.findByTestId("gallery-grid");
+    fireEvent.doubleClick(grid.children[0]);
+
+    // Wait for sidebar to open and metadata to render
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+
+    // Primitive sidecar field (duration) should appear in the dynamic Media group
+    expect(screen.getByText("42")).toBeInTheDocument();
+
+    // Array/object fields must NOT render as raw JSON blobs
+    const renderedText = document.body.textContent ?? "";
+    expect(renderedText).not.toMatch(/\[object Object\]/);
+    expect(renderedText).not.toMatch(/channel_name/);
   });
 });
