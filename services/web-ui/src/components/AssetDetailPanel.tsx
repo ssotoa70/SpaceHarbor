@@ -20,6 +20,7 @@ import {
   findPipelineForFilename,
 } from "../hooks/useDataEnginePipelines";
 import { useAssetMetadata } from "../hooks/useAssetMetadata";
+import { useAssetIntegrity } from "../hooks/useAssetIntegrity";
 import { VideoMetadataRenderer, detectSchema } from "./metadata";
 import { ChannelPills } from "./ChannelPills";
 
@@ -54,7 +55,7 @@ interface ExrMetadataLookupResultLike {
 // Types
 // ---------------------------------------------------------------------------
 
-type TabId = "metadata" | "info" | "aovs" | "streams" | "vast" | "history";
+type TabId = "metadata" | "info" | "aovs" | "streams" | "vast" | "history" | "integrity";
 
 interface AssetDetailPanelProps {
   asset: AssetRow;
@@ -341,6 +342,7 @@ function getTabsForMediaType(mediaType: string): TabDef[] {
     base.push({ id: "streams", label: "STREAMS" });
   }
   base.push({ id: "vast", label: "VAST" });
+  base.push({ id: "integrity", label: "INTEGRITY" });
   base.push({ id: "history", label: "HISTORY" });
   return base;
 }
@@ -1361,7 +1363,129 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
         {activeTab === "history" && <HistoryTab events={loadingHistory ? null : history} />}
         {activeTab === "aovs" && <AovsTab exrMeta={exrMeta} />}
         {activeTab === "vast" && <VastTab asset={asset} exrMeta={exrMeta} />}
+        {activeTab === "integrity" && (
+          <IntegrityTabPanel assetId={asset.id} fileKind={inferIntegrityKind(asset)} />
+        )}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// IntegrityTabPanel — hashes + keyframes from GET /api/v1/assets/:id/integrity
+// ---------------------------------------------------------------------------
+
+function inferIntegrityKind(asset: AssetRow): "video" | "raw_camera" | "image" | "other" {
+  const t = inferMediaType(asset.title, asset.sourceUri);
+  if (t === "video") return "video";
+  if (t === "raw") return "raw_camera";
+  if (t === "image") return "image";
+  return "other";
+}
+
+interface IntegrityTabPanelProps {
+  assetId: string;
+  fileKind: "video" | "raw_camera" | "image" | "other";
+}
+
+function IntegrityTabPanel({ assetId, fileKind }: IntegrityTabPanelProps): JSX.Element {
+  const state = useAssetIntegrity(assetId);
+
+  if (state.status === "loading") {
+    return <div className="p-4 text-sm text-[var(--color-ah-text-muted)]">Loading integrity data…</div>;
+  }
+  if (state.status === "error") {
+    return (
+      <div className="p-4">
+        <div className="text-sm text-red-400">Unable to load integrity data</div>
+        <div className="text-[10px] text-[var(--color-ah-text-subtle)] mt-1 font-[var(--font-ah-mono)]">{state.error}</div>
+        <button
+          type="button"
+          className="mt-3 px-3 py-1 rounded border border-[var(--color-ah-border)] text-[var(--color-ah-text-muted)] text-[11px] hover:text-[var(--color-ah-text)] cursor-pointer"
+          onClick={state.retry}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (state.status !== "ready") {
+    return <div className="p-4 text-sm text-[var(--color-ah-text-subtle)]">No asset selected.</div>;
+  }
+
+  const { hashes, keyframes, sources } = state.data;
+  const hashesStatus: "ok" | "empty" | "n/a" = sources.hashes;
+  const keyframesStatus: "ok" | "empty" | "n/a" =
+    fileKind === "video" || fileKind === "raw_camera" ? sources.keyframes : "n/a";
+
+  return (
+    <div className="overflow-auto px-4 py-3 space-y-5" style={{ maxHeight: "calc(100vh - 200px)" }}>
+      <div className="flex gap-2">
+        <IntegrityStatusPill label="HASHES" status={hashesStatus} />
+        <IntegrityStatusPill label="KEYFRAMES" status={keyframesStatus} />
+      </div>
+
+      <section>
+        <SectionHeader title="Hashes" />
+        {hashes ? (
+          <dl>
+            <MetaRow label="SHA-256" value={truncateHash(hashes.sha256)} copyable />
+            {hashes.perceptual_hash && (
+              <MetaRow label="Perceptual" value={truncateHash(hashes.perceptual_hash)} />
+            )}
+            <MetaRow label="Algorithm" value={hashes.algorithm_version} />
+            <MetaRow label="Bytes hashed" value={hashes.bytes_hashed.toLocaleString()} />
+            <MetaRow
+              label="Hashed at"
+              value={new Date(hashes.hashed_at).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })}
+            />
+          </dl>
+        ) : (
+          <p className="text-[11px] text-[var(--color-ah-text-subtle)]">Not yet hashed.</p>
+        )}
+      </section>
+
+      <section>
+        <SectionHeader title="Keyframes" />
+        {keyframes ? (
+          <dl>
+            <MetaRow label="Frames" value={`${keyframes.keyframe_count}`} accent />
+            <MetaRow label="Prefix" value={keyframes.keyframe_prefix} copyable />
+            {keyframes.thumbnail_key && (
+              <MetaRow label="Thumbnail" value={keyframes.thumbnail_key} copyable />
+            )}
+            {keyframes.extracted_at && (
+              <MetaRow
+                label="Extracted at"
+                value={new Date(keyframes.extracted_at).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })}
+              />
+            )}
+          </dl>
+        ) : keyframesStatus === "n/a" ? (
+          <p className="text-[11px] text-[var(--color-ah-text-subtle)]">Not applicable for this asset kind.</p>
+        ) : (
+          <p className="text-[11px] text-[var(--color-ah-text-subtle)]">No keyframes.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function truncateHash(h: string): string {
+  if (h.length <= 20) return h;
+  return `${h.slice(0, 12)}…${h.slice(-6)}`;
+}
+
+function IntegrityStatusPill({ label, status }: { label: string; status: "ok" | "empty" | "n/a" }): JSX.Element {
+  const cls =
+    status === "ok"
+      ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+      : status === "empty"
+        ? "bg-[var(--color-ah-bg)] text-[var(--color-ah-text-muted)] border-[var(--color-ah-border)]"
+        : "bg-[var(--color-ah-bg)] text-[var(--color-ah-text-subtle)] border-[var(--color-ah-border-muted)]";
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-[10px] font-[var(--font-ah-mono)] border ${cls}`}>
+      {label} · {status}
+    </span>
   );
 }
