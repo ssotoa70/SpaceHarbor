@@ -50,6 +50,7 @@ function mkApp(opts: {
   permissions?: Set<string>;
   actor?: string;
   audit?: (row: any) => void;
+  notImplemented?: boolean;
 }): FastifyInstance {
   const app = Fastify();
   app.addHook("onRequest", async (req: any) => {
@@ -60,6 +61,7 @@ function mkApp(opts: {
   });
   registerFunctionConfigsRoutes(app, opts.store, ["/api/v1"], {
     writeAudit: opts.audit ?? (() => {}),
+    notImplemented: opts.notImplemented,
   });
   return app;
 }
@@ -223,5 +225,45 @@ test("PUT writes audit row", async () => {
   assert.equal(auditCalls[0].message, "function_config.updated");
   assert.equal(auditCalls[0].scope, "asset-integrity");
   assert.equal(auditCalls[0].key, "k");
+  await app.close();
+});
+
+test("notImplemented=true: GET returns 503 NOT_IMPLEMENTED for admin", async () => {
+  const app = mkApp({
+    store: mkStore(),
+    permissions: new Set([ADMIN_PERM]),
+    notImplemented: true,
+  });
+  const res = await app.inject({ method: "GET", url: "/api/v1/function-configs/asset-integrity" });
+  assert.equal(res.statusCode, 503);
+  assert.equal((res.json() as { code: string }).code, "NOT_IMPLEMENTED");
+  await app.close();
+});
+
+test("notImplemented=true: PUT returns 503 NOT_IMPLEMENTED for admin (not a misleading 404)", async () => {
+  const app = mkApp({
+    store: mkStore(),
+    permissions: new Set([ADMIN_PERM]),
+    notImplemented: true,
+  });
+  const res = await app.inject({
+    method: "PUT",
+    url: "/api/v1/function-configs/asset-integrity/k",
+    payload: { value: 7 },
+    headers: { "content-type": "application/json" },
+  });
+  assert.equal(res.statusCode, 503);
+  assert.equal((res.json() as { code: string }).code, "NOT_IMPLEMENTED");
+  await app.close();
+});
+
+test("notImplemented=true: non-admin still gets 403 first", async () => {
+  const app = mkApp({
+    store: mkStore(),
+    permissions: new Set<string>(),
+    notImplemented: true,
+  });
+  const res = await app.inject({ method: "GET", url: "/api/v1/function-configs/asset-integrity" });
+  assert.equal(res.statusCode, 403);
   await app.close();
 });
