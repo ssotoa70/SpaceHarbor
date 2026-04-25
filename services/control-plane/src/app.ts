@@ -53,6 +53,8 @@ import { registerStorageMetadataRoutes } from "./routes/storage-metadata.js";
 import { registerAssetMetadataRoute } from "./routes/asset-metadata.js";
 import { registerAssetStatsRoute } from "./routes/asset-stats.js";
 import { registerAssetIntegrityRoute } from "./routes/asset-integrity.js";
+import { registerFunctionConfigsRoutes } from "./routes/function-configs.js";
+import { createFunctionConfigsStore, type StoreDeps as FunctionConfigsStoreDeps } from "./config/function-configs-store.js";
 import { registerDataEnginePipelineRoutes } from "./routes/dataengine-pipelines.js";
 import { registerDataEnginePipelineDefaultsRoute } from "./routes/dataengine-pipelines-defaults.js";
 import { registerMetadataLookupProxyRoute } from "./routes/metadata-lookup-proxy.js";
@@ -507,6 +509,31 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // Phase 6.0 (C2): per-asset hashes + keyframes reader for INTEGRITY tab
     void registerAssetIntegrityRoute(app, persistence, prefixes);
+
+    // Phase 6.0 (C3): admin-gated typed runtime configs (function_configs).
+    // C3 follow-up: replace with a real DB-backed StoreDeps that queries
+    // function_configs in VAST DB. The migration (024) is in place; routes
+    // ship against an in-memory deps stub for now so the API surface is
+    // available end-to-end. Readers degrade gracefully when the table is
+    // empty, matching the rest of the C-layer's "graceful when empty" policy.
+    const functionConfigsDeps: FunctionConfigsStoreDeps = {
+      queryScope: async () => [],
+      upsertValue: async () => {
+        // no-op stub; real impl will UPSERT into function_configs
+      },
+    };
+    const functionConfigsStore = createFunctionConfigsStore(functionConfigsDeps, {
+      cacheTtlMs: 60_000,
+    });
+    void registerFunctionConfigsRoutes(app, functionConfigsStore, prefixes, {
+      writeAudit: async (row) => {
+        await persistence.recordRequestAudit({
+          message: row.message,
+          correlationId: `function_config.${row.scope}.${row.key}`,
+          actor: row.actor,
+        });
+      },
+    });
 
     // Phase: Analytics dashboard endpoints (cached, fallback to in-memory)
     void registerAnalyticsRoutes(app, persistence, catalogTrino, prefixes);
