@@ -27,6 +27,15 @@ export interface FunctionConfigsDeps {
     previous: unknown;
     next: unknown;
   }) => void | Promise<void>;
+  /**
+   * When true, both routes short-circuit with 503 NOT_IMPLEMENTED. Set by
+   * the wiring layer when the store is backed by an in-memory stub
+   * (no real DB queryScope/upsertValue), so admins get an unambiguous
+   * "not yet wired" signal instead of a misleading 404 CONFIG_KEY_NOT_FOUND
+   * (which would otherwise fire because the stub returns an empty scope
+   * and setValue's NotFoundError surfaces).
+   */
+  notImplemented?: boolean;
 }
 
 const ADMIN_PERM = "admin:system_config";
@@ -69,6 +78,10 @@ export function registerFunctionConfigsRoutes(
     },
     async (request, reply) => {
       if (denyUnlessAdmin(request, reply)) return;
+      if (deps.notImplemented) {
+        return sendError(request, reply, 503, "NOT_IMPLEMENTED",
+          "function_configs store is not yet wired to the database");
+      }
       const { scope } = request.params as { scope: string };
       try {
         const configs = await store.getScope(scope);
@@ -104,6 +117,10 @@ export function registerFunctionConfigsRoutes(
     },
     async (request, reply) => {
       if (denyUnlessAdmin(request, reply)) return;
+      if (deps.notImplemented) {
+        return sendError(request, reply, 503, "NOT_IMPLEMENTED",
+          "function_configs store is not yet wired to the database");
+      }
       const { scope, key } = request.params as { scope: string; key: string };
       const { value } = request.body as { value: unknown };
       const actor = getActor(request);

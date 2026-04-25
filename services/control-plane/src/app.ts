@@ -526,6 +526,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       cacheTtlMs: 60_000,
     });
     void registerFunctionConfigsRoutes(app, functionConfigsStore, prefixes, {
+      // Until the DB-backed StoreDeps lands, both routes return 503
+      // NOT_IMPLEMENTED so admins get an unambiguous signal instead of
+      // a misleading 404 CONFIG_KEY_NOT_FOUND on every PUT (which the
+      // empty-stub queryScope would otherwise produce).
+      notImplemented: true,
       writeAudit: async (row) => {
         await persistence.recordRequestAudit({
           message: row.message,
