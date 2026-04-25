@@ -21,7 +21,7 @@
  *   - No recursive CTEs
  *   - TIMESTAMP(6) precision
  *
- * Plan reference: docs/superpowers/plans/2026-04-24-phase-6.0-asset-integrity.md
+ * Plan reference: docs/superpowers/plans/2026-04-19-phase-6.0-asset-integrity.md (Task A4)
  */
 
 import type { Migration } from "./types.js";
