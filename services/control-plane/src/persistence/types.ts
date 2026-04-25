@@ -718,6 +718,20 @@ export interface AuditRetentionApplyResult {
   remainingCount: number;
 }
 
+/**
+ * Catalog-wide asset counters returned by {@link PersistenceAdapter.getAssetStats}.
+ *
+ * Consumed by `GET /api/v1/assets/stats` (Phase 6.0 Layer C1) to populate the
+ * <KpiCounterStrip> on the Asset Browser. Integrity counters gracefully return
+ * 0 when `asset_integrity.*` tables are empty or not yet deployed.
+ */
+export interface AssetStatsSnapshot {
+  total: number;
+  byStatus: Record<string, number>;
+  byKind: Record<string, number>;
+  integrity: { hashed: number; withKeyframes: number };
+}
+
 export interface PersistenceAdapter extends VfxHierarchyAdapter {
   readonly backend: PersistenceBackend;
   reset(): void;
@@ -753,6 +767,7 @@ export interface PersistenceAdapter extends VfxHierarchyAdapter {
   getOutboxItems(): Promise<OutboxItem[]>;
   publishOutbox(context: WriteContext): Promise<number>;
   getWorkflowStats(nowIso?: string): Promise<WorkflowStats>;
+  getAssetStats(): Promise<AssetStatsSnapshot>;
   listAssetQueueRows(): Promise<AssetQueueRow[]>;
   getAuditEvents(): Promise<AuditEvent[]>;
   previewAuditRetention(cutoffIso: string): Promise<AuditRetentionPreview>;

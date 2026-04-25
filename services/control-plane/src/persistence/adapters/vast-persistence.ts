@@ -8,6 +8,7 @@ import type { AuditSignal } from "../../domain/models.js";
 import { canTransitionWorkflowStatus } from "../../workflow/transitions.js";
 import { LocalPersistenceAdapter } from "./local-persistence.js";
 import type {
+  AssetStatsSnapshot,
   AuditRetentionApplyResult,
   AuditRetentionPreview,
   CreateCommentAnnotationInput,
@@ -350,6 +351,41 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
       degradedMode: {
         fallbackEvents: stats.degradedMode.fallbackEvents + this.fallbackAuditEvents.length
       }
+    };
+  }
+
+  async getAssetStats(): Promise<AssetStatsSnapshot> {
+    // Status + byKind + total: currently delegated to the local fallback
+    // (which mirrors catalog state for most dev topologies). A future task
+    // (C1-follow-up) may push this down to a single GROUP BY query against
+    // ${S}.assets + ${S}.jobs once file_kind is persisted on the asset row.
+    const base = await this.localFallback.getAssetStats();
+
+    // Integrity counters from asset_integrity.*. Graceful when the schema
+    // does not yet exist (Phase 6.0 tables land with the DataEngine function
+    // rollout) — a failed query here must not fail the whole stats endpoint.
+    let integrity = { hashed: 0, withKeyframes: 0 };
+    if (this.trinoClient) {
+      try {
+        const [hashedR, keyframeR] = await Promise.all([
+          this.trinoClient.query('SELECT COUNT(*) AS cnt FROM vast."asset_integrity".hashes'),
+          this.trinoClient.query('SELECT COUNT(*) AS cnt FROM vast."asset_integrity".keyframes')
+        ]);
+        integrity = {
+          hashed: hashedR.data.length > 0 ? Number(hashedR.data[0][0]) : 0,
+          withKeyframes: keyframeR.data.length > 0 ? Number(keyframeR.data[0][0]) : 0
+        };
+      } catch {
+        // Tables not deployed yet — degrade gracefully (spec line 475).
+        integrity = { hashed: 0, withKeyframes: 0 };
+      }
+    }
+
+    return {
+      total: base.total,
+      byStatus: base.byStatus,
+      byKind: base.byKind,
+      integrity
     };
   }
 

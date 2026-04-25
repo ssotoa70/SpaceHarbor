@@ -51,6 +51,7 @@ import { registerNavBadgeRoutes } from "./routes/nav-badges.js";
 import { registerStorageBrowseRoutes } from "./routes/storage-browse.js";
 import { registerStorageMetadataRoutes } from "./routes/storage-metadata.js";
 import { registerAssetMetadataRoute } from "./routes/asset-metadata.js";
+import { registerAssetStatsRoute } from "./routes/asset-stats.js";
 import { registerDataEnginePipelineRoutes } from "./routes/dataengine-pipelines.js";
 import { registerDataEnginePipelineDefaultsRoute } from "./routes/dataengine-pipelines-defaults.js";
 import { registerMetadataLookupProxyRoute } from "./routes/metadata-lookup-proxy.js";
@@ -499,6 +500,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // Unified asset metadata reader (DB + sidecar, dependency-injectable)
     void registerAssetMetadataRoute(app, persistence, prefixes);
+
+    // Phase 6.0 (C1): authoritative catalog-wide counters for <KpiCounterStrip>
+    void registerAssetStatsRoute(app, persistence, prefixes);
 
     // Phase: Analytics dashboard endpoints (cached, fallback to in-memory)
     void registerAnalyticsRoutes(app, persistence, catalogTrino, prefixes);

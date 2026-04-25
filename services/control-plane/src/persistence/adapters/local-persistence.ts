@@ -71,6 +71,7 @@ import {
   ReferentialIntegrityError
 } from "../types.js";
 import type {
+  AssetStatsSnapshot,
   AuditRetentionApplyResult,
   AuditRetentionPreview,
   CreateEpisodeInput,
@@ -204,6 +205,23 @@ function coalesceProductionMetadata(
     dueDate: metadata?.dueDate ?? null,
     owner: metadata?.owner ?? null
   };
+}
+
+// Minimal source_uri → kind classifier used by getAssetStats.
+// Extensions pulled from the same buckets the scanner-function categorises:
+//   image     — stills (jpg/png/tif/exr/dpx)
+//   video     — h264/prores/etc.
+//   raw_camera — ARRI/RED/Sony cine-camera containers
+//   other     — anything else (scripts, sidecars, audio)
+function classifyKindFromUri(sourceUri: string): "image" | "video" | "raw_camera" | "other" {
+  const lower = sourceUri.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  if (dot < 0) return "other";
+  const ext = lower.slice(dot + 1);
+  if (["jpg", "jpeg", "png", "tif", "tiff", "exr", "dpx", "hdr", "webp", "gif"].includes(ext)) return "image";
+  if (["mov", "mp4", "mxf", "m4v", "avi", "mkv", "webm", "prores"].includes(ext)) return "video";
+  if (["ari", "r3d", "braw", "arw", "cr3", "nef"].includes(ext)) return "raw_camera";
+  return "other";
 }
 
 export class LocalPersistenceAdapter implements PersistenceAdapter {
@@ -1202,6 +1220,33 @@ export class LocalPersistenceAdapter implements PersistenceAdapter {
           production: { ...this.outboundCounters.byTarget.production }
         }
       }
+    };
+  }
+
+  async getAssetStats(): Promise<AssetStatsSnapshot> {
+    // Build latest-job lookup so status mirrors how listAssetQueueRows
+    // derives it (coalesces to "pending" when no job exists).
+    const latestJobByAssetId = new Map<string, WorkflowJob>();
+    for (const job of this.jobs.values()) {
+      latestJobByAssetId.set(job.assetId, job);
+    }
+
+    const byStatus: Record<string, number> = {};
+    const byKind: Record<string, number> = {};
+    for (const asset of this.assets.values()) {
+      const status = latestJobByAssetId.get(asset.id)?.status ?? "pending";
+      byStatus[status] = (byStatus[status] ?? 0) + 1;
+
+      const kind = classifyKindFromUri(asset.sourceUri);
+      byKind[kind] = (byKind[kind] ?? 0) + 1;
+    }
+
+    // Local adapter has no asset_integrity tables; always 0.
+    return {
+      total: this.assets.size,
+      byStatus,
+      byKind,
+      integrity: { hashed: 0, withKeyframes: 0 }
     };
   }
 
