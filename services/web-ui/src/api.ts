@@ -3827,3 +3827,94 @@ export interface AssetMetadataResponse {
 export async function fetchAssetMetadata(assetId: string): Promise<AssetMetadataResponse> {
   return apiFetch<AssetMetadataResponse>(`/assets/${encodeURIComponent(assetId)}/metadata`);
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Phase 6.0 — asset stats + integrity + function configs
+// ─────────────────────────────────────────────────────────────────────
+
+export interface AssetStatsResponse {
+  total: number;
+  byStatus: Record<string, number>;
+  byKind: Record<string, number>;
+  integrity: { hashed: number; with_keyframes: number };
+}
+
+export async function fetchAssetStats(): Promise<AssetStatsResponse> {
+  const response = await fetch("/api/v1/assets/stats", { credentials: "include" });
+  if (!response.ok) throw new ApiRequestError(response.status, `asset stats: ${response.status}`);
+  return (await response.json()) as AssetStatsResponse;
+}
+
+export interface AssetIntegrityHashes {
+  sha256: string;
+  perceptual_hash: string | null;
+  algorithm_version: string;
+  bytes_hashed: number;
+  hashed_at: string;
+}
+export interface AssetIntegrityKeyframes {
+  keyframe_count: number;
+  keyframe_prefix: string;
+  thumbnail_key: string;
+  extracted_at: string;
+}
+export interface AssetIntegrityResponse {
+  assetId: string;
+  sources: { hashes: "ok" | "empty"; keyframes: "ok" | "empty" };
+  hashes: AssetIntegrityHashes | null;
+  keyframes: AssetIntegrityKeyframes | null;
+}
+
+export async function fetchAssetIntegrity(assetId: string): Promise<AssetIntegrityResponse> {
+  const response = await fetch(`/api/v1/assets/${encodeURIComponent(assetId)}/integrity`, { credentials: "include" });
+  if (!response.ok) throw new ApiRequestError(response.status, `asset integrity: ${response.status}`);
+  return (await response.json()) as AssetIntegrityResponse;
+}
+
+export type FunctionConfigValueType = "int" | "float" | "bool" | "string" | "duration_seconds";
+
+export interface FunctionConfigDTO {
+  scope: string;
+  key: string;
+  valueType: FunctionConfigValueType;
+  value: unknown;
+  default: unknown;
+  min: number | null;
+  max: number | null;
+  description: string;
+  label: string;
+  category: string;
+  lastEditedBy: string | null;
+  lastEditedAt: string | null;
+}
+
+export async function fetchFunctionConfigs(scope: string): Promise<FunctionConfigDTO[]> {
+  const response = await fetch(`/api/v1/function-configs/${encodeURIComponent(scope)}`, { credentials: "include" });
+  if (!response.ok) throw new ApiRequestError(response.status, `function-configs list: ${response.status}`);
+  const body = (await response.json()) as { configs: FunctionConfigDTO[] };
+  return body.configs;
+}
+
+export async function saveFunctionConfig(
+  scope: string, key: string, value: unknown,
+): Promise<FunctionConfigDTO> {
+  const response = await fetch(
+    `/api/v1/function-configs/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`,
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    },
+  );
+  if (!response.ok) {
+    let msg = `function-configs save: ${response.status}`;
+    try {
+      const body = await response.json() as { message?: string };
+      if (body.message) msg = body.message;
+    } catch { /* no-op */ }
+    throw new ApiRequestError(response.status, msg);
+  }
+  const body = (await response.json()) as { config: FunctionConfigDTO };
+  return body.config;
+}
