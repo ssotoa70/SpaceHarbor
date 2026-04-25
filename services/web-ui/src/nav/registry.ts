@@ -314,4 +314,12 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
     permission: "admin:system_config",
     icon: "M8 5.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM3 8a5 5 0 1110 0A5 5 0 013 8z",
   },
+  {
+    id: "integrity",
+    to: "/admin/integrity",
+    label: "Integrity",
+    section: "ADMIN",
+    permission: "admin:system_config",
+    icon: "M8 2l6 3v5c0 3-3 5-6 6-3-1-6-3-6-6V5l6-3z",
+  },
 ];

@@ -132,6 +132,9 @@ const DispatchesPage = React.lazy(() =>
 const BreakersPage = React.lazy(() =>
   import("./pages/admin/BreakersPage").then((m) => ({ default: m.BreakersPage }))
 );
+const IntegritySettingsPage = React.lazy(() =>
+  import("./pages/admin/IntegritySettingsPage").then((m) => ({ default: m.IntegritySettingsPage }))
+);
 const CheckinPage = React.lazy(() =>
   import("./pages/CheckinPage").then((m) => ({ default: m.CheckinPage }))
 );
@@ -231,6 +234,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="admin/settings" element={<Lazy><SettingsPage /></Lazy>} />
             <Route path="admin/rbac" element={<Lazy><RbacMatrixPage /></Lazy>} />
             <Route path="admin/breakers" element={<Lazy><BreakersPage /></Lazy>} />
+            <Route path="admin/integrity" element={<Lazy><IntegritySettingsPage /></Lazy>} />
 
             {/* ── Utility routes (not in nav) ── */}
             <Route path="api-keys" element={<Lazy><ApiKeysPage /></Lazy>} />
