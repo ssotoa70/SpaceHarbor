@@ -27,7 +27,7 @@ function stubCommonApis() {
   vi.spyOn(api, "fetchActiveDataEnginePipelines").mockResolvedValue({ pipelines: [] });
   vi.spyOn(api, "fetchAssetIntegrity").mockResolvedValue({
     assetId: exrAsset.id,
-    sources: { hashes: "empty", keyframes: "n/a" },
+    sources: { hashes: "empty", keyframes: "empty" },
     hashes: null,
     keyframes: null,
   });
