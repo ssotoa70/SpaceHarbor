@@ -23,6 +23,7 @@ import { useAssetMetadata } from "../hooks/useAssetMetadata";
 import { useAssetIntegrity } from "../hooks/useAssetIntegrity";
 import { VideoMetadataRenderer, detectSchema } from "./metadata";
 import { ChannelPills } from "./ChannelPills";
+import { AllFieldsPanel } from "./AllFieldsPanel";
 
 // ---------------------------------------------------------------------------
 // Local alias — shape-compatible with the former ExrMetadataLookupResult.
@@ -55,7 +56,7 @@ interface ExrMetadataLookupResultLike {
 // Types
 // ---------------------------------------------------------------------------
 
-type TabId = "metadata" | "info" | "aovs" | "streams" | "vast" | "history" | "integrity";
+type TabId = "info" | "aovs" | "streams" | "vast" | "history" | "integrity";
 
 interface AssetDetailPanelProps {
   asset: AssetRow;
@@ -327,15 +328,11 @@ function FrameBar({ info }: { info: VersionDetailInfo | null }) {
 type TabDef = { id: TabId; label: string };
 
 function getTabsForMediaType(mediaType: string): TabDef[] {
-  const base: TabDef[] = [];
-  // "Metadata" is the primary view — rich sidecar payload from
-  // frame-metadata-extractor (images) or video-metadata-extractor (video/raw).
-  // Rendered only for media types whose extractor writes a sidecar; other
-  // kinds (audio, documents, 3D, etc.) skip this tab and start on INFO.
-  if (mediaType === "image" || mediaType === "video" || mediaType === "raw") {
-    base.push({ id: "metadata", label: "METADATA" });
-  }
-  base.push({ id: "info", label: "INFO" });
+  // INFO is the primary view; it renders the same Frame.io-style "All Fields"
+  // panel as the full-screen viewer (file-kind-aware MEDIA section + flat
+  // ATTRIBUTES dump from the unified DB+sidecar reader). Tabs that don't
+  // apply to the file kind are hidden.
+  const base: TabDef[] = [{ id: "info", label: "INFO" }];
   if (mediaType === "image") {
     base.push({ id: "aovs", label: "AOVS" });
   } else if (mediaType === "video" || mediaType === "audio") {
@@ -377,140 +374,11 @@ function TabBar({ activeTab, onTabChange, tabs }: { activeTab: TabId; onTabChang
 }
 
 // ---------------------------------------------------------------------------
-// MetadataTab helpers
-// ---------------------------------------------------------------------------
-
-type FieldFamily = "Dimensions" | "Codec & color" | "Timing" | "File" | "Other";
-
-const FAMILY_PATTERNS: [FieldFamily, RegExp][] = [
-  ["Dimensions",    /^(width|height|channels|bit_depth|pixel_aspect|display_window|data_window)$/i],
-  ["Codec & color", /^(codec|pix_fmt|color_space|transfer|primaries|chroma|profile|level|bit_rate)$/i],
-  ["Timing",        /^(duration|frame_count|frame_rate|fps|timecode|start_frame|end_frame)$/i],
-  ["File",          /^(path|filename|size|sha256|md5|etag|mtime|created_at|modified_at|source_uri|s3_key|file_path|uri)$/i],
-];
-
-export function groupColumns(row: Record<string, unknown>): Record<FieldFamily, [string, unknown][]> {
-  const groups: Record<FieldFamily, [string, unknown][]> = {
-    "Dimensions": [], "Codec & color": [], "Timing": [], "File": [], "Other": [],
-  };
-  for (const [key, value] of Object.entries(row)) {
-    const family = FAMILY_PATTERNS.find(([, re]) => re.test(key))?.[0] ?? "Other";
-    groups[family].push([key, value]);
-  }
-  groups["Other"].sort(([a], [b]) => a.localeCompare(b));
-  return groups;
-}
-
-function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
-  try { return JSON.stringify(value); } catch { return "<unserializable>"; }
-}
-
-function DbRowCard({ row, index }: { row: Record<string, unknown>; index: number }) {
-  const groups = groupColumns(row);
-  return (
-    <div className="p-2 rounded border border-[var(--color-ah-border-muted)] bg-[var(--color-ah-bg-raised)] mb-2">
-      <div className="text-[10px] uppercase tracking-wider text-[var(--color-ah-text-subtle)] mb-1">Row {index}</div>
-      {(Object.entries(groups) as [FieldFamily, [string, unknown][]][]).map(([family, rows]) =>
-        rows.length === 0 ? null : (
-          <div key={family} className="mb-2 last:mb-0">
-            <div className="text-[10px] text-[var(--color-ah-text-muted)] mb-1">{family}</div>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-              {rows.map(([key, value]) => (
-                <React.Fragment key={key}>
-                  <dt className="font-[var(--font-ah-mono)] text-[var(--color-ah-text-muted)]">{key}</dt>
-                  <dd className="font-[var(--font-ah-mono)] break-all">{formatCell(value)}</dd>
-                </React.Fragment>
-              ))}
-            </dl>
-          </div>
-        )
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// MetadataTab — reads from /assets/:id/metadata (DB + sidecar unified endpoint)
-// ---------------------------------------------------------------------------
-
-export function MetadataTab({ asset }: { asset: AssetRow }) {
-  const metadata = useAssetMetadata(asset.id);
-  const { pipelines } = useDataEnginePipelines();
-  const matchedPipeline = findPipelineForFilename(pipelines, asset.title);
-
-  if (metadata.status === "loading") {
-    return <div className="p-3 text-sm text-[var(--color-ah-text-muted)]">Loading…</div>;
-  }
-  if (metadata.status === "error") {
-    return (
-      <div className="p-3 text-sm text-red-400">
-        Failed to load metadata: {metadata.error ?? "unknown error"}
-      </div>
-    );
-  }
-  if (metadata.status !== "ready" || !metadata.data) {
-    // idle (no asset id) — matches parent behavior; shouldn't normally appear here.
-    return null;
-  }
-  const data = metadata.data;
-
-  const badgeVariant = (s: string) =>
-    s === "ok" ? "success" : s === "empty" ? "default" : s === "missing" ? "default"
-      : s === "disabled" ? "default" : "warning";
-
-  return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="flex items-center gap-2 text-xs">
-        <Badge variant={badgeVariant(data.sources.db)}>DB · {data.sources.db}</Badge>
-        <Badge variant={badgeVariant(data.sources.sidecar)}>Sidecar · {data.sources.sidecar}</Badge>
-        {data.pipeline && (
-          <span className="text-[var(--color-ah-text-muted)] font-[var(--font-ah-mono)]">
-            {data.pipeline.functionName}
-          </span>
-        )}
-      </div>
-
-      {data.dbError && (
-        <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-xs text-amber-400">
-          DB unreachable: {data.dbError}
-        </div>
-      )}
-
-      {data.dbRows.length > 0 && (
-        <section aria-label="Database fields">
-          <h4 className="text-xs font-medium text-[var(--color-ah-text-muted)] uppercase tracking-wider mb-1">
-            Database ({data.dbRows.length} row{data.dbRows.length === 1 ? "" : "s"})
-          </h4>
-          {data.dbRows.map((row, i) => (
-            <DbRowCard key={i} row={row} index={i + 1} />
-          ))}
-        </section>
-      )}
-
-      {data.sidecar && (
-        <section aria-label="Sidecar fields">
-          <h4 className="text-xs font-medium text-[var(--color-ah-text-muted)] uppercase tracking-wider mb-1">Sidecar</h4>
-          <pre className="p-2 rounded bg-[var(--color-ah-bg)] border border-[var(--color-ah-border)] font-[var(--font-ah-mono)] text-xs overflow-auto max-h-80">
-            {JSON.stringify(data.sidecar, null, 2)}
-          </pre>
-        </section>
-      )}
-
-      {data.sources.db !== "ok" && !data.sidecar && (
-        <p className="text-xs text-[var(--color-ah-text-muted)]">
-          {matchedPipeline
-            ? `No metadata yet — ${matchedPipeline.config.functionName} has not produced output for this asset.`
-            : "No metadata pipeline is configured for this file kind."}
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// InfoTab — matches mockup layout exactly
+// InfoTab — Frame.io-style "All Fields" view shared with the full-screen
+// viewer (MediaPreview). Renders FILE / MEDIA / ATTRIBUTES sections via
+// <AllFieldsPanel>; file-kind-specific MEDIA fields surface for image,
+// video, and raw_camera. The version-detail header is preserved when the
+// asset has a currentVersionId.
 // ---------------------------------------------------------------------------
 
 function InfoTab({
@@ -525,217 +393,14 @@ function InfoTab({
   onAdvanced?: (updatedAsset: AssetRow) => void;
 }) {
   // When no version detail is available (asset ingested without VFX hierarchy),
-  // show data from the asset record + rich metadata from the frame-metadata-extractor pipeline.
+  // show the shared AllFieldsPanel — same renderer as the full-screen viewer.
+  // FILE / MEDIA / ATTRIBUTES groups + sticky action footer.
   if (!info && !asset.currentVersionId) {
-    const mt = inferMediaType(asset.title, asset.sourceUri);
-    const statusLabel = STATUS_LABELS[asset.status] ?? asset.status;
-    const exr = exrMeta?.found ? exrMeta : null;
-    const summary = exr?.summary;
-    const firstPart = exr?.parts?.[0] ?? null;
-    const prod = asset.productionMetadata;
-
     return (
       <div className="flex flex-col h-full">
-        <div className="flex-1 overflow-auto px-4 pb-4">
-          <div className="mt-3 mb-1">
-            <h3 className="text-[13px] font-semibold text-[var(--color-ah-text)] truncate">{asset.title}</h3>
-            <p className="font-[var(--font-ah-mono)] text-[10px] text-[var(--color-ah-accent)] tracking-wide mt-0.5">
-              {mt.toUpperCase()}{summary ? " SEQUENCE" : " FILE"}
-              {prod?.sequence || prod?.shot
-                ? ` \u00b7 ${[prod.sequence, prod.shot].filter(Boolean).join(" / ")}`
-                : ""}
-            </p>
-          </div>
-
-          {/* ════════════════════════════════════════════════════════════
-              VIDEO / AUDIO — codec, streams, timecode
-              ════════════════════════════════════════════════════════════ */}
-          {(mt === "video" || mt === "audio") && (
-            <>
-              <SectionHeader title="Video" />
-              <dl>
-                <MetaRow label="Codec" value={asset.metadata?.codec} accent />
-                {asset.metadata?.resolution && (
-                  <MetaRow label="Resolution" value={`${asset.metadata.resolution.width}\u00d7${asset.metadata.resolution.height}`} />
-                )}
-                <MetaRow label="Frame Rate" value={asset.metadata?.frame_rate ? `${asset.metadata.frame_rate} fps` : null} />
-                {asset.metadata?.frame_range && asset.metadata?.frame_rate && (
-                  <MetaRow label="Duration" value={formatDuration((asset.metadata.frame_range.end - asset.metadata.frame_range.start + 1) / asset.metadata.frame_rate)} />
-                )}
-                <MetaRow label="Bit Depth" value={asset.metadata?.bit_depth ? bitDepthLabel(asset.metadata.bit_depth) : null} />
-                <MetaRow label="Compression" value={asset.metadata?.compression_type} />
-                <MetaRow label="Pixel Aspect" value={asset.metadata?.pixel_aspect_ratio != null && asset.metadata.pixel_aspect_ratio !== 1 ? String(asset.metadata.pixel_aspect_ratio) : null} />
-              </dl>
-
-              {asset.metadata?.color_space && (
-                <>
-                  <SectionHeader title="Color" />
-                  <dl>
-                    <MetaRow label="Color Space" value={asset.metadata.color_space} accent />
-                  </dl>
-                </>
-              )}
-
-              {asset.metadata?.channels && asset.metadata.channels.length > 0 && (
-                <>
-                  <SectionHeader title="Audio" />
-                  <dl>
-                    <MetaRow label="Channels" value={asset.metadata.channels.join(", ")} />
-                  </dl>
-                </>
-              )}
-            </>
-          )}
-
-          {/* ════════════════════════════════════════════════════════════
-              IMAGE / EXR — sequence info, color science, technical
-              ════════════════════════════════════════════════════════════ */}
-          {mt !== "video" && mt !== "audio" && (
-            <>
-              <SectionHeader title="Image" />
-              <dl>
-                {summary?.frameNumber != null && (
-                  <MetaRow label="Frame" value={String(summary.frameNumber)} />
-                )}
-                <MetaRow label="Resolution" value={summary?.resolution !== "unknown" ? summary?.resolution : null} />
-                <MetaRow label="Channels" value={summary?.channelCount ? channelLabel(summary.channelCount) : null} accent={!!summary?.channelCount && summary.channelCount > 3} />
-                <MetaRow label="Compression" value={summary?.compression !== "unknown" ? summary?.compression : null} />
-                {summary?.isDeep && <MetaRow label="Type" value="Deep EXR" accent />}
-                {exr?.file?.size_bytes && <MetaRow label="File Size" value={formatFileSize(exr.file.size_bytes)} />}
-                {exr?.file?.multipart_count && exr.file.multipart_count > 1 && (
-                  <MetaRow label="Parts" value={String(exr.file.multipart_count)} />
-                )}
-              </dl>
-
-              {/* COLOR SCIENCE */}
-              {(summary?.colorSpace && summary.colorSpace !== "unknown") && (
-                <>
-                  <SectionHeader title="Color Science" />
-                  <dl>
-                    <MetaRow label="Color Space" value={summary.colorSpace} accent />
-                    {/* Pull chromaticities and related from header attributes */}
-                    {exr?.attributes?.filter((a) =>
-                      ["chromaticities", "whiteLuminance", "adoptedNeutral", "renderingTransform", "lookModTransform", "acesImageContainerFlag"].some(
-                        (k) => a.attr_name.toLowerCase().includes(k.toLowerCase())
-                      )
-                    ).map((a) => (
-                      <MetaRow key={a.attr_name} label={a.attr_name} value={attrDisplayValue(a)} />
-                    ))}
-                  </dl>
-                </>
-              )}
-
-              {/* TECHNICAL — display/data windows, render info, tiling */}
-              {firstPart && (
-                <>
-                  <SectionHeader title="Technical" />
-                  <dl>
-                    <MetaRow label="Display Window" value={firstPart.display_window ?? (firstPart.display_width ? `${firstPart.display_width}\u00d7${firstPart.display_height}` : null)} />
-                    <MetaRow label="Data Window" value={firstPart.data_window ?? (firstPart.data_x_offset != null ? `offset ${firstPart.data_x_offset}, ${firstPart.data_y_offset}` : null)} />
-                    <MetaRow label="Pixel Aspect" value={firstPart.pixel_aspect_ratio != null && firstPart.pixel_aspect_ratio !== 1 ? String(firstPart.pixel_aspect_ratio) : null} />
-                    <MetaRow label="Line Order" value={firstPart.line_order} />
-                    {firstPart.is_tiled && (
-                      <MetaRow label="Tiling" value={`${firstPart.tile_width ?? "?"}x${firstPart.tile_height ?? "?"}${firstPart.tile_depth ? ` (${firstPart.tile_depth})` : ""}`} />
-                    )}
-                    {firstPart.multi_view && <MetaRow label="Multi-View" value="Yes" accent />}
-                  </dl>
-                </>
-              )}
-
-              {/* RENDER — software, DCC, hostname */}
-              {(firstPart?.render_software || exr?.attributes?.some((a) =>
-                ["Software", "renderer", "hostname", "oiio", "driverVersion"].some((k) => a.attr_name.toLowerCase().includes(k.toLowerCase()))
-              )) && (
-                <>
-                  <SectionHeader title="Render" />
-                  <dl>
-                    <MetaRow label="Software" value={firstPart?.render_software} accent />
-                    {exr?.attributes?.filter((a) =>
-                      ["Software", "hostname", "oiio:ColorSpace", "DateTime"].some(
-                        (k) => a.attr_name === k
-                      )
-                    ).map((a) => (
-                      <MetaRow key={a.attr_name} label={a.attr_name} value={attrDisplayValue(a)} />
-                    ))}
-                  </dl>
-                </>
-              )}
-
-              {/* CAMERA — lens, exposure, etc. (from EXR header attributes) */}
-              {exr?.attributes && exr.attributes.some((a) =>
-                ["camera", "lens", "focalLength", "aperture", "focus", "exposure", "isoSpeed"].some(
-                  (k) => a.attr_name.toLowerCase().includes(k.toLowerCase())
-                )
-              ) && (
-                <>
-                  <SectionHeader title="Camera" />
-                  <dl>
-                    {exr.attributes.filter((a) =>
-                      ["camera", "lens", "focalLength", "aperture", "focus", "exposure", "isoSpeed", "shutterAngle"].some(
-                        (k) => a.attr_name.toLowerCase().includes(k.toLowerCase())
-                      )
-                    ).map((a) => (
-                      <MetaRow key={a.attr_name} label={a.attr_name} value={attrDisplayValue(a)} />
-                    ))}
-                  </dl>
-                </>
-              )}
-
-              {/* EXR HEADER ATTRIBUTES — remaining attributes, collapsible */}
-              {exr?.attributes && exr.attributes.length > 0 && (() => {
-                // Filter out attrs already shown in Color Science, Render, Camera sections
-                const shownKeys = new Set([
-                  "chromaticities", "whiteLuminance", "adoptedNeutral", "renderingTransform",
-                  "lookModTransform", "acesImageContainerFlag",
-                  "Software", "hostname", "oiio:ColorSpace", "DateTime",
-                  "camera", "lens", "focalLength", "aperture", "focus", "exposure",
-                  "isoSpeed", "shutterAngle",
-                ]);
-                const remaining = exr.attributes.filter((a) =>
-                  !shownKeys.has(a.attr_name) && ![...shownKeys].some((k) => a.attr_name.toLowerCase().includes(k.toLowerCase()))
-                );
-                if (remaining.length === 0) return null;
-                return (
-                  <CollapsibleSection title="EXR Header" count={remaining.length}>
-                    <dl>
-                      {remaining.map((a) => (
-                        <MetaRow key={a.attr_name} label={a.attr_name} value={attrDisplayValue(a)} />
-                      ))}
-                    </dl>
-                  </CollapsibleSection>
-                );
-              })()}
-            </>
-          )}
-
-          {/* ════════════════════════════════════════════════════════════
-              PRODUCTION — always shown
-              ════════════════════════════════════════════════════════════ */}
-          <SectionHeader title="Production" />
-          <dl>
-            <MetaRow label="Project" value={prod?.show} />
-            <MetaRow label="Sequence" value={prod?.sequence} />
-            <MetaRow label="Shot" value={prod?.shot} accent />
-            <StatusRow label="Status" statusLabel={statusLabel} />
-            {asset.metadata?.file_size_bytes != null && (
-              <MetaRow label="Size" value={formatFileSize(asset.metadata.file_size_bytes)} />
-            )}
-            {asset.createdAt && <MetaRow label="Ingested" value={new Date(asset.createdAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })} />}
-          </dl>
-
-          {/* ════════════════════════════════════════════════════════════
-              STORAGE — identifiers and paths
-              ════════════════════════════════════════════════════════════ */}
-          <SectionHeader title="Storage" />
-          <dl>
-            <MetaRow label="Source" value={asset.sourceUri} copyable />
-            <MetaRow label="Asset ID" value={asset.id} copyable />
-            {asset.jobId && <MetaRow label="Job ID" value={asset.jobId} copyable />}
-            {exr?.file?.file_id && <MetaRow label="EXR File ID" value={String(exr.file.file_id)} copyable />}
-          </dl>
+        <div className="flex-1 overflow-hidden">
+          <AllFieldsPanel asset={asset} hideHeader />
         </div>
-
-        {/* Action buttons */}
         <div className="shrink-0 border-t border-[var(--color-ah-border)] p-3 space-y-2 bg-[var(--color-ah-bg-raised)]">
           <button type="button"
             onClick={() => window.open(`rvlink://${asset.sourceUri}`, "_blank")}
@@ -752,6 +417,7 @@ function InfoTab({
       </div>
     );
   }
+
 
   if (!info) {
     return (
@@ -1240,7 +906,7 @@ function StreamsTab({ asset }: { asset: AssetRow }) {
 
 export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("metadata");
+  const [activeTab, setActiveTab] = useState<TabId>("info");
   const [info, setInfo] = useState<VersionDetailInfo | null>(null);
   const [history, setHistory] = useState<VersionDetailHistoryEvent[] | null>(null);
   const [loadingInfo, setLoadingInfo] = useState(false);
@@ -1327,10 +993,9 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
   useEffect(() => {
     setInfo(null);
     setHistory(null);
-    // Reset to the first available tab for this media type — "metadata"
-    // when supported, "info" otherwise.
-    const mt = inferMediaType(asset.title, asset.sourceUri);
-    setActiveTab(mt === "image" || mt === "video" || mt === "raw" ? "metadata" : "info");
+    // INFO is now the primary view (renders AllFieldsPanel — same as
+    // the full-screen viewer). Reset on asset change.
+    setActiveTab("info");
   }, [asset.id, asset.title, asset.sourceUri]);
 
   return (
@@ -1357,7 +1022,6 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
       <TabBar activeTab={activeTab} onTabChange={setActiveTab} tabs={tabs} />
 
       <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`} className="flex-1 overflow-hidden">
-        {activeTab === "metadata" && <MetadataTab asset={asset} />}
         {activeTab === "info" && <InfoTab info={loadingInfo ? null : info} asset={asset} exrMeta={exrMeta} onAdvanced={onAdvanced} />}
         {activeTab === "streams" && <StreamsTab asset={asset} />}
         {activeTab === "history" && <HistoryTab events={loadingHistory ? null : history} />}
