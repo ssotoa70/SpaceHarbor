@@ -24,6 +24,7 @@ import { useAssetIntegrity } from "../hooks/useAssetIntegrity";
 import { VideoMetadataRenderer, detectSchema } from "./metadata";
 import { ChannelPills } from "./ChannelPills";
 import { AllFieldsPanel } from "./AllFieldsPanel";
+import { AovLayerMapTable } from "./AovLayerMapTable";
 
 // ---------------------------------------------------------------------------
 // Local alias — shape-compatible with the former ExrMetadataLookupResult.
@@ -1025,7 +1026,7 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
         {activeTab === "info" && <InfoTab info={loadingInfo ? null : info} asset={asset} exrMeta={exrMeta} onAdvanced={onAdvanced} />}
         {activeTab === "streams" && <StreamsTab asset={asset} />}
         {activeTab === "history" && <HistoryTab events={loadingHistory ? null : history} />}
-        {activeTab === "aovs" && <AovsTab exrMeta={exrMeta} />}
+        {activeTab === "aovs" && <AovLayerMapTable asset={asset} />}
         {activeTab === "vast" && <VastTab asset={asset} exrMeta={exrMeta} />}
         {activeTab === "integrity" && (
           <IntegrityTabPanel assetId={asset.id} fileKind={inferIntegrityKind(asset)} />
