@@ -147,7 +147,7 @@ describe("MediaPreview field composition", () => {
     vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
       assetId: "a1",
       sourceUri: "/data/hero.exr",
-      fileKind: "exr",
+      fileKind: "image",
       pipeline: null,
       sources: { db: "ok" as const, sidecar: "ok" as const },
       dbRows: [{ width: 2048, height: 858, compression: "zip", color_space: "ACES2065-1" }],
@@ -158,20 +158,22 @@ describe("MediaPreview field composition", () => {
     const grid = await screen.findByTestId("gallery-grid");
     fireEvent.doubleClick(grid.children[0]);
 
-    // Sidebar header shows resolution and compression (may appear in multiple places: breadcrumb + badge area)
+    // AllFieldsPanel renders Resolution from width+height in the MEDIA group;
+    // the same dbRow values also surface in ATTRIBUTES (Width, Height, Compression).
     await waitFor(() => {
       expect(screen.getAllByText("2048x858").length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText("ZIP").length).toBeGreaterThanOrEqual(1);
+      // Compression value preserves its source casing — no toUpperCase.
+      expect(screen.getAllByText("zip").length).toBeGreaterThanOrEqual(1);
     });
-    // Image field group should list Compression
-    expect(screen.getByText("Compression")).toBeInTheDocument();
+    // The Compression field label is rendered once in MEDIA and again in ATTRIBUTES.
+    expect(screen.getAllByText("Compression").length).toBeGreaterThanOrEqual(1);
   });
 
   it("falls back to sidecar when dbRows is empty", async () => {
     vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
       assetId: "a1",
       sourceUri: "/data/hero.exr",
-      fileKind: "exr",
+      fileKind: "image",
       pipeline: null,
       sources: { db: "empty" as const, sidecar: "ok" as const },
       dbRows: [],
@@ -193,7 +195,7 @@ describe("MediaPreview field composition", () => {
     vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
       assetId: "a1",
       sourceUri: "/data/hero.exr",
-      fileKind: "exr",
+      fileKind: "image",
       pipeline: null,
       sources: { db: "empty" as const, sidecar: "ok" as const },
       dbRows: [],
