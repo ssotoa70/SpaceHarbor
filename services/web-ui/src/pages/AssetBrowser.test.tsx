@@ -135,74 +135,29 @@ describe("AssetBrowser", () => {
 });
 
 // ---------------------------------------------------------------------------
-// MediaPreview field composition — I-1 coverage for C2 migration
+// MediaPreview integration — confirms the full-screen viewer dispatches
+// to the right metadata renderer per file kind. Unit-level coverage of the
+// renderer logic lives in components/AllFieldsPanel.test.tsx + the
+// metadata/* tests; this file only verifies routing through MediaPreview.
 // ---------------------------------------------------------------------------
-describe("MediaPreview field composition", () => {
+describe("MediaPreview integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     __resetAssetMetadataCacheForTests();
   });
 
-  it("renders resolution and compression from dbRow when populated", async () => {
+  it("frame pipeline asset → FrameMetadataRenderer activates in the sidebar", async () => {
     vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
       assetId: "a1",
       sourceUri: "/data/hero.exr",
       fileKind: "image",
-      pipeline: null,
-      sources: { db: "ok" as const, sidecar: "ok" as const },
-      dbRows: [{ width: 2048, height: 858, compression: "zip", color_space: "ACES2065-1" }],
+      pipeline: { functionName: "frame-metadata-extractor", targetSchema: "frame_metadata", targetTable: "files", sidecarSchemaId: "frame@1" },
+      sources: { db: "ok" as const, sidecar: "missing" as const },
+      dbRows: [{ file_id: "abc", file_path: "/data/hero.exr", format: "openexr", size_bytes: 9999 }],
       sidecar: null,
-    } as any);
-
-    renderWithRouter(<AssetBrowser />);
-    const grid = await screen.findByTestId("gallery-grid");
-    fireEvent.doubleClick(grid.children[0]);
-
-    // AllFieldsPanel renders Resolution from width+height in the MEDIA group;
-    // the same dbRow values also surface in ATTRIBUTES (Width, Height, Compression).
-    await waitFor(() => {
-      expect(screen.getAllByText("2048x858").length).toBeGreaterThanOrEqual(1);
-      // Compression value preserves its source casing — no toUpperCase.
-      expect(screen.getAllByText("zip").length).toBeGreaterThanOrEqual(1);
-    });
-    // The Compression field label is rendered once in MEDIA and again in ATTRIBUTES.
-    expect(screen.getAllByText("Compression").length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("falls back to sidecar when dbRows is empty", async () => {
-    vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
-      assetId: "a1",
-      sourceUri: "/data/hero.exr",
-      fileKind: "image",
-      pipeline: null,
-      sources: { db: "empty" as const, sidecar: "ok" as const },
-      dbRows: [],
-      sidecar: { width: 2048, height: 1080, compression: "piz", color_space: "scene-linear" },
-    } as any);
-
-    renderWithRouter(<AssetBrowser />);
-    const grid = await screen.findByTestId("gallery-grid");
-    fireEvent.doubleClick(grid.children[0]);
-
-    await waitFor(() => {
-      expect(screen.getAllByText("2048x1080").length).toBeGreaterThanOrEqual(1);
-    });
-    // Compression from sidecar fallback
-    expect(screen.getAllByText("piz").length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("does not render channels/parts arrays as JSON strings in dynamic loop", async () => {
-    vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
-      assetId: "a1",
-      sourceUri: "/data/hero.exr",
-      fileKind: "image",
-      pipeline: null,
-      sources: { db: "empty" as const, sidecar: "ok" as const },
-      dbRows: [],
-      sidecar: {
-        channels: [{ channel_name: "R", layer_name: "rgba", channel_type: "FLOAT", part_index: 0 }],
-        parts: [{ name: "rgba", type: "scanlineimage" }],
-        duration: 42,
+      dbExtras: {
+        parts: [{ part_index: 0, width: 2048, height: 858, compression: "zip", color_space: "ACES2065-1" }],
+        channels: [{ channel_name: "R", channel_type: "FLOAT" }, { channel_name: "G", channel_type: "FLOAT" }],
       },
     } as any);
 
@@ -210,15 +165,31 @@ describe("MediaPreview field composition", () => {
     const grid = await screen.findByTestId("gallery-grid");
     fireEvent.doubleClick(grid.children[0]);
 
-    // Wait for sidebar to open and metadata to render
+    // FrameMetadataRenderer renders Sequence + Color Science sections.
+    await waitFor(() => expect(screen.getByTestId("frame-metadata-renderer")).toBeInTheDocument());
+    expect(screen.getByText("2048 × 858")).toBeInTheDocument();
+    expect(screen.getByText("ZIP (lossless)")).toBeInTheDocument();
+    expect(screen.getByText("ACES2065-1")).toBeInTheDocument();
+  });
+
+  it("unknown file (no pipeline) → only File summary renders, no semantic renderer", async () => {
+    vi.mocked(api.fetchAssetMetadata).mockResolvedValueOnce({
+      assetId: "a1",
+      sourceUri: "/data/notes.txt",
+      fileKind: "other",
+      pipeline: null,
+      sources: { db: "disabled" as const, sidecar: "missing" as const },
+      dbRows: [],
+      sidecar: null,
+    } as any);
+
+    renderWithRouter(<AssetBrowser />);
+    const grid = await screen.findByTestId("gallery-grid");
+    fireEvent.doubleClick(grid.children[0]);
+
+    // Wait for the dialog and confirm no semantic renderer is mounted.
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
-
-    // Primitive sidecar field (duration) should appear in the dynamic Media group
-    expect(screen.getByText("42")).toBeInTheDocument();
-
-    // Array/object fields must NOT render as raw JSON blobs
-    const renderedText = document.body.textContent ?? "";
-    expect(renderedText).not.toMatch(/\[object Object\]/);
-    expect(renderedText).not.toMatch(/channel_name/);
+    expect(screen.queryByTestId("frame-metadata-renderer")).toBeNull();
+    expect(screen.queryByTestId("video-metadata-renderer")).toBeNull();
   });
 });

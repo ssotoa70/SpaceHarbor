@@ -128,6 +128,7 @@ export interface FrameMetadataPayload {
   file?: Record<string, unknown>;
   parts?: readonly Record<string, unknown>[];
   channels?: readonly Record<string, unknown>[];
+  aovs?: readonly Record<string, unknown>[];
   attributes?: { parts?: readonly unknown[] };
   color?: Record<string, unknown>;
   timecode?: Record<string, unknown>;
@@ -135,5 +136,94 @@ export interface FrameMetadataPayload {
   camera?: Record<string, unknown>;
   production?: Record<string, unknown>;
   extraction?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/**
+ * Flat field bag derived from a FrameMetadataPayload + the asset-metadata
+ * route's dbRow + dbExtras. The `extractFrameFields` helper merges all
+ * available sources (parent files row, child tables, sidecar JSON) into
+ * this single bag — matching the VideoMetadataFields pattern so the
+ * renderer can read by key without descending into nested objects.
+ *
+ * Fields come from multiple sources:
+ *   - dbRow (frame_metadata.files): file_id, file_path, format, size_bytes, mtime,
+ *     multipart_count, is_deep, header_hash
+ *   - dbExtras.parts[0] (frame_metadata.parts): width, height, display_window,
+ *     compression, line_order, render_software, is_tiled, tile_*, view_name, part_name
+ *   - dbExtras.channels rollup: channel_count, channel_type, bit_depth_label
+ *   - dbExtras.aovs rollup: aov_count, aov_summary
+ *   - dbExtras.color / sidecar.color: color_space, transfer_function, primaries
+ *   - dbExtras.camera / sidecar.camera: camera_make, camera_model, camera_lens, ...
+ *   - dbExtras.production / sidecar.production: production_creator, production_copyright, ...
+ *   - dbExtras.timecode / sidecar.timecode: timecode_value, timecode_rate
+ */
+export interface FrameMetadataFields {
+  // FILE / identity
+  file_id?: string;
+  file_path?: string;
+  format?: string;
+  size_bytes?: number;
+  mtime?: string;
+  multipart_count?: number;
+  is_deep?: boolean;
+  header_hash?: string;
+  frame_number?: number;
+
+  // SEQUENCE / parts[0] geometry
+  width?: number;
+  height?: number;
+  display_width?: number;
+  display_height?: number;
+  data_window?: string;
+  display_window?: string;
+  pixel_aspect_ratio?: number;
+  compression?: string;
+  line_order?: string;
+  render_software?: string;
+  is_tiled?: boolean;
+  tile_width?: number;
+  tile_height?: number;
+  multi_view?: boolean;
+  view_name?: string;
+  part_name?: string;
+  parts_count?: number;
+
+  // Channels / AOVs rollups
+  channels_count?: number;
+  channel_type?: string;       // most common across channels[]
+  bit_depth_label?: string;    // 32f / 16f / 8u / "mixed (32f/16f)"
+  aov_count?: number;
+  aov_summary?: string;        // "Multi-ch (7 AOVs)" or "RGB · beauty only"
+
+  // COLOR SCIENCE
+  color_space?: string;
+  transfer_function?: string;
+  primaries?: string;
+
+  // CAMERA (per OIIO/sidecar; sparse in CG renders)
+  camera_make?: string;
+  camera_model?: string;
+  camera_lens?: string;
+  camera_exposure?: string;
+  camera_fnumber?: number;
+  camera_iso?: number;
+
+  // TIMECODE
+  timecode_value?: string;
+  timecode_rate?: number;
+
+  // PRODUCTION
+  production_creator?: string;
+  production_copyright?: string;
+  production_description?: string;
+  production_software?: string;
+
+  // EXTRACTION provenance
+  extraction_tool?: string;
+  extraction_tool_version?: string;
+  extraction_timestamp?: string;
+  extraction_warnings?: readonly string[];
+
   [key: string]: unknown;
 }
