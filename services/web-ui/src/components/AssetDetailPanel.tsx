@@ -22,9 +22,9 @@ import {
 import { useAssetMetadata } from "../hooks/useAssetMetadata";
 import { useAssetIntegrity } from "../hooks/useAssetIntegrity";
 import { VideoMetadataRenderer, detectSchema } from "./metadata";
-import { ChannelPills } from "./ChannelPills";
 import { AllFieldsPanel } from "./AllFieldsPanel";
 import { AovLayerMapTable } from "./AovLayerMapTable";
+import { AssetHeaderBar } from "./AssetHeaderBar";
 import { FrameSequenceIntegrity } from "./FrameSequenceIntegrity";
 
 // ---------------------------------------------------------------------------
@@ -928,6 +928,13 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
     setActiveTab("info");
   }, [asset.id, asset.title, asset.sourceUri]);
 
+  // Phase 6 — AOV pill filter state, owned at this panel level so it
+  // survives tab switches but resets when the user picks a different
+  // asset (otherwise Asset B's AOVS tab would render filtered by a
+  // layer name that may not exist on it).
+  const [activeAov, setActiveAov] = useState<string | null>(null);
+  useEffect(() => { setActiveAov(null); }, [asset.id]);
+
   return (
     <div ref={panelRef} tabIndex={-1}
       className="h-full flex flex-col bg-[var(--color-ah-bg-raised)] border-l border-[var(--color-ah-border)] outline-none"
@@ -936,18 +943,11 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
       <PanelHeader asset={asset} info={info} onClose={onClose} />
       <FrameBar info={info} />
 
-      {/* AOV tag pills — show channel layers from EXR metadata (images only) */}
-      {mediaType === "image" && Array.isArray(panelMetadata.data?.sidecar?.channels) &&
-       (panelMetadata.data?.sidecar?.channels as unknown[]).length > 0 && (
-        <div className="px-4 py-2 border-b border-[var(--color-ah-border-muted)]">
-          <ChannelPills
-            channels={panelMetadata.data!.sidecar!.channels}
-            mode="dedup-by-layer"
-            containerClassName="flex flex-wrap gap-1.5"
-            pillClassName="px-2 py-0.5 rounded-full text-[10px] font-[var(--font-ah-mono)] border border-[var(--color-ah-border)] text-[var(--color-ah-text-muted)] bg-[var(--color-ah-bg)]"
-          />
-        </div>
-      )}
+      <AssetHeaderBar
+        metadata={panelMetadata.data ?? null}
+        activeAov={activeAov}
+        onAovChange={setActiveAov}
+      />
 
       <TabBar activeTab={activeTab} onTabChange={setActiveTab} tabs={tabs} />
 
@@ -957,7 +957,7 @@ export function AssetDetailPanel({ asset, onClose, onAdvanced }: AssetDetailPane
         {activeTab === "history" && <HistoryTab events={loadingHistory ? null : history} />}
         {activeTab === "aovs" && (
           <div className="overflow-auto h-full">
-            <AovLayerMapTable asset={asset} />
+            <AovLayerMapTable asset={asset} activeAov={activeAov} />
             <FrameSequenceIntegrity asset={asset} />
           </div>
         )}
