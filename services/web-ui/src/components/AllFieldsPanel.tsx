@@ -23,6 +23,7 @@
  */
 
 import { useAssetMetadata } from "../hooks/useAssetMetadata";
+import { AssetBadges } from "./AssetBadges";
 import { FrameMetadataRenderer } from "./metadata/FrameMetadataRenderer";
 import { VideoMetadataRenderer } from "./metadata/VideoMetadataRenderer";
 import { extractFrameFields } from "./metadata/frame-fields-extractor";
@@ -65,6 +66,15 @@ export function AllFieldsPanel({ asset, hideHeader = false }: AllFieldsPanelProp
               })}
             </p>
           )}
+          <AssetBadges asset={asset} metadata={metadata} />
+        </div>
+      )}
+      {hideHeader && (
+        // Caller (AssetDetailPanel) supplies its own filename header — but
+        // the structural / QC badges still need a home so artists see them
+        // without scrolling. Render compactly above the tabs' content.
+        <div className="px-4 pt-2">
+          <AssetBadges asset={asset} metadata={metadata} />
         </div>
       )}
 
