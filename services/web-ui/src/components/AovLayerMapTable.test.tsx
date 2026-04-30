@@ -167,4 +167,73 @@ describe("<AovLayerMapTable />", () => {
     expect(screen.getAllByText(/beauty/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/data/i).length).toBeGreaterThanOrEqual(1);
   });
+
+  it("filters rows to only the matching layer when activeAov is set", async () => {
+    vi.spyOn(api, "fetchAssetMetadata").mockResolvedValue({
+      assetId: exrAsset.id,
+      sourceUri: exrAsset.sourceUri,
+      fileKind: "image",
+      pipeline: null,
+      sources: { db: "ok", sidecar: "missing" },
+      dbRows: [{ file_id: "abc" }],
+      sidecar: null,
+      dbExtras: {
+        channels: [
+          { channel_name: "R", layer_name: "diffuse", channel_type: "FLOAT" },
+          { channel_name: "G", layer_name: "diffuse", channel_type: "FLOAT" },
+          { channel_name: "B", layer_name: "diffuse", channel_type: "FLOAT" },
+          { channel_name: "X", layer_name: "normals", channel_type: "FLOAT" },
+          { channel_name: "Y", layer_name: "normals", channel_type: "FLOAT" },
+          { channel_name: "Z", layer_name: "normals", channel_type: "FLOAT" },
+        ],
+      },
+    });
+    render(<AovLayerMapTable asset={exrAsset} activeAov="diffuse" />);
+    await screen.findByTestId("aov-layer-map");
+    expect(screen.getAllByText("diffuse").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("normals")).toBeNull();
+    // Header still reflects the filtered count
+    expect(screen.getByText(/1 LAYER/)).toBeInTheDocument();
+  });
+
+  it("renders all rows when activeAov is null (regression guard)", async () => {
+    vi.spyOn(api, "fetchAssetMetadata").mockResolvedValue({
+      assetId: exrAsset.id,
+      sourceUri: exrAsset.sourceUri,
+      fileKind: "image",
+      pipeline: null,
+      sources: { db: "ok", sidecar: "missing" },
+      dbRows: [{ file_id: "abc" }],
+      sidecar: null,
+      dbExtras: {
+        channels: [
+          { channel_name: "R", layer_name: "diffuse", channel_type: "FLOAT" },
+          { channel_name: "X", layer_name: "normals", channel_type: "FLOAT" },
+        ],
+      },
+    });
+    render(<AovLayerMapTable asset={exrAsset} activeAov={null} />);
+    await screen.findByTestId("aov-layer-map");
+    expect(screen.getAllByText("diffuse").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("normals").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders an empty state when activeAov does not match any row", async () => {
+    vi.spyOn(api, "fetchAssetMetadata").mockResolvedValue({
+      assetId: exrAsset.id,
+      sourceUri: exrAsset.sourceUri,
+      fileKind: "image",
+      pipeline: null,
+      sources: { db: "ok", sidecar: "missing" },
+      dbRows: [{ file_id: "abc" }],
+      sidecar: null,
+      dbExtras: {
+        channels: [
+          { channel_name: "R", layer_name: "diffuse", channel_type: "FLOAT" },
+        ],
+      },
+    });
+    render(<AovLayerMapTable asset={exrAsset} activeAov="not-a-real-layer" />);
+    await screen.findByTestId("aov-empty");
+  });
 });

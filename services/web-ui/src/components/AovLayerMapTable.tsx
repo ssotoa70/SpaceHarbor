@@ -43,13 +43,20 @@ interface LayerRow {
 
 interface AovLayerMapTableProps {
   asset: AssetRow;
+  /** Filter the rendered rows to only the row whose `name` matches.
+   *  When `null` or `undefined`, all rows render. */
+  activeAov?: string | null;
 }
 
-export function AovLayerMapTable({ asset }: AovLayerMapTableProps): ReactNode {
+export function AovLayerMapTable({ asset, activeAov }: AovLayerMapTableProps): ReactNode {
   const result = useAssetMetadata(asset.id);
   const metadata = result.status === "ready" ? result.data : null;
 
-  const rows = useMemo(() => buildLayerRows(metadata), [metadata]);
+  const rows = useMemo(() => {
+    const all = buildLayerRows(metadata);
+    if (!activeAov) return all;
+    return all.filter((r) => r.name === activeAov);
+  }, [metadata, activeAov]);
 
   if (result.status === "loading") {
     return (

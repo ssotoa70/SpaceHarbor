@@ -6,6 +6,8 @@ import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingest
 import { Badge, Button, Input, Skeleton } from "../design-system";
 import { AssetDetailPanel } from "../components/AssetDetailPanel";
 import { AllFieldsPanel } from "../components/AllFieldsPanel";
+import { AssetHeaderBar } from "../components/AssetHeaderBar";
+import { useAssetMetadata } from "../hooks/useAssetMetadata";
 
 import { AssetSelectionToolbar } from "../components/AssetSelectionToolbar";
 import { AssetContextMenu } from "../components/AssetContextMenu";
@@ -413,6 +415,10 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoaded, setPreviewLoaded] = useState(false);
 
+  // Phase 6 — same metadata feed used by AllFieldsPanel; the hook
+  // dedupes against any concurrent side-panel fetch for the same id.
+  const previewMetadata = useAssetMetadata(asset.id);
+
   const currentIndex = assets.findIndex((a) => a.id === asset.id);
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < assets.length - 1;
@@ -503,6 +509,10 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
             </button>
           </div>
         </div>
+
+        <AssetHeaderBar
+          metadata={previewMetadata.status === "ready" ? previewMetadata.data : null}
+        />
 
         {/* Media viewport — image fills the space */}
         <div className="flex-1 flex items-center justify-center relative overflow-hidden">
