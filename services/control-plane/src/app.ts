@@ -53,6 +53,7 @@ import { registerStorageMetadataRoutes } from "./routes/storage-metadata.js";
 import { registerAssetMetadataRoute } from "./routes/asset-metadata.js";
 import { registerAssetStatsRoute } from "./routes/asset-stats.js";
 import { registerAssetIntegrityRoute } from "./routes/asset-integrity.js";
+import { registerSequenceIntegrityRoute } from "./routes/sequence-integrity.js";
 import { registerFunctionConfigsRoutes } from "./routes/function-configs.js";
 import { createFunctionConfigsStore, type StoreDeps as FunctionConfigsStoreDeps } from "./config/function-configs-store.js";
 import { registerDataEnginePipelineRoutes } from "./routes/dataengine-pipelines.js";
@@ -509,6 +510,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // Phase 6.0 (C2): per-asset hashes + keyframes reader for INTEGRITY tab
     void registerAssetIntegrityRoute(app, persistence, prefixes);
+
+    // Frame Sequence Integrity stub — POST /assets/:id/sequence-integrity
+    // returns 503 NOT_IMPLEMENTED until the sequence-scanner job ships.
+    registerSequenceIntegrityRoute(app, prefixes);
 
     // Phase 6.0 (C3): admin-gated typed runtime configs (function_configs).
     // C3 follow-up: replace with a real DB-backed StoreDeps that queries

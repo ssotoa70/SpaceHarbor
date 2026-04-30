@@ -3,9 +3,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { fetchAssets, fetchVersionDependencies, fetchCatalogUnregistered, ingestAsset, fetchMediaUrls, type AssetRow, type AssetDependencyData, type UnregisteredFile } from "../api";
-import { useAssetMetadata } from "../hooks/useAssetMetadata";
 import { Badge, Button, Input, Skeleton } from "../design-system";
 import { AssetDetailPanel } from "../components/AssetDetailPanel";
+import { AllFieldsPanel } from "../components/AllFieldsPanel";
 
 import { AssetSelectionToolbar } from "../components/AssetSelectionToolbar";
 import { AssetContextMenu } from "../components/AssetContextMenu";
@@ -407,36 +407,8 @@ interface MediaPreviewProps {
   onNavigate: (asset: AssetRow) => void;
 }
 
-// Dynamic-field helpers used by the metadata rendering path. Both are
-// schema-agnostic: humanizeMetaLabel turns snake_case / camelCase column
-// names into "Title Case" display labels, and formatMetaFieldValue coerces
-// any JSON value (string / number / bool / array / nested object) to a safe
-// display string. Keeps the sidebar robust to whatever shape the
-// video-metadata-extractor function decides to emit.
-function humanizeMetaLabel(key: string): string {
-  return key
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function formatMetaFieldValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (typeof value === "number") return String(value);
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map((v) => formatMetaFieldValue(v)).join(", ");
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const metadataResult = useAssetMetadata(asset?.id ?? null);
-  const metadata = metadataResult.status === "ready" ? metadataResult.data : undefined;
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoaded, setPreviewLoaded] = useState(false);
@@ -487,105 +459,6 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
 
   const mediaType = inferMediaType(asset.title, asset.sourceUri);
 
-  // Build dynamic fields
-  const fields: Array<{ group: string; label: string; value: string }> = [];
-  const addField = (group: string, label: string, value: string | number | null | undefined) => {
-    if (value == null || value === "" || value === "unknown") return;
-    fields.push({ group, label, value: String(value) });
-  };
-
-  // Unified metadata from useAssetMetadata — reads DB rows + S3 sidecar via
-  // the /assets/:id/metadata endpoint (C-1b unified reader + Layer A fallback).
-  const dbRow = metadata?.dbRows?.[0] as Record<string, unknown> | undefined;
-  const sidecar = metadata?.sidecar as Record<string, unknown> | null | undefined;
-  // Helper: prefer dbRow value, fall back to sidecar, coerce to string or null.
-  // Returns null for arrays/objects — those are not renderable as a single field value.
-  const field = (name: string): string | null => {
-    const v = dbRow?.[name] ?? sidecar?.[name];
-    if (v == null) return null;
-    if (typeof v === "object") return null;
-    return String(v);
-  };
-
-  addField("File", "Filename", asset.title);
-  addField("File", "Source", asset.sourceUri);
-  if (asset.metadata?.file_size_bytes) {
-    addField("File", "Size", formatFileSize(asset.metadata.file_size_bytes));
-  } else {
-    const sizeBytes = field("size_bytes") ?? field("file_size_bytes");
-    if (sizeBytes) addField("File", "Size", formatFileSize(Number(sizeBytes)));
-  }
-  if (asset.createdAt) addField("File", "Created", new Date(asset.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }));
-
-  // Image fields — read from unified dbRow/sidecar (oiio-inspector or sidecar shape).
-  const resolution =
-    field("resolution") ??
-    (field("width") && field("height") ? `${field("width")}x${field("height")}` : null);
-  const compression = field("compression");
-  const colorSpace = field("color_space") ?? field("colorSpace");
-  const channelCount = field("channel_count") ?? field("channelCount") ?? field("channels");
-  const isDeep = field("is_deep") ?? field("isDeep");
-  const frameNumber = field("frame_number") ?? field("frameNumber");
-
-  if (resolution || compression || channelCount || colorSpace) {
-    addField("Image", "Resolution", resolution);
-    addField("Image", "Compression", compression);
-    if (channelCount) addField("Image", "Channels", channelCount);
-    addField("Image", "Color Space", colorSpace);
-    if (isDeep === "true" || isDeep === "1") addField("Image", "Type", "Deep EXR");
-    if (frameNumber != null) addField("Image", "Frame", frameNumber);
-  }
-
-  // Technical fields (EXR part-level metadata preserved from the sidecar/dbRow).
-  addField("Technical", "Render Software", field("render_software"));
-  const displayWindow = field("display_window") ??
-    (field("display_width") && field("display_height") ? `${field("display_width")}x${field("display_height")}` : null);
-  addField("Technical", "Display Window", displayWindow);
-  addField("Technical", "Data Window", field("data_window"));
-  const pixelAspect = field("pixel_aspect_ratio");
-  if (pixelAspect && pixelAspect !== "1" && pixelAspect !== "1.0") {
-    addField("Technical", "Pixel Aspect", pixelAspect);
-  }
-  addField("Technical", "Line Order", field("line_order"));
-  if (field("is_tiled") === "true" || field("is_tiled") === "1") {
-    const tw = field("tile_width") ?? "?";
-    const th = field("tile_height") ?? "?";
-    addField("Technical", "Tiling", `${tw}x${th}`);
-  }
-  if (field("multi_view") === "true" || field("multi_view") === "1") {
-    addField("Technical", "Multi-View", "Yes");
-  }
-
-  // Dynamic fields — merge sidecar + dbRow and emit everything not already
-  // captured above into the "Media" group.  dbRow takes precedence over sidecar.
-  // This handles the video/raw-camera schema without hardcoding column names.
-  const ALREADY_RENDERED = new Set([
-    "resolution", "width", "height", "compression", "color_space", "colorSpace",
-    "channel_count", "channelCount", "channels", "is_deep", "isDeep",
-    "frame_number", "frameNumber", "size_bytes", "file_size_bytes",
-    "render_software", "display_window", "display_width", "display_height",
-    "data_window", "pixel_aspect_ratio", "line_order", "is_tiled",
-    "tile_width", "tile_height", "multi_view",
-    // Structured sidecar arrays — rendered by dedicated components, not here.
-    "parts", "attributes", "layers",
-  ]);
-  const combined = { ...(sidecar ?? {}), ...(dbRow ?? {}) };
-  for (const [k, v] of Object.entries(combined)) {
-    if (ALREADY_RENDERED.has(k)) continue;
-    if (v == null || v === "") continue;
-    // Skip arrays and nested objects — they render as ugly JSON blobs via
-    // JSON.stringify fallback. Structured fields (channels, parts, attributes)
-    // should be rendered by dedicated components, not the generic Media loop.
-    if (typeof v === "object") continue;
-    addField("Media", humanizeMetaLabel(k), formatMetaFieldValue(v));
-  }
-
-  const grouped = new Map<string, typeof fields>();
-  for (const f of fields) {
-    if (!grouped.has(f.group)) grouped.set(f.group, []);
-    grouped.get(f.group)!.push(f);
-  }
-
   const effectiveProxy = asset.proxy?.uri ?? (mediaType === "video" ? previewUrl : null);
   // Progressive: show thumb while full-res loads
   const displayUrl = previewLoaded ? previewUrl : (thumbUrl ?? previewUrl);
@@ -606,12 +479,6 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
             <span className="text-[13px] text-gray-500">Library</span>
             <span className="text-gray-600 text-xs">/</span>
             <h2 className="text-[13px] font-medium text-white truncate">{asset.title}</h2>
-            {resolution && (
-              <span className="text-[10px] font-[var(--font-ah-mono)] text-gray-500 shrink-0 ml-2">
-                {resolution}{compression ? ` \u00b7 ${compression}` : ""}
-                {colorSpace && colorSpace !== "unknown" ? ` \u00b7 ${colorSpace}` : ""}
-              </span>
-            )}
           </div>
           <div className="flex items-center gap-3 shrink-0">
             {/* Prev/Next navigation */}
@@ -694,65 +561,10 @@ function MediaPreview({ asset, assets, onClose, onNavigate }: MediaPreviewProps)
         </div>
       </div>
 
-      {/* ── Right sidebar — metadata fields ── */}
+      {/* ── Right sidebar — Frame.io-style "All Fields" via shared renderer ── */}
       {sidebarOpen && (
         <div className="w-[340px] shrink-0 bg-[#141418] border-l border-[#1e1e24] flex flex-col overflow-hidden">
-          {/* Header with filename + format/resolution badges */}
-          <div className="px-5 pt-5 pb-4 border-b border-[#1e1e24]">
-            <h3 className="text-[14px] font-semibold text-white mb-1 truncate">{asset.title}</h3>
-            {asset.createdAt && (
-              <p className="text-[11px] text-gray-500 mb-3">
-                Created {new Date(asset.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
-              </p>
-            )}
-            {(resolution || compression) && (
-              <div className="flex gap-4">
-                {compression && (
-                  <div className="text-center">
-                    <div className="text-[9px] font-[var(--font-ah-mono)] tracking-[0.12em] text-gray-500 uppercase mb-0.5">Format</div>
-                    <div className="text-[13px] font-semibold text-white">{compression.toUpperCase()}</div>
-                  </div>
-                )}
-                {resolution && (
-                  <div className="text-center">
-                    <div className="text-[9px] font-[var(--font-ah-mono)] tracking-[0.12em] text-gray-500 uppercase mb-0.5">Resolution</div>
-                    <div className="text-[13px] font-semibold text-white">{resolution}</div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Scrollable fields */}
-          <div className="flex-1 overflow-auto px-5 py-3">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[12px] font-medium text-gray-300">All Fields ({fields.length})</span>
-            </div>
-            {[...grouped.entries()].map(([group, gFields]) => (
-              <div key={group} className="mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="font-[var(--font-ah-mono)] text-[10px] font-medium tracking-[0.14em] text-gray-500 uppercase">
-                    {group}
-                  </span>
-                  <span className="font-[var(--font-ah-mono)] text-[9px] text-gray-600">({gFields.length})</span>
-                  <div className="flex-1 h-px bg-[#1e1e24]" />
-                </div>
-                <dl>
-                  {gFields.map((f) => (
-                    <div key={f.label} className="flex items-baseline justify-between gap-3 py-[4px]">
-                      <dt className="font-[var(--font-ah-mono)] text-[11px] text-gray-500 shrink-0">{f.label}</dt>
-                      <dd className="text-[11px] font-[var(--font-ah-mono)] text-gray-200 text-right truncate max-w-[180px]" title={f.value}>{f.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            ))}
-            {fields.length === 0 && (
-              <p className="text-[11px] text-gray-600 py-4 text-center">
-                {metadataResult.status === "loading" ? "Loading metadata..." : "No metadata available."}
-              </p>
-            )}
-          </div>
+          <AllFieldsPanel asset={asset} />
         </div>
       )}
     </div>

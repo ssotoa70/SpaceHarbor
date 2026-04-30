@@ -527,3 +527,53 @@ test("updateVersionReviewStatusSql: uses DELETE+INSERT pattern", () => {
     }
   );
 });
+
+// ---------------------------------------------------------------------------
+// getAssetIntegrity: defense-in-depth assetId guard
+// ---------------------------------------------------------------------------
+
+test("getAssetIntegrity: rejects unsafe assetId without building SQL", () => {
+  let trinoCallCount = 0;
+
+  return withMockFetch(
+    async (url) => {
+      // Any /v1/statement call would mean the SQL interpolation was reached.
+      if (url.includes("/v1/statement")) trinoCallCount++;
+      return jsonResponse({ columns: [], data: [], stats: { state: "FINISHED" } });
+    },
+    async () => {
+      const adapter = new VastPersistenceAdapter({
+        databaseUrl: "http://testkey:testsecret@trino:8080",
+        eventBrokerUrl: undefined,
+        dataEngineUrl: undefined,
+        strict: false,
+        fallbackToLocal: true
+      });
+
+      const malformedIds = [
+        "abc' OR 1=1",
+        "abc'; DROP TABLE x; --",
+        "abc/../../etc",
+        "abc\"name",
+        "abc;DELETE",
+        "x".repeat(129),
+        ""
+      ];
+
+      for (const id of malformedIds) {
+        const snap = await adapter.getAssetIntegrity(id);
+        assert.deepEqual(
+          snap,
+          { assetExists: false, hashes: null, keyframes: null },
+          `expected empty snapshot for malformed id ${JSON.stringify(id)}`
+        );
+      }
+
+      assert.equal(
+        trinoCallCount,
+        0,
+        "Trino must never be called when assetId fails the safe pattern"
+      );
+    }
+  );
+});

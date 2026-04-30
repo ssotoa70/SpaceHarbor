@@ -231,3 +231,106 @@ test("GET /api/v1/assets/:id/metadata — disabled pipeline → sources.db=disab
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// dbExtras — frame-pipeline child tables (parts/channels/aovs/...)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("GET /api/v1/assets/:id/metadata — frame_metadata: dbExtras populated from child tables", async () => {
+  await withApp(async (app) => {
+    const assetId = await seedAsset(app, "s3://sergio-spaceharbor/uploads/01_beauty_only.exr", "01_beauty_only.exr");
+
+    const calls: string[] = [];
+    setDeps(app, {
+      queryFetcher: async ({ schema, table }) => {
+        calls.push(`${schema}.${table}`);
+        if (table === "files") {
+          return { ok: true, status: 200, data: { rows: [{ file_id: "abc", file_path: "x", format: "openexr" }] } };
+        }
+        if (table === "parts") {
+          return { ok: true, status: 200, data: { rows: [{ part_index: 0, width: 256, height: 256, compression: "zip" }] } };
+        }
+        if (table === "channels") {
+          return { ok: true, status: 200, data: { rows: [
+            { channel_name: "R", channel_type: "HALF" },
+            { channel_name: "G", channel_type: "HALF" },
+            { channel_name: "B", channel_type: "HALF" },
+          ] } };
+        }
+        if (table === "attributes") {
+          return { ok: true, status: 200, data: { rows: [{ attr_name: "compression", attr_value: "zip" }] } };
+        }
+        // Tables that don't exist (aovs/color/timecode/camera/production) — 503
+        return { ok: false, status: 503, data: { detail: "table not found" } };
+      },
+      sidecarFetcher: async (): Promise<SidecarFetchResult> =>
+        ({ ok: false, code: "SIDECAR_NOT_FOUND", message: "no sidecar" }),
+    });
+
+    const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
+    assert.equal(r.statusCode, 200, r.body);
+    const body = r.json();
+    // Parent files row + each child table is queried in parallel.
+    assert.ok(calls.includes("frame_metadata.files"));
+    assert.ok(calls.includes("frame_metadata.parts"));
+    assert.ok(calls.includes("frame_metadata.channels"));
+    assert.ok(calls.includes("frame_metadata.attributes"));
+    assert.ok(calls.includes("frame_metadata.aovs"));
+    // Populated tables surface under dbExtras; missing/empty tables are absent.
+    assert.ok(body.dbExtras, "dbExtras should be present");
+    assert.equal(body.dbExtras.parts.length, 1);
+    assert.equal(body.dbExtras.channels.length, 3);
+    assert.equal(body.dbExtras.attributes.length, 1);
+    assert.equal(body.dbExtras.aovs, undefined);
+    assert.equal(body.dbExtras.color, undefined);
+  });
+});
+
+test("GET /api/v1/assets/:id/metadata — video pipeline: no dbExtras query (single-row schema)", async () => {
+  await withApp(async (app) => {
+    const assetId = await seedAsset(app, "s3://sergio-spaceharbor/uploads/lola.mov", "lola.mov");
+
+    const calls: string[] = [];
+    setDeps(app, {
+      queryFetcher: async ({ schema, table }) => {
+        calls.push(`${schema}.${table}`);
+        return { ok: true, status: 200, data: { rows: [{ file_id: "x", duration_seconds: 90 }] } };
+      },
+      sidecarFetcher: async (): Promise<SidecarFetchResult> =>
+        ({ ok: false, code: "SIDECAR_NOT_FOUND", message: "no sidecar" }),
+    });
+
+    const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
+    assert.equal(r.statusCode, 200, r.body);
+    const body = r.json();
+    // Video schema has only `files` — child tables are not queried.
+    assert.deepEqual(calls, ["video_metadata.files"]);
+    assert.equal(body.dbExtras, undefined);
+  });
+});
+
+test("GET /api/v1/assets/:id/metadata — frame_metadata: no dbExtras when files row missing", async () => {
+  await withApp(async (app) => {
+    const assetId = await seedAsset(app, "s3://sergio-spaceharbor/uploads/orphan.exr", "orphan.exr");
+
+    const calls: string[] = [];
+    setDeps(app, {
+      queryFetcher: async ({ schema, table }) => {
+        calls.push(`${schema}.${table}`);
+        if (table === "files") {
+          return { ok: false, status: 503, data: { detail: "vast unreachable" } };
+        }
+        return { ok: true, status: 200, data: { rows: [{ part_index: 0 }] } };
+      },
+      sidecarFetcher: async (): Promise<SidecarFetchResult> =>
+        ({ ok: false, code: "SIDECAR_NOT_FOUND", message: "no sidecar" }),
+    });
+
+    const r = await app.inject({ method: "GET", url: `/api/v1/assets/${assetId}/metadata` });
+    assert.equal(r.statusCode, 200, r.body);
+    const body = r.json();
+    // When the parent files query fails, child tables are skipped — no point fetching detail without identity.
+    assert.deepEqual(calls, ["frame_metadata.files"]);
+    assert.equal(body.dbExtras, undefined);
+  });
+});

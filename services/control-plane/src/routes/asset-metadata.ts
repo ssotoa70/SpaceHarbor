@@ -44,6 +44,32 @@ export interface SidecarResult_Hit { kind: "sidecar"; data: Record<string, unkno
 export interface SidecarResult_Miss { kind: "missing" }
 export type SidecarResult = SidecarResult_Hit | SidecarResult_Miss;
 
+/**
+ * Frame-pipeline child tables that share the path-match column convention
+ * (file_path or s3_key keys to the same s3:// URI as the parent `files`
+ * row). Tables that don't yet exist in the cluster's frame_metadata schema
+ * are queried best-effort and silently dropped on 4xx/5xx — the UI hides
+ * empty sections.
+ *
+ * Source of truth: the frame-metadata-extractor's table writes (per
+ * services/dataengine-functions/frame-metadata-extractor in the external
+ * DataEngine repo). Adding a new child table here is safe — the route
+ * tolerates missing tables.
+ */
+export const FRAME_CHILD_TABLES = [
+  "parts",
+  "channels",
+  "attributes",
+  "aovs",
+  "color",
+  "timecode",
+  "camera",
+  "production",
+] as const;
+export type FrameChildTable = (typeof FRAME_CHILD_TABLES)[number];
+
+export type DbExtras = Partial<Record<FrameChildTable, Record<string, unknown>[]>>;
+
 export interface SourcesStatus {
   db: DbSourceStatus;
   sidecar: SidecarSourceStatus;
@@ -186,6 +212,41 @@ export async function registerAssetMetadataRoute(
 
         const sources = resolveSourcesStatus(dbResult, sidecarResult);
 
+        // Frame pipeline (EXR/DPX/TIFF/...) splits its output across multiple
+        // tables. Fetch the child tables in parallel when the asset's pipeline
+        // writes to frame_metadata so the UI can surface per-part / per-channel
+        // / per-AOV detail. Best-effort: tables that don't exist yet are
+        // dropped silently. Skipped entirely for video pipelines (single-row).
+        let dbExtras: DbExtras | undefined;
+        if (
+          pipeline && s3
+          && fileKind === "image"
+          && pipeline.targetSchema === "frame_metadata"
+          && dbResult.kind === "rows"
+        ) {
+          const extrasEntries = await Promise.all(
+            FRAME_CHILD_TABLES.map(async (table): Promise<[FrameChildTable, Record<string, unknown>[] | null]> => {
+              try {
+                const q = await deps.queryFetcher({
+                  path: sourceUri,
+                  schema: pipeline.targetSchema,
+                  table,
+                });
+                if (!q.ok) return [table, null];
+                const rows = (q.data as { rows?: Record<string, unknown>[] }).rows ?? [];
+                return [table, rows];
+              } catch {
+                return [table, null];
+              }
+            }),
+          );
+          dbExtras = {};
+          for (const [table, rows] of extrasEntries) {
+            if (rows && rows.length > 0) dbExtras[table] = rows;
+          }
+          if (Object.keys(dbExtras).length === 0) dbExtras = undefined;
+        }
+
         return reply.send({
           assetId: asset.id,
           sourceUri,
@@ -201,6 +262,7 @@ export async function registerAssetMetadataRoute(
           sources,
           dbRows: dbResult.kind === "rows" ? dbResult.rows : [],
           sidecar: sidecarResult.kind === "sidecar" ? sidecarResult.data : null,
+          ...(dbExtras ? { dbExtras } : {}),
           ...(sources.dbError ? { dbError: sources.dbError } : {}),
         });
       },

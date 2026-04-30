@@ -61,6 +61,12 @@ interface VastConfig {
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
+// Mirrors the JSON Schema pattern enforced on `GET /assets/:id/integrity`.
+// Used as a defense-in-depth guard in `getAssetIntegrity` so the SQL string
+// interpolation below cannot be reached with arbitrary characters by a
+// non-route caller.
+const ASSET_ID_SAFE_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
 export class VastPersistenceAdapter implements PersistenceAdapter {
   readonly backend = "vast" as const;
 
@@ -391,6 +397,14 @@ export class VastPersistenceAdapter implements PersistenceAdapter {
   }
 
   async getAssetIntegrity(assetId: string): Promise<AssetIntegritySnapshot> {
+    // Defense in depth: the route layer validates `:id` against this same
+    // pattern before reaching here, but a non-route caller could bypass it.
+    // Fail closed (empty snapshot, no SQL built) rather than rely on the
+    // single-quote escape below as the only barrier.
+    if (!ASSET_ID_SAFE_PATTERN.test(assetId) || assetId.length > 128) {
+      return { assetExists: false, hashes: null, keyframes: null };
+    }
+
     // Asset existence is delegated to the local fallback (which mirrors the
     // catalog state for most dev topologies). A C2-follow-up may push this
     // down to the workflow client once a dedicated existence-check is added.

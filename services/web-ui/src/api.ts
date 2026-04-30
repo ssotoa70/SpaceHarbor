@@ -3813,6 +3813,22 @@ export interface AssetMetadataSources {
   sidecar: "ok" | "missing";
 }
 
+/**
+ * Per-table rows the frame-metadata-extractor writes alongside the parent
+ * `files` row. Populated only for fileKind=image+frame_metadata; missing
+ * tables are simply absent (the UI hides empty sections).
+ */
+export interface AssetMetadataDbExtras {
+  parts?: Record<string, unknown>[];
+  channels?: Record<string, unknown>[];
+  attributes?: Record<string, unknown>[];
+  aovs?: Record<string, unknown>[];
+  color?: Record<string, unknown>[];
+  timecode?: Record<string, unknown>[];
+  camera?: Record<string, unknown>[];
+  production?: Record<string, unknown>[];
+}
+
 export interface AssetMetadataResponse {
   assetId: string;
   sourceUri: string;
@@ -3821,6 +3837,11 @@ export interface AssetMetadataResponse {
   sources: AssetMetadataSources;
   dbRows: Record<string, unknown>[];
   sidecar: Record<string, unknown> | null;
+  /**
+   * Child-table rows for frame-pipeline assets (EXR/DPX/TIFF/etc.). Absent
+   * for video, audio, raw_camera, or when no child tables have data.
+   */
+  dbExtras?: AssetMetadataDbExtras;
   dbError?: string;
 }
 
